@@ -220,7 +220,9 @@ func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint6
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	out := make([]vectorstore.ScoredPoint, 0)
 	for rows.Next() {

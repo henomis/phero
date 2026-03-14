@@ -49,7 +49,9 @@ func getRandomQuoteHandler(ctx context.Context, _ *mcp.CallToolRequest, _ *Input
 	if err != nil {
 		return nil, Output{}, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
