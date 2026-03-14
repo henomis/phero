@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phero • Vectorstore</title>
+  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css?family=Space+Grotesk:700|Inter:400,500|JetBrains+Mono:400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+  <nav class="navbar">
+    <ul>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="llm.html">LLM</a></li>
+      <li><a href="agent.html">Agent</a></li>
+      <li><a href="tool.html">Tool</a></li>
+      <li><a href="mcp.html">MCP</a></li>
+      <li><a href="embedding.html">Embedding</a></li>
+      <li><a href="textsplitter.html">Textsplitter</a></li>
+      <li><a href="vectorstore.html">Vectorstore</a></li>
+      <li><a href="rag.html">RAG</a></li>
+      <li><a href="memory.html">Memory</a></li>
+      <li><a href="skill.html">Skill</a></li>
+    </ul>
+  </nav>
+
+  <header>
+    <h1>Vectorstore</h1>
+    <p class="subtitle">Persist embeddings and search by similarity.</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>What it is</h2>
+      <p>
+        A vector store is where you persist embedding vectors so you can query them later with nearest-neighbor similarity
+        search. In a RAG system, it’s the component that lets you retrieve relevant chunks or memories for a new question.
+      </p>
+      <p>
+        In Phero, vector stores are typically used through the <a href="rag.html">rag</a> package:
+        you ingest chunks (embed + store), then query by embedding the user’s question.
+      </p>
+    </section>
+
+    <section>
+      <h2>How it fits in the stack</h2>
+      <ul>
+        <li><a href="textsplitter.html">textsplitter</a> breaks documents into chunks</li>
+        <li><a href="embedding.html">embedding</a> converts chunks/queries into vectors</li>
+        <li><strong>vectorstore</strong> persists vectors and supports similarity search</li>
+        <li><a href="rag.html">rag</a> ties it together and exposes retrieval to agents</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Example: Qdrant-backed store (document RAG)</h2>
+      <p>
+        The <a href="https://github.com/henomis/phero/tree/main/examples/rag-chatbot">examples/rag-chatbot</a> program uses Qdrant.
+        The important parts are:
+      </p>
+      <ul>
+        <li>Infer the vector size from your embedder</li>
+        <li>Create a Qdrant client</li>
+        <li>Create a vector store bound to a collection</li>
+        <li>Pass the store into <code>rag.New(...)</code></li>
+      </ul>
+
+      <pre><code class="language-go">// From examples/rag-chatbot (edited for brevity)
+
+// Infer vector size from the embedder output
+vecs, err := embedder.Embed(ctx, []string{chunks[0]})
+if err != nil {
+    // handle error
+}
+vectorSize := uint64(len(vecs[0]))
+
+// Qdrant client
+qc, err := qdrantapi.NewClient(&qdrantapi.Config{
+    Host:   qdrantHost,
+    Port:   qdrantPort,
+    APIKey: strings.TrimSpace(qdrantAPIKey),
+    UseTLS: qdrantUseTLS,
+})
+if err != nil {
+    // handle error
+}
+
+// Vector store bound to a single collection
+store, err := vsqdrant.New(
+    qc,
+    strings.TrimSpace(qdrantCollection),
+    vsqdrant.WithVectorSize(vectorSize),
+    vsqdrant.WithWait(true),
+)
+if err != nil {
+    // handle error
+}
+
+// Use the store via RAG
+ragEngine, _ := rag.New(store, embedder, rag.WithTopK(topK))</code></pre>
+
+      <p>
+        The RAG engine handles ingestion and retrieval; the vector store’s job is to provide durable storage and fast similarity search.
+      </p>
+    </section>
+
+    <section>
+      <h2>Example: Qdrant-backed store (semantic memory)</h2>
+      <p>
+        The <a href="https://github.com/henomis/phero/tree/main/examples/long-term-memory">examples/long-term-memory</a> program uses the
+        same Qdrant store, but wraps the RAG engine as semantic <a href="memory.html">memory</a>.
+      </p>
+
+      <pre><code class="language-go">// From examples/long-term-memory (edited for brevity)
+
+store, err := vsqdrant.New(
+    qc,
+    qdrantCollection,
+    vsqdrant.WithVectorSize(vectorSize),
+    vsqdrant.WithWait(true),
+)
+if err != nil {
+    // handle error
+}
+
+// Ensure the collection exists
+_ = store.EnsureCollection(ctx)
+
+ragEngine, _ := rag.New(store, embedder, rag.WithTopK(topK))
+conversationMemory := ragmemory.New(ragEngine)
+
+a.SetMemory(conversationMemory)</code></pre>
+    </section>
+
+    <section>
+      <h2>Run the examples</h2>
+      <p>
+        The Qdrant-based examples require a running Qdrant instance. Provider setup depends on your chosen LLM/embedder;
+        follow each example README.
+      </p>
+
+      <pre><code class="language-bash"># Start Qdrant (one quick way)
+docker run --rm -p 6333:6333 -p 6334:6334 qdrant/qdrant
+
+# Document RAG over a local file
+
+go run ./examples/rag-chatbot -file /path/to/your/file.txt
+
+# Semantic long-term memory
+
+go run ./examples/long-term-memory</code></pre>
+    </section>
+
+    <section>
+      <h2>Other backends</h2>
+      <p>
+        Phero also includes a PostgreSQL + pgvector adapter under <code>vectorstore/psql</code>.
+        Use it when you want vectors stored alongside your relational data.
+      </p>
+    </section>
+
+    <section>
+      <h2>Related packages</h2>
+      <ul>
+        <li><a href="rag.html">rag</a>: ingestion + retrieval built on a vector store</li>
+        <li><a href="embedding.html">embedding</a>: produces vectors stored in the vector store</li>
+        <li><a href="memory.html">memory</a>: semantic memory backed by vector search</li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-go.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
+</body>
+</html>

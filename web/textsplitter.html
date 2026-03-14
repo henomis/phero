@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phero • Textsplitter</title>
+  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css?family=Space+Grotesk:700|Inter:400,500|JetBrains+Mono:400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+  <nav class="navbar">
+    <ul>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="llm.html">LLM</a></li>
+      <li><a href="agent.html">Agent</a></li>
+      <li><a href="tool.html">Tool</a></li>
+      <li><a href="mcp.html">MCP</a></li>
+      <li><a href="embedding.html">Embedding</a></li>
+      <li><a href="textsplitter.html">Textsplitter</a></li>
+      <li><a href="vectorstore.html">Vectorstore</a></li>
+      <li><a href="rag.html">RAG</a></li>
+      <li><a href="memory.html">Memory</a></li>
+      <li><a href="skill.html">Skill</a></li>
+    </ul>
+  </nav>
+
+  <header>
+    <h1>Textsplitter</h1>
+    <p class="subtitle">Chunk documents into size-bounded pieces for RAG.</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>What it is</h2>
+      <p>
+        When building RAG systems, you usually don’t embed an entire document at once.
+        Instead, you split it into smaller chunks, embed each chunk, and store them for retrieval.
+      </p>
+      <p>
+        The <code>textsplitter</code> package provides utilities to split text into size-bounded chunks with an optional overlap.
+        Chunk overlap helps preserve context across boundaries.
+      </p>
+    </section>
+
+    <section>
+      <h2>Key ideas</h2>
+      <ul>
+        <li><strong>Chunk size</strong>: the maximum size of each chunk (the examples measure this in bytes)</li>
+        <li><strong>Overlap</strong>: how much content is repeated between adjacent chunks to avoid hard cutoffs</li>
+        <li><strong>Downstream usage</strong>: chunks are fed into <a href="embedding.html">embeddings</a> and stored in a <a href="vectorstore.html">vector store</a></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Example: splitting a file into chunks</h2>
+      <p>
+        The <a href="https://github.com/henomis/phero/tree/main/examples/rag-chatbot">examples/rag-chatbot</a> program loads a local
+        text file and splits it before ingestion.
+      </p>
+
+      <pre><code class="language-go">// From examples/rag-chatbot (edited for brevity)
+
+b, err := os.ReadFile(filePath)
+if err != nil {
+    // handle error
+}
+
+splitter := textsplitter.NewRecursiveCharacterTextSplitter(chunkSize, chunkOverlap)
+chunks := compactStrings(splitter.SplitText(string(b)))
+if len(chunks) == 0 {
+    // handle error
+}
+
+// chunks are then embedded and ingested into a vector store</code></pre>
+
+      <p>
+        In that example, <code>chunkSize</code> and <code>chunkOverlap</code> are CLI flags so you can tune them per dataset.
+      </p>
+    </section>
+
+    <section>
+      <h2>Run the example</h2>
+      <p>
+        The RAG Chatbot example exercises the splitter as part of a full ingestion + retrieval flow.
+        Provider setup depends on your chosen LLM/embedder; follow the example README.
+      </p>
+
+      <pre><code class="language-bash"># from repo root
+
+go run ./examples/rag-chatbot -file /path/to/your/file.txt
+
+# tuning knobs
+# -chunk-size / -chunk-overlap</code></pre>
+    </section>
+
+    <section>
+      <h2>Practical tuning tips</h2>
+      <ul>
+        <li><strong>If answers miss context</strong>: increase overlap so facts aren’t split apart</li>
+        <li><strong>If retrieval feels noisy</strong>: decrease chunk size so chunks are more specific</li>
+        <li><strong>If ingestion is slow</strong>: increase chunk size (fewer chunks) and keep overlap modest</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Related packages</h2>
+      <ul>
+        <li><a href="rag.html">rag</a>: ingests and retrieves chunks</li>
+        <li><a href="embedding.html">embedding</a>: turns chunks/queries into vectors</li>
+        <li><a href="vectorstore.html">vectorstore</a>: stores vectors for similarity search</li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-go.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
+</body>
+</html>

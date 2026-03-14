@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phero • Tool</title>
+  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css?family=Space+Grotesk:700|Inter:400,500|JetBrains+Mono:400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+  <nav class="navbar">
+    <ul>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="llm.html">LLM</a></li>
+      <li><a href="agent.html">Agent</a></li>
+      <li><a href="tool.html">Tool</a></li>
+      <li><a href="mcp.html">MCP</a></li>
+      <li><a href="embedding.html">Embedding</a></li>
+      <li><a href="textsplitter.html">Textsplitter</a></li>
+      <li><a href="vectorstore.html">Vectorstore</a></li>
+      <li><a href="rag.html">RAG</a></li>
+      <li><a href="memory.html">Memory</a></li>
+      <li><a href="skill.html">Skill</a></li>
+    </ul>
+  </nav>
+
+  <header>
+    <h1>Tool</h1>
+    <p class="subtitle">Give agents real capabilities: files, commands, and human approvals.</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>What it is</h2>
+      <p>
+        Tools are callable functions the LLM can request during an agent run.
+        They are the primary way an agent interacts with the outside world: reading/writing files, executing commands,
+        talking to services, or asking a human for confirmation.
+      </p>
+      <p>
+        Phero tools are just function tools from <a href="llm.html">llm</a>, registered on an <a href="agent.html">agent</a>.
+      </p>
+    </section>
+
+    <section>
+      <h2>Built-in tool packages</h2>
+      <p>
+        Phero includes a few ready-to-use tools under <code>tool/</code>. These are designed to be easy to attach to an agent.
+        (Exact behavior can be customized via validation hooks.)
+      </p>
+
+      <ul>
+        <li><strong>File tools</strong> (<code>tool/file</code>):
+          <code>list_files</code>, <code>read_file</code>, <code>write_file</code></li>
+        <li><strong>Go tool</strong> (<code>tool/go</code>): run <code>go</code> commands (use validation to restrict args)</li>
+        <li><strong>Python tool</strong> (<code>tool/python</code>): run <code>python</code> commands (use validation to restrict args)</li>
+        <li><strong>Human tool</strong> (<code>tool/human</code>): ask the user for input/approval mid-run</li>
+      </ul>
+
+      <p>
+        Tip: for anything with side effects (writes, deletes, shell commands), add a validation/approval step.
+      </p>
+    </section>
+
+    <section>
+      <h2>Example: safe file writes (with approval)</h2>
+      <p>
+        The <a href="https://github.com/henomis/phero/tree/main/examples/skills">examples/skills</a> program combines skills with a
+        file-writing tool that asks the user to approve writes.
+      </p>
+
+      <pre><code class="language-go">// From examples/skills (edited for brevity)
+
+writeTool, err := file.NewWriteTool()
+if err != nil {
+    panic(err)
+}
+
+tools = append(tools, writeTool.WithValidation(writeValidationFunc).Tool())
+
+for _, tool := range tools {
+    if err := a.AddTool(tool); err != nil {
+        panic(err)
+    }
+}</code></pre>
+
+      <pre><code class="language-go">// From examples/skills (edited for brevity)
+
+func writeValidationFunc(_ context.Context, input *file.WriteInput) error {
+    fmt.Printf("Do you want to write to the file '%s'? (y/N): ", input.Path)
+    var permission string
+    _, scanErr := fmt.Scanln(&permission)
+    if scanErr != nil {
+        return fmt.Errorf("failed to read user input: %w", scanErr)
+    }
+
+    if strings.EqualFold(permission, "y") {
+        return nil
+    }
+
+    return fmt.Errorf("user permission denied")
+}</code></pre>
+
+      <p>
+        This pattern keeps the agent powerful while still giving the user control.
+      </p>
+    </section>
+
+    
+
+    <section>
+      <h2>Run an example</h2>
+      <p>
+        These are good starting points to see tools in action (provider setup is described in each example README):
+      </p>
+
+      <pre><code class="language-bash"># Skills + file tool (run from example dir)
+cd ./examples/skills
+go run .
+
+# Multi-agent workflow (uses a restricted command tool)
+cd -
+go run ./examples/multi-agent-workflow</code></pre>
+    </section>
+
+    <section>
+      <h2>Related packages</h2>
+      <ul>
+        <li><a href="llm.html">llm</a>: define function tools</li>
+        <li><a href="agent.html">agent</a>: runs the tool loop</li>
+        <li><a href="skill.html">skill</a>: package tool-usage workflows in SKILL.md</li>
+        <li><a href="mcp.html">mcp</a>: expose remote tools from MCP servers</li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-go.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
+</body>
+</html>

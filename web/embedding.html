@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phero • Embedding</title>
+  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css?family=Space+Grotesk:700|Inter:400,500|JetBrains+Mono:400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+  <nav class="navbar">
+    <ul>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="llm.html">LLM</a></li>
+      <li><a href="agent.html">Agent</a></li>
+      <li><a href="tool.html">Tool</a></li>
+      <li><a href="mcp.html">MCP</a></li>
+      <li><a href="embedding.html">Embedding</a></li>
+      <li><a href="textsplitter.html">Textsplitter</a></li>
+      <li><a href="vectorstore.html">Vectorstore</a></li>
+      <li><a href="rag.html">RAG</a></li>
+      <li><a href="memory.html">Memory</a></li>
+      <li><a href="skill.html">Skill</a></li>
+    </ul>
+  </nav>
+
+  <header>
+    <h1>Embedding</h1>
+    <p class="subtitle">Turn text into vectors for search, RAG, and long-term memory.</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>What it is</h2>
+      <p>
+        Embeddings convert text into numerical vectors (typically <code>[]float32</code>) that preserve semantic similarity.
+        Once you have vectors, you can do things like similarity search, clustering, deduplication, and retrieval.
+      </p>
+      <p>
+        In Phero, embeddings are a building block you combine with a vector store and the RAG engine.
+        Provider implementations live in subpackages (for example, <code>embedding/openai</code>).
+      </p>
+    </section>
+
+    <section>
+      <h2>Basic usage</h2>
+      <p>
+        You typically embed either user queries or document chunks.
+        In the RAG examples, text is split into chunks and then embedded before it’s stored in a vector store.
+      </p>
+
+      <pre><code class="language-go">// From examples/rag-chatbot (edited for brevity)
+
+splitter := textsplitter.NewRecursiveCharacterTextSplitter(chunkSize, chunkOverlap)
+chunks := splitter.SplitText(string(fileBytes))
+
+// Embed a chunk (or a query) to get vectors
+vecs, err := embedder.Embed(ctx, []string{chunks[0]})
+if err != nil {
+    // handle error
+}
+
+_ = vecs // []embedding.Vector (typically []float32)</code></pre>
+    </section>
+
+    <section>
+      <h2>Example: infer vector size (RAG + vector stores)</h2>
+      <p>
+        Many vector stores require a fixed vector dimension for a collection/index.
+        The <a href="https://github.com/henomis/phero/tree/main/examples/rag-chatbot">RAG Chatbot</a> and
+        <a href="https://github.com/henomis/phero/tree/main/examples/long-term-memory">Long-Term Memory</a> examples infer
+        the dimension from the embedder by embedding a probe text.
+      </p>
+
+      <pre><code class="language-go">// From examples/rag-chatbot and examples/long-term-memory (edited for brevity)
+
+// Qdrant collections require a fixed vector size. Infer it from the embedder.
+vecs, err := embedder.Embed(ctx, []string{"vector size probe"})
+if err != nil {
+    // handle error
+}
+if len(vecs) != 1 || len(vecs[0]) == 0 {
+    // handle error
+}
+
+vectorSize := uint64(len(vecs[0]))</code></pre>
+    </section>
+
+    <section>
+      <h2>Using embeddings in Phero</h2>
+      <p>
+        Embeddings are usually combined with a vector store to power RAG:
+      </p>
+      <ul>
+        <li>Split documents into chunks (<code>textsplitter</code>)</li>
+        <li>Embed each chunk (<code>embedding</code>)</li>
+        <li>Store/search vectors (<code>vectorstore</code>)</li>
+        <li>Retrieve top-k matches per query (<code>rag</code>)</li>
+      </ul>
+
+      <p>
+        See the examples:
+        <a href="https://github.com/henomis/phero/tree/main/examples/rag-chatbot">RAG Chatbot</a> and
+        <a href="https://github.com/henomis/phero/tree/main/examples/long-term-memory">Long-Term Memory</a>.
+      </p>
+    </section>
+
+    <section>
+      <h2>Run an example</h2>
+      <p>
+        These examples exercise embeddings as part of a full retrieval pipeline. Follow each example’s README for any
+        required services and provider setup.
+      </p>
+      <pre><code class="language-bash"># from repo root
+go run ./examples/rag-chatbot -file ./README.md
+
+go run ./examples/long-term-memory</code></pre>
+    </section>
+
+    <section>
+      <h2>Related packages</h2>
+      <ul>
+        <li><a href="rag.html">rag</a>: end-to-end retrieval pipeline</li>
+        <li><a href="vectorstore.html">vectorstore</a>: store/search vectors</li>
+        <li><a href="textsplitter.html">textsplitter</a>: chunk documents for ingestion</li>
+        <li><a href="memory.html">memory</a>: conversational memory (some implementations use embeddings indirectly)</li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-go.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
+</body>
+</html>

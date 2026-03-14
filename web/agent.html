@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phero • Agent</title>
+  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css?family=Space+Grotesk:700|Inter:400,500|JetBrains+Mono:400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+  <nav class="navbar">
+    <ul>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="llm.html">LLM</a></li>
+      <li><a href="agent.html">Agent</a></li>
+      <li><a href="tool.html">Tool</a></li>
+      <li><a href="mcp.html">MCP</a></li>
+      <li><a href="embedding.html">Embedding</a></li>
+      <li><a href="textsplitter.html">Textsplitter</a></li>
+      <li><a href="vectorstore.html">Vectorstore</a></li>
+      <li><a href="rag.html">RAG</a></li>
+      <li><a href="memory.html">Memory</a></li>
+      <li><a href="skill.html">Skill</a></li>
+    </ul>
+  </nav>
+
+  <header>
+    <h1>Agent</h1>
+    <p class="subtitle">Turn LLMs into reliable teammates: memory in, tools out.</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>What it does</h2>
+      <p>
+        The <code>agent</code> package provides a minimal chat-loop orchestration layer.
+        An Agent is configured with a name and a system prompt (description). When you call <code>Run</code>, it:
+      </p>
+      <ul>
+        <li>Builds a session (system prompt + optional memory + user input)</li>
+        <li>Calls the LLM</li>
+        <li>Executes any requested tool calls</li>
+        <li>Appends tool results and repeats until the model returns a final message</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Typical workflow</h2>
+      <p>Most examples follow the same flow:</p>
+      <ul>
+        <li>Create an <code>llm.LLM</code> client (any backend that implements the interface)</li>
+        <li>Create one or more tools with <code>llm.NewTool</code></li>
+        <li>Create an agent with a clear system prompt</li>
+        <li>Add tools (optional) and memory (optional)</li>
+        <li>Call <code>Run</code> for each user input</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Example: minimal agent + tool</h2>
+      <p>
+        This is the essence of the <a href="https://github.com/henomis/phero/tree/main/examples/simple-agent">Simple Agent</a>
+        example: define a Go function, wrap it as an LLM tool, add it to the agent, then run.
+      </p>
+
+      <pre><code class="language-go">package main
+
+import (
+    "context"
+    "fmt"
+
+    "github.com/henomis/phero/agent"
+    "github.com/henomis/phero/llm"
+)
+
+type CalculatorInput struct {
+    Operation string  `json:"operation"`
+    A         float64 `json:"a"`
+    B         float64 `json:"b"`
+}
+
+type CalculatorOutput struct {
+    Result float64 `json:"result"`
+    Error  string  `json:"error,omitempty"`
+}
+
+func calculate(_ context.Context, input *CalculatorInput) (*CalculatorOutput, error) {
+    switch input.Operation {
+    case "add":
+        return &CalculatorOutput{Result: input.A + input.B}, nil
+    default:
+        return &CalculatorOutput{Error: "unknown operation"}, nil
+    }
+}
+
+func main() {
+    ctx := context.Background()
+
+  // Any llm.LLM works here (OpenAI-compatible, local, etc.)
+  llmClient := /* ... */
+
+    calcTool, err := llm.NewTool(
+        "calculator",
+        "Performs basic arithmetic operations",
+        calculate,
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    a, err := agent.New(
+        llmClient,
+        "Math Assistant",
+        "You are a helpful math assistant. Use the calculator tool to perform calculations accurately.",
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    if err := a.AddTool(calcTool); err != nil {
+        panic(err)
+    }
+
+    answer, err := a.Run(ctx, "If I have 15 apples and give away 7, then buy 23 more, how many do I have?")
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Println(answer)
+}</code></pre>
+    </section>
+
+    <section>
+      <h2>Memory</h2>
+      <p>
+        If you attach a <code>memory.Memory</code>, the agent will retrieve messages before each run and will save the
+        conversation at the end of the call.
+      </p>
+
+      <pre><code class="language-go">// From examples/conversational-agent (edited for brevity)
+
+conversationMemory := memory.New(20)
+
+a.SetMemory(conversationMemory)
+
+// Guardrail against tool-call loops
+a.SetMaxIterations(10)</code></pre>
+    </section>
+
+    <section>
+      <h2>Tools</h2>
+      <p>
+        A tool is a Go function wrapped as an <code>*llm.Tool</code>. When the LLM requests a tool call, the agent:
+      </p>
+      <ol>
+        <li>Looks up the tool by name</li>
+        <li>Calls its handler with the JSON arguments</li>
+        <li>Appends the tool result as a <code>tool</code> role message</li>
+      </ol>
+
+      <p>
+        Tool handlers can return any Go value; non-string results are JSON-marshaled before being added to the chat.
+      </p>
+    </section>
+
+    <section>
+      <h2>Common errors</h2>
+      <ul>
+        <li><code>ErrUndefinedLLM</code>: creating an agent with a nil LLM client</li>
+        <li><code>ErrNameRequired</code>: empty agent name</li>
+        <li><code>ErrDescriptionRequired</code>: empty system prompt / description</li>
+        <li><code>ToolAlreadyExistsError</code>: tool name collision on <code>AddTool</code></li>
+        <li><code>ToolUnknownError</code>: model requested a tool that is not registered</li>
+        <li><code>ErrMaxIterationsReached</code>: iteration cap hit (often due to repeated tool calls)</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Run an example</h2>
+      <p>
+        Try the conversational agent example (REPL with memory). Follow the example’s README for provider setup.
+      </p>
+
+      <pre><code class="language-bash"># from repo root
+go run ./examples/simple-agent
+
+go run ./examples/conversational-agent</code></pre>
+    </section>
+
+    <section>
+      <h2>Related packages</h2>
+      <ul>
+        <li><a href="llm.html">llm</a>: LLM interface + tools</li>
+        <li><a href="memory.html">memory</a>: memory implementations used by agents</li>
+        <li><a href="tool.html">tool</a>: prebuilt tools you can attach to an agent</li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-go.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
+</body>
+</html>

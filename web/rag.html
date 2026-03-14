@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phero • RAG</title>
+  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css?family=Space+Grotesk:700|Inter:400,500|JetBrains+Mono:400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+  <nav class="navbar">
+    <ul>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="llm.html">LLM</a></li>
+      <li><a href="agent.html">Agent</a></li>
+      <li><a href="tool.html">Tool</a></li>
+      <li><a href="mcp.html">MCP</a></li>
+      <li><a href="embedding.html">Embedding</a></li>
+      <li><a href="textsplitter.html">Textsplitter</a></li>
+      <li><a href="vectorstore.html">Vectorstore</a></li>
+      <li><a href="rag.html">RAG</a></li>
+      <li><a href="memory.html">Memory</a></li>
+      <li><a href="skill.html">Skill</a></li>
+    </ul>
+  </nav>
+
+  <header>
+    <h1>RAG</h1>
+    <p class="subtitle">Answer with receipts: retrieve relevant text, then respond.</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>What it is</h2>
+      <p>
+        RAG (Retrieval-Augmented Generation) is a pattern where you retrieve relevant text snippets (from documents or memory)
+        and feed them into the LLM as context before answering.
+      </p>
+      <p>
+        In Phero, the <code>rag</code> package ties together an <a href="embedding.html">embedder</a> and a
+        <a href="vectorstore.html">vector store</a>. The most common integration points are:
+      </p>
+      <ul>
+        <li>Ingest chunks of text into a vector store</li>
+        <li>Query the store for the most similar chunks</li>
+        <li>Expose retrieval as a tool so an <a href="agent.html">agent</a> can call it</li>
+        <li>Optionally use retrieval as semantic <a href="memory.html">memory</a></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>The RAG pipeline (practical)</h2>
+      <ol>
+        <li>Load a document (or messages)</li>
+        <li>Split it into chunks (<a href="textsplitter.html">textsplitter</a>)</li>
+        <li>Embed chunks (<a href="embedding.html">embedding</a>)</li>
+        <li>Store vectors (<a href="vectorstore.html">vectorstore</a>)</li>
+        <li>Retrieve top-k chunks per query</li>
+      </ol>
+      <p>
+        The end-to-end examples below show the full wiring.
+      </p>
+    </section>
+
+    <section>
+      <h2>Example: document Q&amp;A with a RAG tool</h2>
+      <p>
+        The <a href="https://github.com/henomis/phero/tree/main/examples/rag-chatbot">examples/rag-chatbot</a> program loads a local
+        text file, splits it into chunks, indexes it in Qdrant, and exposes a retrieval tool (<code>search_document</code>) to the agent.
+      </p>
+
+      <pre><code class="language-go">// From examples/rag-chatbot (edited for brevity)
+
+// 1) Load a document and split into chunks
+b, _ := os.ReadFile(filePath)
+
+splitter := textsplitter.NewRecursiveCharacterTextSplitter(chunkSize, chunkOverlap)
+chunks := compactStrings(splitter.SplitText(string(b)))
+
+// 2) Create an embedder and a vector store (provider/setup omitted here)
+llmClient := /* any llm.LLM */
+embedder := /* any embedding.Embedder */
+store := /* a vectorstore.Store (e.g. Qdrant) */
+
+// 3) Create RAG engine and ingest chunks
+ragEngine, _ := rag.New(store, embedder, rag.WithTopK(topK))
+_ = ragEngine.Ingest(ctx, chunks)
+
+// 4) Expose retrieval as a tool
+ragTool, _ := ragEngine.AsTool(
+    "search_document",
+    "Search the loaded document for relevant excerpts.",
+)
+
+// 5) Run an agent instructed to use the tool
+sysPrompt := `You are a helpful chatbot that answers questions about a single document.
+
+Rules:
+- For any question that depends on the document, call the tool "search_document" first.
+- Use retrieved excerpts as your source of truth.
+- If you cannot find supporting excerpts, say you don't know based on the document.`
+
+a, _ := agent.New(llmClient, "RAG Chatbot", sysPrompt)
+_ = a.AddTool(ragTool)
+
+out, _ := a.Run(ctx, "Question: What does this document say about X?")
+fmt.Println(out)</code></pre>
+
+      <p>
+        The important bit is the prompt contract: the agent is instructed to call the retrieval tool first whenever the
+        answer depends on the document.
+      </p>
+    </section>
+
+    <section>
+      <h2>Example: semantic memory (RAG-backed)</h2>
+      <p>
+        The <a href="https://github.com/henomis/phero/tree/main/examples/long-term-memory">examples/long-term-memory</a> program uses RAG
+        as memory: instead of keeping a chronological transcript, it retrieves the most relevant past snippets for each turn.
+      </p>
+
+      <pre><code class="language-go">// From examples/long-term-memory (edited for brevity)
+
+ragEngine, _ := rag.New(store, embedder, rag.WithTopK(topK))
+conversationMemory := ragmemory.New(ragEngine)
+
+a, _ := agent.New(llmClient, "Long-Term Memory Assistant", sysPrompt)
+
+a.SetMemory(conversationMemory)
+
+out, _ := a.Run(ctx, "Remember that my favorite color is blue.")
+fmt.Println(out)</code></pre>
+    </section>
+
+    <section>
+      <h2>Run the examples</h2>
+      <p>
+        Both examples use Qdrant (vector database). Start it, then run the example.
+        Provider setup depends on your chosen LLM and embedder; follow each example’s README.
+      </p>
+
+      <pre><code class="language-bash"># Start Qdrant (one quick way)
+docker run --rm -p 6333:6333 -p 6334:6334 qdrant/qdrant
+
+# Document Q&A (requires -file)
+go run ./examples/rag-chatbot -file /path/to/your/file.txt
+
+# Semantic long-term memory
+# (see the README for flags like -topk and qdrant settings)
+go run ./examples/long-term-memory</code></pre>
+    </section>
+
+    <section>
+      <h2>Related packages</h2>
+      <ul>
+        <li><a href="embedding.html">embedding</a>: generate vectors for chunks and queries</li>
+        <li><a href="vectorstore.html">vectorstore</a>: persist and query vectors</li>
+        <li><a href="textsplitter.html">textsplitter</a>: chunk documents prior to ingestion</li>
+        <li><a href="memory.html">memory</a>: wire RAG into agent memory via <code>memory/rag</code></li>
+        <li><a href="agent.html">agent</a>: orchestrates tool calls and uses memory</li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-go.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
+</body>
+</html>

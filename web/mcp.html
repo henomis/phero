@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phero • MCP</title>
+  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css?family=Space+Grotesk:700|Inter:400,500|JetBrains+Mono:400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+  <nav class="navbar">
+    <ul>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="llm.html">LLM</a></li>
+      <li><a href="agent.html">Agent</a></li>
+      <li><a href="tool.html">Tool</a></li>
+      <li><a href="mcp.html">MCP</a></li>
+      <li><a href="embedding.html">Embedding</a></li>
+      <li><a href="textsplitter.html">Textsplitter</a></li>
+      <li><a href="vectorstore.html">Vectorstore</a></li>
+      <li><a href="rag.html">RAG</a></li>
+      <li><a href="memory.html">Memory</a></li>
+      <li><a href="skill.html">Skill</a></li>
+    </ul>
+  </nav>
+
+  <header>
+    <h1>MCP</h1>
+    <p class="subtitle">Plug external tool servers into agents, without rewriting integrations.</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>What it is</h2>
+      <p>
+        MCP (Model Context Protocol) is a standard way for an LLM application to discover and call tools exposed by an external
+        server. In practice, it lets you treat remote capabilities (APIs, databases, CLIs, internal services) as tools that
+        your agent can call.
+      </p>
+      <p>
+        Phero’s <code>mcp</code> package adapts an MCP client session into Phero’s <code>llm.Tool</code> values, so the
+        <a href="agent.html">agent</a> loop can call MCP tools the same way it calls in-process tools.
+      </p>
+    </section>
+
+    <section>
+        <h2>How it’s used</h2>
+      <p>
+        In practice, you connect to an MCP server, list its tools, convert them to agent tools, and then run the agent.
+        The <a href="https://github.com/henomis/phero/tree/main/examples/mcp">examples/mcp</a> example shows the full flow.
+      </p>
+
+        <pre><code class="language-go">// From examples/mcp (edited for brevity)
+
+    ctx := context.Background()
+
+    client := gomcp.NewClient(&gomcp.Implementation{Name: "myclient", Version: "1.0.0"}, nil)
+
+    // Launch MCP server as a subprocess and connect over stdio
+    command := "./examples/mcp/server/server"
+    cmd := exec.CommandContext(ctx, command)
+    transport := &gomcp.CommandTransport{Command: cmd}
+
+    session, err := client.Connect(ctx, transport, nil)
+    if err != nil {
+      panic(err)
+    }
+    defer session.Close()
+
+    mcpServer := mcp.New(session)
+
+    tools, err := mcpServer.AsTools(ctx, nil)
+    if err != nil {
+      panic(err)
+    }
+
+    llmClient := /* any llm.LLM */
+    a, _ := agent.New(llmClient, "MCP Agent", "An agent that uses tools from an MCP server.")
+    for _, tool := range tools {
+      _ = a.AddTool(tool)
+    }
+
+    res, _ := a.Run(ctx, "Give me a random quote.")
+    fmt.Println(res)</code></pre>
+    </section>
+
+    <section>
+      <h2>Example: run an MCP server over stdio</h2>
+      <p>
+        The repo includes an end-to-end example under
+        <a href="https://github.com/henomis/phero/tree/main/examples/mcp">examples/mcp</a>.
+        The server exposes a single tool: <code>get_random_quote</code>.
+      </p>
+
+      <h3>1) Build the server</h3>
+      <pre><code class="language-bash"># from repo root
+make -C ./examples/mcp/server build
+
+# binary created at:
+# ./examples/mcp/server/server</code></pre>
+
+      <h3>2) Run the client</h3>
+      <pre><code class="language-bash"># IMPORTANT: run from the repo root (client uses a relative path)
+go run ./examples/mcp</code></pre>
+
+      <h3>Client side (connect + expose tools to an agent)</h3>
+      <pre><code class="language-go">ctx := context.Background()
+
+client := gomcp.NewClient(&gomcp.Implementation{Name: "myclient", Version: "1.0.0"}, nil)
+
+// Launch MCP server as a subprocess and connect over stdio
+command := "./examples/mcp/server/server"
+cmd := exec.CommandContext(ctx, command)
+transport := &gomcp.CommandTransport{Command: cmd}
+
+session, err := client.Connect(ctx, transport, nil)
+if err != nil {
+    panic(err)
+}
+defer session.Close()
+
+mcpServer := mcp.New(session)
+
+tools, err := mcpServer.AsTools(ctx, nil)
+if err != nil {
+    panic(err)
+}
+
+a, _ := agent.New(llmClient, "MCP Agent", "An agent that uses tools from an MCP server.")
+for _, tool := range tools {
+    _ = a.AddTool(tool)
+}
+
+res, _ := a.Run(ctx, "Give me a random quote.")
+fmt.Println(res)</code></pre>
+
+      <h3>Server side (define and run a tool)</h3>
+      <pre><code class="language-go">server := mcp.NewServer(&mcp.Implementation{Name: "random_quote", Version: "v1.0.0"}, nil)
+
+mcp.AddTool(
+    server,
+    &mcp.Tool{Name: "get_random_quote", Description: "Fetches a random inspirational quote"},
+    getRandomQuoteHandler,
+)
+
+// Run over stdin/stdout until client disconnects
+_ = server.Run(context.Background(), &mcp.StdioTransport{})</code></pre>
+    </section>
+
+    <section>
+      <h2>Filtering tools</h2>
+      <p>
+        If your MCP server exposes many tools, you can selectively expose them to an agent by passing a filter:
+      </p>
+      <pre><code class="language-go">tools, err := mcpServer.AsTools(ctx, func(name string) bool {
+    // allowlist only a subset
+    return name == "get_random_quote" || strings.HasPrefix(name, "search_")
+})</code></pre>
+    </section>
+
+    <section>
+      <h2>Notes & troubleshooting</h2>
+      <ul>
+        <li>The example server calls <code>https://zenquotes.io/api/random</code> (needs outbound HTTP).</li>
+        <li>Run the MCP client from the repo root, or update the server command path.</li>
+        <li>Bring your own <code>llm.LLM</code> backend (see <a href="llm.html">llm</a>).</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Related packages</h2>
+      <ul>
+        <li><a href="agent.html">agent</a>: tool execution loop (calls MCP tools like any other tool)</li>
+        <li><a href="llm.html">llm</a>: LLM interface + tool definition</li>
+        <li><a href="tool.html">tool</a>: built-in local tools (files, Go, Python, human)</li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-go.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
+</body>
+</html>

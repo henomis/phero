@@ -1,4 +1,4 @@
-![Phero](./assets/phero-logo.png)
+![Phero](./web/images/phero-logo.png)
 
 # 🐜 Phero 
 

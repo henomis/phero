@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phero • LLM</title>
+  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css?family=Space+Grotesk:700|Inter:400,500|JetBrains+Mono:400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+  <nav class="navbar">
+    <ul>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="llm.html">LLM</a></li>
+      <li><a href="agent.html">Agent</a></li>
+      <li><a href="tool.html">Tool</a></li>
+      <li><a href="mcp.html">MCP</a></li>
+      <li><a href="embedding.html">Embedding</a></li>
+      <li><a href="textsplitter.html">Textsplitter</a></li>
+      <li><a href="vectorstore.html">Vectorstore</a></li>
+      <li><a href="rag.html">RAG</a></li>
+      <li><a href="memory.html">Memory</a></li>
+      <li><a href="skill.html">Skill</a></li>
+    </ul>
+  </nav>
+
+  <header>
+    <h1>LLM</h1>
+    <p class="subtitle">A minimal chat interface + first-class function tools.</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>What it is</h2>
+      <p>
+        The <code>llm</code> package is the thin waist of Phero: a minimal interface for chat models plus a small tool system.
+        Higher-level packages (like <code>agent</code>) build on this to orchestrate multi-turn loops and tool execution.
+      </p>
+      <p>
+        For convenience, Phero re-exports a few OpenAI chat types (messages, tool calls, and role constants), so most of the
+        framework can depend on a single import.
+      </p>
+    </section>
+
+    <section>
+      <h2>Using an LLM backend</h2>
+      <p>
+        Any backend that implements <code>llm.LLM</code> can power agents and tools.
+        Phero includes an OpenAI-compatible client at <code>llm/openai</code>.
+      </p>
+
+      <ul>
+        <li>Choose a backend (e.g. <code>llm/openai</code> or your own implementation)</li>
+        <li>Pass that client into <a href="agent.html">agent.New</a></li>
+        <li>Optionally attach tools created via <code>llm.NewTool</code></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Function tools</h2>
+      <p>
+        The main way you integrate capabilities is via function tools.
+        In <a href="https://github.com/henomis/phero/tree/main/examples/conversational-agent">examples/conversational-agent</a>,
+        a <code>get_current_time</code> tool is exposed to the agent.
+      </p>
+
+      <pre><code class="language-go">type TimeInput struct{}
+
+type TimeOutput struct {
+    CurrentTime string `json:"current_time" jsonschema:"description=The current local time in RFC3339 format"`
+}
+
+func getCurrentTime(_ context.Context, _ *TimeInput) (*TimeOutput, error) {
+    return &TimeOutput{CurrentTime: time.Now().Format(time.RFC3339)}, nil
+}
+
+tool, err := llm.NewTool(
+    "get_current_time",
+    "Get the current local time",
+    getCurrentTime,
+)
+if err != nil {
+    panic(err)
+}</code></pre>
+
+      <p>
+        Tools are added to an agent with <code>AddTool</code>, and the agent will run them when the model requests a tool call.
+      </p>
+    </section>
+
+    <section>
+      <h2>Putting it together</h2>
+      <p>
+        The minimal loop is: create an LLM client, register one or more tools, then run an agent.
+        This is the core pattern used throughout <code>examples/</code>.
+      </p>
+
+      <pre><code class="language-bash"># from repo root
+go run ./examples/simple-agent
+
+go run ./examples/conversational-agent</code></pre>
+    </section>
+
+    <section>
+      <h2>Related packages</h2>
+      <ul>
+        <li><a href="agent.html">agent</a>: orchestration loop around <code>llm.LLM</code> + tools</li>
+        <li><a href="tool.html">tool</a>: prebuilt tools you can attach to agents/models</li>
+        <li><a href="embedding.html">embedding</a>: vector embeddings for RAG and memory</li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-go.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phero • Memory</title>
+  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css?family=Space+Grotesk:700|Inter:400,500|JetBrains+Mono:400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+  <nav class="navbar">
+    <ul>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="llm.html">LLM</a></li>
+      <li><a href="agent.html">Agent</a></li>
+      <li><a href="tool.html">Tool</a></li>
+      <li><a href="mcp.html">MCP</a></li>
+      <li><a href="embedding.html">Embedding</a></li>
+      <li><a href="textsplitter.html">Textsplitter</a></li>
+      <li><a href="vectorstore.html">Vectorstore</a></li>
+      <li><a href="rag.html">RAG</a></li>
+      <li><a href="memory.html">Memory</a></li>
+      <li><a href="skill.html">Skill</a></li>
+    </ul>
+  </nav>
+
+  <header>
+    <h1>Memory</h1>
+    <p class="subtitle">Give agents context across turns: recent, summarized, or semantic.</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>What it is</h2>
+      <p>
+        Memory is how an agent keeps useful context across turns.
+        In Phero, memory is a pluggable component: the agent can retrieve prior messages before each turn and save
+        the new messages after each turn.
+      </p>
+      <p>
+        Different implementations provide different behavior:
+      </p>
+      <ul>
+        <li><strong>Short-term</strong>: keep the last N messages (fast, simple)</li>
+        <li><strong>Summarized</strong>: compress older history into a structured summary</li>
+        <li><strong>Semantic</strong>: retrieve by similarity search (RAG-backed)</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Simple FIFO memory (in-process)</h2>
+      <p>
+        <code>memory/simple</code> stores recent <code>llm.Message</code> values in a fixed-size FIFO ring buffer.
+        When the capacity is reached, older messages roll off.
+      </p>
+
+      <pre><code class="language-go">import memory "github.com/henomis/phero/memory/simple"
+
+conversationMemory := memory.New(20)
+
+a.SetMemory(conversationMemory)</code></pre>
+
+      <p>
+        This is the default choice for REPL-style conversational agents.
+      </p>
+    </section>
+
+    <section>
+      <h2>Optional summarization</h2>
+      <p>
+        The simple memory can optionally summarize history when the number of stored messages reaches a threshold.
+        The idea is to keep a compact “state snapshot” plus the most recent turns.
+      </p>
+
+      <pre><code class="language-go">// From examples/conversational-agent (edited for brevity)
+
+conversationMemory := memory.New(
+    20,
+    memory.WithSummarization(llmClient, 8, 15),
+)
+
+a.SetMemory(conversationMemory)</code></pre>
+    </section>
+
+    <section>
+      <h2>Semantic memory (RAG-backed)</h2>
+      <p>
+        For long-term recall, you can back memory with a RAG store: messages are embedded and stored in a vector store,
+        then retrieved by similarity search at query time.
+      </p>
+      <p>
+        The adapter lives at <code>memory/rag</code> and wraps a <code>rag.RAG</code> instance.
+      </p>
+
+      <pre><code class="language-go">import (
+    ragmemory "github.com/henomis/phero/memory/rag"
+    "github.com/henomis/phero/rag"
+)
+
+ragEngine, _ := rag.New(store, embedder)
+
+conversationMemory := ragmemory.New(ragEngine)
+
+a.SetMemory(conversationMemory)</code></pre>
+
+      <p>
+        This is used in the <a href="https://github.com/henomis/phero/tree/main/examples/long-term-memory">Long-Term Memory</a>
+        example (RAG + Qdrant).
+      </p>
+    </section>
+
+    <section>
+      <h2>Run an example</h2>
+      <p>
+        The conversational agent example uses simple FIFO memory, with an option to enable summarization.
+      </p>
+
+      <pre><code class="language-bash"># from repo root
+
+go run ./examples/conversational-agent
+
+# with summarization enabled
+
+go run ./examples/conversational-agent -summarize -summary-threshold 8 -summary-size 15 -max-messages 20</code></pre>
+
+      <p>
+        For semantic recall, try the long-term memory example (requires Qdrant):
+      </p>
+      <pre><code class="language-bash">go run ./examples/long-term-memory -qdrant-host localhost -qdrant-collection long_term_memory</code></pre>
+    </section>
+
+    <section>
+      <h2>Picking the right memory</h2>
+      <ul>
+        <li><strong>Fast prototyping</strong>: use <code>memory/simple</code> with a reasonable max messages value</li>
+        <li><strong>Long conversations</strong>: enable summarization to keep context compact</li>
+        <li><strong>Long-term recall</strong>: use semantic memory via <code>memory/rag</code></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Related packages</h2>
+      <ul>
+        <li><a href="agent.html">agent</a>: uses memory to seed/snapshot sessions</li>
+        <li><a href="rag.html">rag</a>: semantic retrieval engine used by RAG memory</li>
+        <li><a href="embedding.html">embedding</a>: generates vectors for semantic memory</li>
+        <li><a href="vectorstore.html">vectorstore</a>: stores vectors for semantic memory</li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-go.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
+</body>
+</html>

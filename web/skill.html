@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phero • Skill</title>
+  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css?family=Space+Grotesk:700|Inter:400,500|JetBrains+Mono:400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+  <nav class="navbar">
+    <ul>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="llm.html">LLM</a></li>
+      <li><a href="agent.html">Agent</a></li>
+      <li><a href="tool.html">Tool</a></li>
+      <li><a href="mcp.html">MCP</a></li>
+      <li><a href="embedding.html">Embedding</a></li>
+      <li><a href="textsplitter.html">Textsplitter</a></li>
+      <li><a href="vectorstore.html">Vectorstore</a></li>
+      <li><a href="rag.html">RAG</a></li>
+      <li><a href="memory.html">Memory</a></li>
+      <li><a href="skill.html">Skill</a></li>
+    </ul>
+  </nav>
+
+  <header>
+    <h1>Skill</h1>
+    <p class="subtitle">Package a capability once, reuse it across agents.</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>What it is</h2>
+      <p>
+        Skills are reusable agent capabilities defined as local <code>SKILL.md</code> files.
+        A skill can describe how to perform a task (including when and how to call tools), and can be exposed to an agent
+        as a callable tool.
+      </p>
+      <p>
+        The <a href="https://github.com/henomis/phero/tree/main/examples/skills">examples/skills</a> example demonstrates the full flow:
+        discover local skills, turn them into tools, and let an agent use them.
+      </p>
+    </section>
+
+    <section>
+      <h2>Skill layout</h2>
+      <p>
+        A skill lives in its own directory and includes a <code>SKILL.md</code>. Skills can also ship helper scripts under
+        <code>scripts/</code>.
+      </p>
+
+      <pre><code class="language-bash">examples/skills/
+  skills/
+    get-random-quote/
+      SKILL.md
+      scripts/
+        get_random_quote/
+          main.go</code></pre>
+    </section>
+
+    <section>
+      <h2>SKILL.md format</h2>
+      <p>
+        Skills are written in Markdown with a small YAML frontmatter header. The body describes when to use the skill and
+        the tool-call contract.
+      </p>
+
+      <pre><code class="language-markdown">---
+name: get-random-quote
+description: Fetches and returns a single random quote by running the Go script scripts/get_random_quote/main.go.
+---
+
+# Random Quote Retriever
+
+## Overview
+
+Use this skill when the user asks for a random quote (inspirational, motivational, general). This skill must retrieve the quote by executing the repository's Go script and returning its stdout.
+
+## How It Works
+
+### Primary Action
+
+- Always run the Go program at `scripts/get_random_quote/main.go` via the `go` tool.
+- Return exactly the quote line printed by the program (trim surrounding whitespace).</code></pre>
+
+      <p>
+        Tip: keep the contract concrete (exact command, expected stdout, and error behavior). This makes it easier for an agent
+        to use the skill reliably.
+      </p>
+    </section>
+
+    <section>
+      <h2>Example: a skill-backed script</h2>
+      <p>
+        The bundled <code>get-random-quote</code> skill fetches a quote by running a small Go program.
+      </p>
+
+      <pre><code class="language-go">// From examples/skills/skills/get-random-quote/scripts/get_random_quote/main.go
+
+httpReq, err := http.NewRequestWithContext(
+    context.Background(),
+    "GET",
+    "https://zenquotes.io/api/random",
+    http.NoBody,
+)
+// ...
+fmt.Printf("%s - %s\n", data[0].Q, data[0].A)</code></pre>
+    </section>
+
+    <section>
+      <h2>Example: discover skills and add them to an agent</h2>
+      <p>
+        In the example, skills are loaded from a local directory (<code>./skills</code>), parsed, converted into tools, and then
+        registered on an agent.
+      </p>
+
+      <pre><code class="language-go">// From examples/skills (edited for brevity)
+
+skillParser := skill.New("./skills")
+list, err := skillParser.List()
+if err != nil {
+    panic(err)
+}
+
+tools := make([]*llm.Tool, 0, len(list))
+for _, skillName := range list {
+    s, err := skillParser.Parse(skillName)
+    if err != nil {
+        panic(err)
+    }
+
+    tool, err := s.AsTool(llmClient)
+    if err != nil {
+        panic(err)
+    }
+    tools = append(tools, tool)
+}
+
+// register each skill tool on the agent
+for _, tool := range tools {
+    _ = a.AddTool(tool)
+}</code></pre>
+
+      <p>
+        The example also adds a file-writing tool with interactive validation so the user can approve writes.
+      </p>
+    </section>
+
+    <section>
+      <h2>Run the example</h2>
+      <p>
+        The example loads skills from a relative path (<code>./skills</code>), so run it from its directory.
+        Provider setup depends on your chosen LLM; follow the example README.
+      </p>
+
+      <pre><code class="language-bash">cd ./examples/skills
+
+go run .</code></pre>
+
+      <p>
+        You’ll be prompted to approve tool actions (like running commands or writing files). Reply <code>y</code> to allow.
+      </p>
+    </section>
+
+    <section>
+      <h2>When to use skills</h2>
+      <ul>
+        <li>Standardize a repeated workflow ("always do X this way")</li>
+        <li>Package a capability with a precise tool-call contract</li>
+        <li>Share a library of local skills across multiple agents</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Related packages</h2>
+      <ul>
+        <li><a href="agent.html">agent</a>: orchestrates tool calls and memory</li>
+        <li><a href="llm.html">llm</a>: function tools used by skills</li>
+        <li><a href="tool.html">tool</a>: built-in tools often used in skills (file/go/python/human)</li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-go.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-markdown.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-yaml.min.js"></script>
+</body>
+</html>
