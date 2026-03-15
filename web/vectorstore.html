@@ -158,6 +158,32 @@ go run ./examples/long-term-memory</code></pre>
         Phero also includes a PostgreSQL + pgvector adapter under <code>vectorstore/psql</code>.
         Use it when you want vectors stored alongside your relational data.
       </p>
+
+      <p>
+        The PostgreSQL store is bound to a logical collection name, but (by default) stores all collections in a single table
+        named <code>vector_store</code> with a <code>collection</code> column.
+      </p>
+
+      <pre><code class="language-go">import (
+    "database/sql"
+    "os"
+
+    _ "github.com/jackc/pgx/v5/stdlib"
+
+    vspql "github.com/henomis/phero/vectorstore/psql"
+)
+
+db, err := sql.Open("pgx", os.Getenv("DATABASE_URL"))
+if err != nil {
+    // handle error
+}
+
+store, err := vspql.New(db, "my_collection", vspql.WithVectorSize(1536))
+if err != nil {
+    // handle error
+}
+
+_ = store.EnsureCollection(ctx)</code></pre>
     </section>
 
     <section>

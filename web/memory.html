@@ -111,6 +111,43 @@ a.SetMemory(conversationMemory)</code></pre>
     </section>
 
     <section>
+      <h2>PostgreSQL conversation memory (persistent)</h2>
+      <p>
+        If you want conversation history to survive process restarts (or be shared across replicas), use <code>memory/psql</code>.
+        It's a session-scoped store backed by PostgreSQL (JSONB rows), with optional automatic summarization similar to <code>memory/simple</code>.
+      </p>
+
+      <pre><code class="language-go">import (
+    "database/sql"
+    "os"
+
+    _ "github.com/jackc/pgx/v5/stdlib"
+
+    "github.com/henomis/phero/memory/psql"
+)
+
+db, err := sql.Open("pgx", os.Getenv("DATABASE_URL"))
+if err != nil {
+    // handle error
+}
+
+conversationMemory, err := psql.New(
+    db,
+    "session-123",
+    psql.WithSummarization(llmClient, 50, 25),
+)
+if err != nil {
+    // handle error
+}
+
+a.SetMemory(conversationMemory)</code></pre>
+
+      <p>
+        By default the store auto-creates its table/index (you can disable that with <code>psql.WithEnsureSchema(false)</code>).
+      </p>
+    </section>
+
+    <section>
       <h2>Run an example</h2>
       <p>
         The conversational agent example uses simple FIFO memory, with an option to enable summarization.

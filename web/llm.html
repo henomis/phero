@@ -47,14 +47,39 @@
       <h2>Using an LLM backend</h2>
       <p>
         Any backend that implements <code>llm.LLM</code> can power agents and tools.
-        Phero includes an OpenAI-compatible client at <code>llm/openai</code>.
+        Phero includes an OpenAI-compatible client at <code>llm/openai</code> and an Anthropic Messages API client at <code>llm/anthropic</code>.
       </p>
 
       <ul>
-        <li>Choose a backend (e.g. <code>llm/openai</code> or your own implementation)</li>
+        <li>Choose a backend (e.g. <code>llm/openai</code>, <code>llm/anthropic</code>, or your own implementation)</li>
         <li>Pass that client into <a href="agent.html">agent.New</a></li>
         <li>Optionally attach tools created via <code>llm.NewTool</code></li>
       </ul>
+    </section>
+
+    <section>
+      <h2>Anthropic backend</h2>
+      <p>
+        <code>llm/anthropic</code> implements <code>llm.LLM</code> using Anthropic's Messages API.
+        It keeps the same OpenAI-shaped message/tool types at the boundary, so the rest of the framework (agents, tools, memory)
+        doesn't need to change.
+      </p>
+
+      <pre><code class="language-go">import (
+    "os"
+
+    "github.com/henomis/phero/llm/anthropic"
+)
+
+llmClient := anthropic.New(
+    os.Getenv("ANTHROPIC_API_KEY"),
+    anthropic.WithModel("claude-sonnet-4-6"),
+    anthropic.WithMaxTokens(2048),
+)</code></pre>
+
+      <p>
+        If you pass an empty API key, the underlying Anthropic SDK will fall back to its environment variable configuration.
+      </p>
     </section>
 
     <section>

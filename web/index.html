@@ -36,7 +36,7 @@
         <li>🎯 <strong>Purpose-built for agents</strong>: Not an LLM wrapper; a framework for orchestrating cooperative agent systems</li>
         <li>🧩 <strong>Composable primitives</strong>: Small, focused packages that solve specific problems</li>
         <li>🔧 <strong>Tool-first design</strong>: Built-in support for function tools, skills, RAG, and MCP</li>
-        <li>🎨 <strong>Developer-friendly</strong>: Clean APIs, opt-in tracing, OpenAI-compatible LLM support</li>
+        <li>🎨 <strong>Developer-friendly</strong>: Clean APIs, opt-in tracing, OpenAI-compatible + Anthropic support</li>
         <li>🪶 <strong>Lightweight</strong>: No heavy dependencies; just Go and your choice of LLM provider</li>
       </ul>
     </section>
@@ -44,7 +44,7 @@
       <h2>Features</h2>
       <ul>
         <li>🤝 <strong>Agent orchestration</strong>: Multi-agent workflows with role specialization and coordination</li>
-        <li>🧩 <strong>LLM abstraction</strong>: Work with OpenAI, Ollama, or any OpenAI-compatible endpoint</li>
+        <li>🧩 <strong>LLM abstraction</strong>: Work with OpenAI-compatible endpoints (OpenAI, Ollama, etc.) and Anthropic</li>
         <li>🛠️ <strong>Function tools</strong>: Expose Go functions as callable tools with automatic JSON Schema generation</li>
         <li>📚 <strong>RAG (Retrieval-Augmented Generation)</strong>: Built-in vector storage and semantic search</li>
         <li>🧠 <strong>Skills system</strong>: Define reusable agent capabilities in SKILL.md files</li>
@@ -68,6 +68,7 @@
           <ul>
             <li><code>llm</code>: Clean LLM interface with function tool support and JSON Schema utilities</li>
             <li><code>llm/openai</code>: OpenAI-compatible client (works with OpenAI, Ollama, and compatible endpoints)</li>
+            <li><code>llm/anthropic</code>: Anthropic API client</li>
           </ul>
         </li>
         <li><strong>Knowledge Layer</strong>

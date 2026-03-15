@@ -131,7 +131,13 @@ for _, skillName := range list {
         panic(err)
     }
 
-    tool, err := s.AsTool(llmClient)
+  tool, err := s.AsTool(
+    llmClient,
+    // Optional: give the skill-agent memory so it can do multi-step work.
+    skill.WithMemory(memory.New(20)),
+    // Optional: prevent runaway tool loops.
+    skill.WithMaxIterations(10),
+  )
     if err != nil {
         panic(err)
     }
