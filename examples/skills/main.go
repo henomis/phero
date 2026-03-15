@@ -52,11 +52,11 @@ func main() {
 		panic(err)
 	}
 
-	writeTool, err := file.NewWriteTool()
+	createFileTool, err := file.NewCreateFileTool()
 	if err != nil {
 		panic(err)
 	}
-	tools = append(tools, writeTool.WithValidation(writeValidationFunc).Tool())
+	tools = append(tools, createFileTool.WithValidation(writeValidationFunc).Tool())
 
 	for _, tool := range tools {
 		if err := a.AddTool(tool); err != nil {
@@ -105,7 +105,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	return client, info
 }
 
-func writeValidationFunc(_ context.Context, input *file.WriteInput) error {
+func writeValidationFunc(_ context.Context, input *file.CreateFileInput) error {
 	fmt.Printf("Do you want to write to the file '%s'? (y/N): ", input.Path)
 	var permission string
 	_, scanErr := fmt.Scanln(&permission)
