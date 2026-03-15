@@ -27,8 +27,8 @@ import (
 	"github.com/henomis/phero/agent"
 	"github.com/henomis/phero/llm"
 	"github.com/henomis/phero/memory"
+	"github.com/henomis/phero/tool/bash"
 	"github.com/henomis/phero/tool/file"
-	golang "github.com/henomis/phero/tool/go"
 )
 
 const (
@@ -195,57 +195,42 @@ func (s *Skill) AsTool(client llm.LLM, opts ...Option) (*llm.Tool, error) {
 }
 
 func (s *Skill) addDefaultTools(agent *agent.Agent) error {
-	goTool, err := golang.New()
+	viewTool, err := file.NewViewTool()
 	if err != nil {
 		return err
 	}
-	if err := agent.AddTool(goTool.WithValidation(goValidationFunc).WithWorkingDirectory(s.BasePath).Tool()); err != nil {
+	if err := agent.AddTool(viewTool.Tool()); err != nil {
 		return err
 	}
 
-	listTool, err := file.NewListTool()
+	createTool, err := file.NewCreateFileTool()
 	if err != nil {
 		return err
 	}
-	if err := agent.AddTool(listTool.WithValidation(listValidationFunc).Tool()); err != nil {
+	if err := agent.AddTool(createTool.WithValidation(createFileValidationFunc).Tool()); err != nil {
 		return err
 	}
 
-	readTool, err := file.NewReadTool()
+	strReplaceTool, err := file.NewStrReplaceTool()
 	if err != nil {
 		return err
 	}
-	if err := agent.AddTool(readTool.WithValidation(readValidationFunc).Tool()); err != nil {
+	if err := agent.AddTool(strReplaceTool.Tool()); err != nil {
 		return err
 	}
 
-	writeTool, err := file.NewWriteTool()
+	bashTool, err := bash.New()
 	if err != nil {
 		return err
 	}
-	if err := agent.AddTool(writeTool.WithValidation(writeValidationFunc).Tool()); err != nil {
+	if err := agent.AddTool(bashTool.WithValidation(bashValidationFunc).Tool()); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func goValidationFunc(_ context.Context, input *golang.Input) error {
-	fmt.Printf("Do you want to run the command 'go %s'? (y/N): ", strings.Join(input.Args, " "))
-	var permission string
-	_, scanErr := fmt.Scanln(&permission)
-	if scanErr != nil {
-		return fmt.Errorf("failed to read user input: %w", scanErr)
-	}
-
-	if strings.EqualFold(permission, "y") {
-		return nil
-	}
-
-	return fmt.Errorf("user permission denied")
-}
-
-func writeValidationFunc(_ context.Context, input *file.WriteInput) error {
+func createFileValidationFunc(_ context.Context, input *file.CreateFileInput) error {
 	fmt.Printf("Do you want to write to the file '%s'? (y/N): ", input.Path)
 	var permission string
 	_, scanErr := fmt.Scanln(&permission)
@@ -260,23 +245,8 @@ func writeValidationFunc(_ context.Context, input *file.WriteInput) error {
 	return fmt.Errorf("user permission denied")
 }
 
-func readValidationFunc(_ context.Context, input *file.ReadInput) error {
-	fmt.Printf("Do you want to read the file '%s'? (y/N): ", input.Path)
-	var permission string
-	_, scanErr := fmt.Scanln(&permission)
-	if scanErr != nil {
-		return fmt.Errorf("failed to read user input: %w", scanErr)
-	}
-
-	if strings.EqualFold(permission, "y") {
-		return nil
-	}
-
-	return fmt.Errorf("user permission denied")
-}
-
-func listValidationFunc(_ context.Context, input *file.ListInput) error {
-	fmt.Printf("Do you want to list the files in the directory '%s'? (y/N): ", input.Path)
+func bashValidationFunc(_ context.Context, input *bash.Input) error {
+	fmt.Printf("Do you want to execute the bash command '%s'? (y/N): ", input.Command)
 	var permission string
 	_, scanErr := fmt.Scanln(&permission)
 	if scanErr != nil {
