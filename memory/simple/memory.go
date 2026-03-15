@@ -90,7 +90,7 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 		toAppend := toSummarize[m.summarySize:]
 		toSummarize = toSummarize[:m.summarySize]
 
-		history := formatSummaryPrompt(toSummarize)
+		history := memory.FormatSummaryPrompt(toSummarize)
 
 		summaryMsg, err := m.llm.Execute(ctx, []llm.Message{history}, nil)
 		if err != nil {

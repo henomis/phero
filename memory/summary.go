@@ -1,4 +1,4 @@
-package simple
+package memory
 
 import (
 	"fmt"
@@ -28,7 +28,7 @@ Analyze the dialogue below and generate a concise summary based on these four pi
 # CONVERSATION TO SUMMARIZE:
 %s`
 
-func formatSummaryPrompt(conversation []llm.Message) llm.Message {
+func FormatSummaryPrompt(conversation []llm.Message) llm.Message {
 	var formatted string
 	for _, msg := range conversation {
 		formatted += "## " + msg.Role + "\n" + msg.Content + "\n\n"
