@@ -8,6 +8,7 @@ import (
 
 	"github.com/henomis/phero/agent"
 	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/llm/anthropic"
 	"github.com/henomis/phero/llm/openai"
 )
 
@@ -26,6 +27,7 @@ type CalculatorOutput struct {
 
 // calculate performs basic arithmetic operations.
 func calculate(_ context.Context, input *CalculatorInput) (*CalculatorOutput, error) {
+	fmt.Printf("Tool called with input: %+v\n", input)
 	if input == nil {
 		return &CalculatorOutput{Error: "missing input"}, nil
 	}
@@ -51,8 +53,8 @@ func main() {
 	ctx := context.Background()
 
 	// Build LLM client from environment variables
-	llmClient, llmInfo := buildLLMFromEnv()
-
+	// llmClient, llmInfo := buildLLMFromEnv()
+	llmClient := anthropic.New(os.Getenv("ANTHROPIC_API_KEY"))
 	// Create the calculator tool from our Go function
 	calcTool, err := llm.NewTool(
 		"calculator",
@@ -80,7 +82,7 @@ func main() {
 
 	// Run the agent with a user request
 	userRequest := "If I have 15 apples and give away 7, then buy 23 more, how many do I have?"
-	fmt.Printf("LLM: %s\n", llmInfo)
+	// fmt.Printf("LLM: %s\n", llmInfo)
 	fmt.Printf("User: %s\n\n", userRequest)
 
 	response, err := a.Run(ctx, userRequest)
