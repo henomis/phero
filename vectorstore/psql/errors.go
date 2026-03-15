@@ -8,11 +8,11 @@ import (
 var (
 	// ErrNilDB is returned when New receives a nil *sql.DB.
 	ErrNilDB = errors.New("nil db")
-	// ErrEmptyTableName is returned when New receives an empty table name.
+	// ErrEmptyCollection is returned when New receives an empty collection name.
+	ErrEmptyCollection = errors.New("empty collection")
+	// ErrEmptyTableName is returned when WithTable (or internal defaults) result
+	// in an empty table name.
 	ErrEmptyTableName = errors.New("empty table name")
-	// ErrEmptyCollection is kept for backward compatibility with earlier versions
-	// that used a logical collection name.
-	ErrEmptyCollection = ErrEmptyTableName
 	// ErrInvalidVectorSize is returned when the vector size is missing or invalid.
 	ErrInvalidVectorSize = errors.New("invalid vector size")
 	// ErrInvalidTableName is returned when the configured table name is not a safe SQL identifier.

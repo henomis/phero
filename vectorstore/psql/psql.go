@@ -33,14 +33,19 @@ const (
 	DistanceDot
 )
 
+const defaultTableName = "vector_store"
+
 // Store is a PostgreSQL-backed implementation of vectorstore.Store.
 //
-// A Store is bound to a single SQL table.
+// A Store is bound to a single logical collection.
+// Points for all collections are stored in a single SQL table (by default
+// "vector_store") and separated by a `collection` column.
 //
 // The provided *sql.DB is treated as an injected dependency and is not owned by
 // the Store (i.e. Store does not Close it).
 type Store struct {
 	db              *sql.DB
+	collection      string
 	vectorSize      uint64
 	tableName       string
 	distance        Distance
@@ -79,20 +84,33 @@ func WithEnsureExtension(ensure bool) Option {
 	}
 }
 
-// New constructs a PostgreSQL-backed vectorstore bound to a single SQL table.
+// WithTable overrides the SQL table used by the store.
 //
-// tableName must be a safe identifier in the form `table` or `schema.table`.
-func New(db *sql.DB, tableName string, opts ...Option) (*Store, error) {
+// Default is "vector_store".
+//
+// table must be a safe identifier in the form `table` or `schema.table`.
+func WithTable(table string) Option {
+	return func(s *Store) {
+		s.tableName = table
+	}
+}
+
+// New constructs a PostgreSQL-backed vectorstore bound to a single collection.
+//
+// Points for all collections are stored in a single SQL table (by default
+// "vector_store") and separated by a `collection` column.
+func New(db *sql.DB, collection string, opts ...Option) (*Store, error) {
 	if db == nil {
 		return nil, ErrNilDB
 	}
-	if strings.TrimSpace(tableName) == "" {
-		return nil, ErrEmptyTableName
+	if strings.TrimSpace(collection) == "" {
+		return nil, ErrEmptyCollection
 	}
 
 	s := &Store{
 		db:              db,
-		tableName:       tableName,
+		collection:      collection,
+		tableName:       defaultTableName,
 		distance:        DistanceCosine,
 		ensureExtension: true,
 	}
@@ -104,6 +122,9 @@ func New(db *sql.DB, tableName string, opts ...Option) (*Store, error) {
 
 	if s.vectorSize == 0 {
 		return nil, ErrInvalidVectorSize
+	}
+	if strings.TrimSpace(s.tableName) == "" {
+		return nil, ErrEmptyTableName
 	}
 	if _, err := quoteQualifiedIdent(s.tableName); err != nil {
 		return nil, ErrInvalidTableName
@@ -179,7 +200,7 @@ func (s *Store) Upsert(ctx context.Context, points []vectorstore.Point) error {
 			payload = nil
 		}
 
-		if _, err := tx.ExecContext(ctx, stmt, p.ID, vecLit, payload); err != nil {
+		if _, err := tx.ExecContext(ctx, stmt, s.collection, p.ID, vecLit, payload); err != nil {
 			return err
 		}
 	}
@@ -216,7 +237,7 @@ func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint6
 
 	stmt := fmt.Sprintf(querySQLTemplate, scoreExpr, table, op)
 
-	rows, err := s.db.QueryContext(ctx, stmt, vecLit, limit)
+	rows, err := s.db.QueryContext(ctx, stmt, vecLit, s.collection, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -269,9 +290,10 @@ func (s *Store) Delete(ctx context.Context, ids []string) error {
 	}
 
 	placeholders := make([]string, 0, len(filtered))
-	args := make([]any, 0, len(filtered))
+	args := make([]any, 0, len(filtered)+1)
+	args = append(args, s.collection)
 	for i, id := range filtered {
-		placeholders = append(placeholders, fmt.Sprintf("$%d", i+1))
+		placeholders = append(placeholders, fmt.Sprintf("$%d", i+2))
 		args = append(args, id)
 	}
 
@@ -288,7 +310,7 @@ func (s *Store) Clear(ctx context.Context) error {
 	}
 
 	stmt := fmt.Sprintf(clearSQLTemplate, table)
-	_, err = s.db.ExecContext(ctx, stmt)
+	_, err = s.db.ExecContext(ctx, stmt, s.collection)
 	return err
 }
 
