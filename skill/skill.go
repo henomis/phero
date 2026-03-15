@@ -26,6 +26,7 @@ import (
 
 	"github.com/henomis/phero/agent"
 	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/memory"
 	"github.com/henomis/phero/tool/file"
 	golang "github.com/henomis/phero/tool/go"
 )
@@ -54,6 +55,9 @@ type Skill struct {
 	Metadata      map[string]any `yaml:"metadata,omitempty"`
 	AllowedTools  string         `yaml:"allowed-tools,omitempty"`
 	Body          string         `yaml:"-"`
+
+	memory        memory.Memory `yaml:"-"`
+	maxIterations int           `yaml:"-"`
 }
 
 // New returns a Parser rooted at skillsRootPath.
@@ -141,8 +145,25 @@ func Parse(r io.Reader) (*Skill, error) {
 	return &skill, nil
 }
 
+// Option is a functional option for configuring a Skill when converting it to a tool.
+type Option func(*Skill)
+
+// WithMemory sets a memory.Memory instance to be used by the skill's agent.
+func WithMemory(memory memory.Memory) Option {
+	return func(s *Skill) {
+		s.memory = memory
+	}
+}
+
+// WithMaxIterations sets the maximum number of iterations the skill's agent can execute before stopping.
+func WithMaxIterations(maxIterations int) Option {
+	return func(s *Skill) {
+		s.maxIterations = maxIterations
+	}
+}
+
 // AsTool converts a Skill into an llm.FunctionTool.
-func (s *Skill) AsTool(client llm.LLM) (*llm.Tool, error) {
+func (s *Skill) AsTool(client llm.LLM, opts ...Option) (*llm.Tool, error) {
 	skillAsAgent, err := agent.New(
 		client,
 		s.Name,
@@ -150,6 +171,20 @@ func (s *Skill) AsTool(client llm.LLM) (*llm.Tool, error) {
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
+	}
+
+	if s.memory != nil {
+		skillAsAgent.SetMemory(s.memory)
+	}
+
+	if s.maxIterations > 0 {
+		skillAsAgent.SetMaxIterations(s.maxIterations)
 	}
 
 	if err := s.addDefaultTools(skillAsAgent); err != nil {
