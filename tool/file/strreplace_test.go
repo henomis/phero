@@ -29,8 +29,8 @@ func TestStrReplace_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("replace: %v", err)
 	}
-	if out == nil || !strings.Contains(out.Confirmation, "replaced 1 occurrence") {
-		t.Fatalf("unexpected confirmation: %+v", out)
+	if out == nil || out.Result != "ok" {
+		t.Fatalf("unexpected result: %+v", out)
 	}
 
 	got, err := os.ReadFile(path)
@@ -39,6 +39,18 @@ func TestStrReplace_Success(t *testing.T) {
 	}
 	if string(got) != "hello NEW world" {
 		t.Fatalf("unexpected content: %q", string(got))
+	}
+}
+
+func TestStrReplace_NilInput(t *testing.T) {
+	tool, err := NewStrReplaceTool()
+	if err != nil {
+		t.Fatalf("NewStrReplaceTool: %v", err)
+	}
+
+	_, err = tool.replace(context.Background(), nil)
+	if err == nil {
+		t.Fatalf("expected error")
 	}
 }
 
@@ -83,6 +95,31 @@ func TestStrReplace_MultipleMatches(t *testing.T) {
 		Path:   path,
 		OldStr: "OLD",
 		NewStr: "NEW",
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if !strings.Contains(err.Error(), "found") || !strings.Contains(err.Error(), "times") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestStrReplace_OverlappingMatches_CountsAsMultiple(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(path, []byte("aaa"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	tool, err := NewStrReplaceTool()
+	if err != nil {
+		t.Fatalf("NewStrReplaceTool: %v", err)
+	}
+
+	_, err = tool.replace(context.Background(), &StrReplaceInput{
+		Path:   path,
+		OldStr: "aa",
+		NewStr: "X",
 	})
 	if err == nil {
 		t.Fatalf("expected error")

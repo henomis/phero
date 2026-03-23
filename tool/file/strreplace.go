@@ -26,7 +26,7 @@ type StrReplaceInput struct {
 
 // StrReplaceOutput represents the output from running the StrReplaceTool.
 type StrReplaceOutput struct {
-	Confirmation string `json:"confirmation"`
+	Result string `json:"result"`
 }
 
 // StrReplaceTool is a tool that allows replacing a unique string in a file.
@@ -65,11 +65,6 @@ func (s *StrReplaceTool) Tool() *llm.Tool {
 }
 
 func (s *StrReplaceTool) replace(ctx context.Context, input *StrReplaceInput) (*StrReplaceOutput, error) {
-	if s.validateFn != nil {
-		if err := s.validateFn(ctx, input); err != nil {
-			return nil, err
-		}
-	}
 	if input == nil {
 		return nil, errors.New("nil input")
 	}
@@ -80,12 +75,24 @@ func (s *StrReplaceTool) replace(ctx context.Context, input *StrReplaceInput) (*
 		return nil, errors.New("old_str is required")
 	}
 
+	if s.validateFn != nil {
+		if err := s.validateFn(ctx, input); err != nil {
+			return nil, err
+		}
+	}
+
+	fileInfo, statErr := os.Stat(input.Path)
+	if statErr != nil {
+		return nil, statErr
+	}
+	fileMode := fileInfo.Mode().Perm()
+
 	content, err := os.ReadFile(input.Path)
 	if err != nil {
 		return nil, err
 	}
 
-	count := bytes.Count(content, []byte(input.OldStr))
+	count := countOccurrencesOverlapping(content, []byte(input.OldStr))
 	switch count {
 	case 0:
 		return nil, fmt.Errorf("old_str not found in %s", input.Path)
@@ -96,13 +103,27 @@ func (s *StrReplaceTool) replace(ctx context.Context, input *StrReplaceInput) (*
 	}
 
 	replaced := bytes.Replace(content, []byte(input.OldStr), []byte(input.NewStr), 1)
-	if err := os.WriteFile(input.Path, replaced, 0o644); err != nil {
+	if err := os.WriteFile(input.Path, replaced, fileMode); err != nil {
 		return nil, err
 	}
 
-	confirmation := fmt.Sprintf("replaced 1 occurrence in %s", input.Path)
-	if strings.TrimSpace(input.Description) != "" {
-		confirmation = fmt.Sprintf("%s (%s)", confirmation, strings.TrimSpace(input.Description))
+	return &StrReplaceOutput{Result: "ok"}, nil
+}
+
+func countOccurrencesOverlapping(haystack []byte, needle []byte) int {
+	if len(needle) == 0 {
+		return 0
 	}
-	return &StrReplaceOutput{Confirmation: confirmation}, nil
+
+	count := 0
+	for i := 0; i < len(haystack); {
+		j := bytes.Index(haystack[i:], needle)
+		if j < 0 {
+			break
+		}
+		count++
+		i += j + 1
+	}
+
+	return count
 }

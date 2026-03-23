@@ -17,7 +17,7 @@ import (
 // ViewInput represents the input for the ReadTool, containing the path of the file to read.
 type ViewInput struct {
 	Description string `json:"description" jsonschema:"description=Why you're viewing this file."`
-	Path        string `json:"path" jsonschema:"description=Supported path types: Directories (lists files and directories up to 2 levels deep, ignoring hidden items and node_modules), Image files (.jpg, .jpeg, .png, .gif, .webp) (displays the image visually), Text files (displays numbered lines). You can optionally specify a view_range to see specific lines. Note: Files with non-UTF-8 encoding will display hex escapes for invalid bytes."`
+	Path        string `json:"path" jsonschema:"description=The path of the file or directory to view."`
 	ViewRange   [2]int `json:"view_range,omitempty" jsonschema:"description=Optional range of lines to view when reading text files. Specify as [start, end], where start is the starting line number (inclusive) and end is the ending line number (exclusive), -1 for the end. Line numbers are 1-based. If not provided, the entire file will be read."`
 }
 
@@ -39,7 +39,7 @@ type ViewTool struct {
 // path specifies the base directory for reading files.
 func NewViewTool() (*ViewTool, error) {
 	name := "view"
-	description := "use this tool to view the content of a file. The input is the file path. The output is the content of the file."
+	description := "Supported path types: Directories (lists files and directories up to 2 levels deep, ignoring hidden items and node_modules), Image files (.jpg, .jpeg, .png, .gif, .webp) (displays the image visually), Text files (displays numbered lines). You can optionally specify a view_range to see specific lines. Note: Files with non-UTF-8 encoding will display hex escapes for invalid bytes."
 
 	viewTool := &ViewTool{}
 
