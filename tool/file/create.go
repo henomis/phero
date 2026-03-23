@@ -2,7 +2,9 @@ package file
 
 import (
 	"context"
+	"errors"
 	"os"
+	"strings"
 
 	"github.com/henomis/phero/llm"
 )
@@ -21,8 +23,7 @@ type CreateFileOutput struct {
 
 // CreateFileTool is a tool that allows writing content to a file.
 type CreateFileTool struct {
-	tool       *llm.Tool
-	validateFn func(context.Context, *CreateFileInput) error
+	tool *llm.Tool
 }
 
 // NewCreateFileTool creates a new instance of CreateFileTool.
@@ -50,24 +51,19 @@ func NewCreateFileTool() (*CreateFileTool, error) {
 	return createFileTool, nil
 }
 
-// WithValidation allows setting a custom validation function for the CreateFileTool.
-func (w *CreateFileTool) WithValidation(validateFn func(context.Context, *CreateFileInput) error) *CreateFileTool {
-	w.validateFn = validateFn
-	return w
-}
-
 // Tool returns the llm.FunctionTool representation of the CreateFileTool.
 func (w *CreateFileTool) Tool() *llm.Tool {
 	return w.tool
 }
 
 func (w *CreateFileTool) write(ctx context.Context, input *CreateFileInput) (*CreateFileOutput, error) {
-	if w.validateFn != nil {
-		if err := w.validateFn(ctx, input); err != nil {
-			return nil, err
-		}
+	_ = ctx
+	if input == nil {
+		return nil, errors.New("nil input")
 	}
-
+	if strings.TrimSpace(input.Path) == "" {
+		return nil, errors.New("path is required")
+	}
 	err := os.WriteFile(input.Path, []byte(input.Content), 0o644)
 	if err != nil {
 		return nil, err

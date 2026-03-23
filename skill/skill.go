@@ -16,6 +16,7 @@ package skill
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -207,7 +208,19 @@ func (s *Skill) addDefaultTools(agent *agent.Agent) error {
 	if err != nil {
 		return err
 	}
-	if err := agent.AddTool(createTool.WithValidation(createFileValidationFunc).Tool()); err != nil {
+	createToolLLM := createTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
+		return func(ctx context.Context, arguments string) (any, error) {
+			var input *file.CreateFileInput
+			if err := json.Unmarshal([]byte(arguments), &input); err != nil {
+				return nil, &llm.ToolArgumentParseError{Err: err}
+			}
+			if err := createFileValidationFunc(ctx, input); err != nil {
+				return nil, err
+			}
+			return next(ctx, arguments)
+		}
+	})
+	if err := agent.AddTool(createToolLLM); err != nil {
 		return err
 	}
 
@@ -223,7 +236,19 @@ func (s *Skill) addDefaultTools(agent *agent.Agent) error {
 	if err != nil {
 		return err
 	}
-	if err := agent.AddTool(bashTool.WithValidation(bashValidationFunc).Tool()); err != nil {
+	bashToolLLM := bashTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
+		return func(ctx context.Context, arguments string) (any, error) {
+			var input *bash.Input
+			if err := json.Unmarshal([]byte(arguments), &input); err != nil {
+				return nil, &llm.ToolArgumentParseError{Err: err}
+			}
+			if err := bashValidationFunc(ctx, input); err != nil {
+				return nil, err
+			}
+			return next(ctx, arguments)
+		}
+	})
+	if err := agent.AddTool(bashToolLLM); err != nil {
 		return err
 	}
 

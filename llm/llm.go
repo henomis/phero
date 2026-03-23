@@ -65,6 +65,14 @@ type LLM interface {
 // arguments is the raw JSON string received from the model.
 type ToolHandler func(ctx context.Context, arguments string) (any, error)
 
+// ToolMiddleware wraps a tool handler.
+//
+// Middlewares can be used to add cross-cutting behavior (e.g. input validation,
+// permission checks, logging) without baking that logic into each tool implementation.
+//
+// Middleware order is preserved: if you call tool.Use(m1, m2), m1 runs before m2.
+type ToolMiddleware func(tool *Tool, next ToolHandler) ToolHandler
+
 // Tool is a Tool that wraps a function.
 type Tool struct {
 	// The name of the tool, as shown to the LLM. Generally the name of the function.
@@ -78,6 +86,10 @@ type Tool struct {
 
 	// Handle calls the underlying function with the given arguments.
 	handle ToolHandler
+
+	// middlewares wraps the tool handler to provide cross-cutting behavior
+	// (e.g., input validation, permission checks, logging).
+	middlewares []ToolMiddleware
 }
 
 // Name returns the stable name used to identify this tool to the LLM.
@@ -97,7 +109,19 @@ func (t *Tool) InputSchema() map[string]any {
 
 // Handle calls the underlying function with the given arguments.
 func (t *Tool) Handle(ctx context.Context, arguments string) (any, error) {
-	return t.handle(ctx, arguments)
+	h := t.handle
+	for i := len(t.middlewares) - 1; i >= 0; i-- {
+		h = t.middlewares[i](t, h)
+	}
+	return h(ctx, arguments)
+}
+
+// Use appends middleware(s) to this tool.
+//
+// Middlewares are executed in the order they are added.
+func (t *Tool) Use(middlewares ...ToolMiddleware) *Tool {
+	t.middlewares = append(t.middlewares, middlewares...)
+	return t
 }
 
 // NewTool creates a new Tool with the given name, description, and handler function.

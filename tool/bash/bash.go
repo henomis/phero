@@ -27,8 +27,7 @@ type Output struct {
 
 // Tool is a tool that runs bash commands.
 type Tool struct {
-	tool       *llm.Tool
-	validateFn func(context.Context, *Input) error
+	tool *llm.Tool
 }
 
 // New creates a new instance of the bash_tool.
@@ -51,23 +50,12 @@ func New() (*Tool, error) {
 	return bashTool, nil
 }
 
-// WithValidation allows setting a custom validation function for the tool.
-func (t *Tool) WithValidation(validateFn func(context.Context, *Input) error) *Tool {
-	t.validateFn = validateFn
-	return t
-}
-
 // Tool returns the llm.Tool representation.
 func (t *Tool) Tool() *llm.Tool {
 	return t.tool
 }
 
 func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
-	if t.validateFn != nil {
-		if err := t.validateFn(ctx, input); err != nil {
-			return nil, err
-		}
-	}
 	if input == nil {
 		return nil, errors.New("nil input")
 	}

@@ -16,6 +16,8 @@ package llm
 
 import (
 	"context"
+	"errors"
+	"reflect"
 	"testing"
 )
 
@@ -97,5 +99,67 @@ func TestNewFunctionTool_PointerToAnonymousEmptyStruct_DoesNotPanic(t *testing.T
 
 	if got, _ := tool.InputSchema()["type"].(string); got != "object" {
 		t.Fatalf("schema type: expected %q, got %#v", "object", tool.InputSchema()["type"])
+	}
+}
+
+func TestToolMiddleware_Order(t *testing.T) {
+	var calls []string
+	tool, err := NewTool("nick", "", func(_ context.Context, in *testInput) (*testOutput, error) {
+		calls = append(calls, "handler")
+		return &testOutput{NickName: in.Name}, nil
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	tool.Use(
+		func(_ *Tool, next ToolHandler) ToolHandler {
+			return func(ctx context.Context, arguments string) (any, error) {
+				calls = append(calls, "mw1")
+				return next(ctx, arguments)
+			}
+		},
+		func(_ *Tool, next ToolHandler) ToolHandler {
+			return func(ctx context.Context, arguments string) (any, error) {
+				calls = append(calls, "mw2")
+				return next(ctx, arguments)
+			}
+		},
+	)
+
+	_, err = tool.Handle(context.Background(), `{"name":"Simone"}`)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if !reflect.DeepEqual(calls, []string{"mw1", "mw2", "handler"}) {
+		t.Fatalf("unexpected call order: %#v", calls)
+	}
+}
+
+func TestToolMiddleware_InputValidation_ShortCircuits(t *testing.T) {
+	var handled bool
+	tool, err := NewTool("nick", "", func(_ context.Context, _ *testInput) (*testOutput, error) {
+		handled = true
+		return &testOutput{NickName: "x"}, nil
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	tool.Use(func(_ *Tool, next ToolHandler) ToolHandler {
+		return func(ctx context.Context, arguments string) (any, error) {
+			// For this test we don't need to decode JSON; just reject based on raw args.
+			_ = arguments
+			return nil, errors.New("invalid")
+		}
+	})
+
+	_, err = tool.Handle(context.Background(), `{"name":"nope"}`)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if handled {
+		t.Fatalf("expected handler not to run")
 	}
 }

@@ -28,8 +28,7 @@ type ViewOutput struct {
 
 // ViewTool is a tool that allows reading the content of a file.
 type ViewTool struct {
-	tool       *llm.Tool
-	validateFn func(context.Context, *ViewInput) error
+	tool *llm.Tool
 }
 
 // NewViewTool creates a new instance of ViewTool.
@@ -57,23 +56,12 @@ func NewViewTool() (*ViewTool, error) {
 	return viewTool, nil
 }
 
-// WithValidation allows setting a custom validation function for the ViewTool.
-func (r *ViewTool) WithValidation(validateFn func(context.Context, *ViewInput) error) *ViewTool {
-	r.validateFn = validateFn
-	return r
-}
-
 // Tool returns the llm.FunctionTool representation of the ViewTool.
 func (r *ViewTool) Tool() *llm.Tool {
 	return r.tool
 }
 
 func (r *ViewTool) view(ctx context.Context, input *ViewInput) (*ViewOutput, error) {
-	if r.validateFn != nil {
-		if err := r.validateFn(ctx, input); err != nil {
-			return nil, err
-		}
-	}
 	if input == nil {
 		return nil, errors.New("nil input")
 	}

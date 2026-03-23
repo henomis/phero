@@ -31,8 +31,7 @@ type StrReplaceOutput struct {
 
 // StrReplaceTool is a tool that allows replacing a unique string in a file.
 type StrReplaceTool struct {
-	tool       *llm.Tool
-	validateFn func(context.Context, *StrReplaceInput) error
+	tool *llm.Tool
 }
 
 func NewStrReplaceTool() (*StrReplaceTool, error) {
@@ -53,13 +52,6 @@ func NewStrReplaceTool() (*StrReplaceTool, error) {
 	strReplaceTool.tool = tool
 	return strReplaceTool, nil
 }
-
-// WithValidation allows setting a custom validation function for the StrReplaceTool.
-func (s *StrReplaceTool) WithValidation(validateFn func(context.Context, *StrReplaceInput) error) *StrReplaceTool {
-	s.validateFn = validateFn
-	return s
-}
-
 func (s *StrReplaceTool) Tool() *llm.Tool {
 	return s.tool
 }
@@ -73,12 +65,6 @@ func (s *StrReplaceTool) replace(ctx context.Context, input *StrReplaceInput) (*
 	}
 	if input.OldStr == "" {
 		return nil, errors.New("old_str is required")
-	}
-
-	if s.validateFn != nil {
-		if err := s.validateFn(ctx, input); err != nil {
-			return nil, err
-		}
 	}
 
 	fileInfo, statErr := os.Stat(input.Path)

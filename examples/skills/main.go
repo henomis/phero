@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -56,7 +57,18 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	tools = append(tools, createFileTool.WithValidation(writeValidationFunc).Tool())
+	tools = append(tools, createFileTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
+		return func(ctx context.Context, arguments string) (any, error) {
+			var input *file.CreateFileInput
+			if err := json.Unmarshal([]byte(arguments), &input); err != nil {
+				return nil, &llm.ToolArgumentParseError{Err: err}
+			}
+			if err := writeValidationFunc(ctx, input); err != nil {
+				return nil, err
+			}
+			return next(ctx, arguments)
+		}
+	}))
 
 	for _, tool := range tools {
 		if err := a.AddTool(tool); err != nil {

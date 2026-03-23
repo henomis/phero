@@ -22,9 +22,8 @@ type Output struct {
 
 // Tool is a tool that allows the agent to ask a human for input.
 type Tool struct {
-	tool       *llm.Tool
-	reader     *bufio.Reader
-	validateFn func(context.Context, *Input) error
+	tool   *llm.Tool
+	reader *bufio.Reader
 }
 
 // New creates a new instance of HumanTool.
@@ -53,12 +52,6 @@ func New() (*Tool, error) {
 	return humanTool, nil
 }
 
-// WithValidation allows setting a custom validation function for the HumanTool.
-func (h *Tool) WithValidation(validateFn func(context.Context, *Input) error) *Tool {
-	h.validateFn = validateFn
-	return h
-}
-
 // WithReader allows setting a custom reader for the HumanTool (useful for testing).
 func (h *Tool) WithReader(reader *bufio.Reader) *Tool {
 	h.reader = reader
@@ -71,12 +64,10 @@ func (h *Tool) Tool() *llm.Tool {
 }
 
 func (h *Tool) ask(ctx context.Context, input *Input) (*Output, error) {
-	if h.validateFn != nil {
-		if err := h.validateFn(ctx, input); err != nil {
-			return nil, err
-		}
+	_ = ctx
+	if input == nil {
+		return nil, fmt.Errorf("nil input")
 	}
-
 	// Print the question to stdout
 	fmt.Printf("\n🤔 Human Input Required:\n%s\n\n", input.Question)
 	fmt.Print("Your response: ")
