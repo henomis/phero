@@ -25,7 +25,6 @@ type Client struct {
 	model  string
 	apiKey string
 	config openai.ClientConfig
-	stream bool
 }
 
 // Option configures a Client created by New.
@@ -57,7 +56,6 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*l
 	request := openai.ChatCompletionRequest{
 		Model:    c.model,
 		Messages: messages,
-		Stream:   c.stream,
 	}
 
 	if len(tools) > 0 {
@@ -104,13 +102,6 @@ func WithBaseURL(baseURL string) Option {
 func WithModel(model string) Option {
 	return func(c *Client) {
 		c.model = model
-	}
-}
-
-// WithStream enables or disables streaming mode on chat completions.
-func WithStream(stream bool) Option {
-	return func(c *Client) {
-		c.stream = stream
 	}
 }
 
