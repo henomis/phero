@@ -182,7 +182,7 @@ Document: %s`, filepath.Base(filePath)))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 		} else {
-			fmt.Println(strings.TrimSpace(out))
+			fmt.Println(strings.TrimSpace(out.Content))
 		}
 		fmt.Println()
 		fmt.Print("> ")

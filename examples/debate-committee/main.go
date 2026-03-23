@@ -58,7 +58,7 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		debate = append(debate, DebateResult{Member: member.Name, Output: strings.TrimSpace(out)})
+		debate = append(debate, DebateResult{Member: member.Name, Output: strings.TrimSpace(out.Content)})
 	}
 
 	for _, r := range debate {
@@ -74,7 +74,7 @@ func main() {
 	}
 
 	fmt.Println("=== judge (final) ===")
-	fmt.Println(strings.TrimSpace(final))
+	fmt.Println(strings.TrimSpace(final.Content))
 }
 
 func renderJudgeInput(goal, question string, debate []DebateResult) string {

@@ -60,6 +60,10 @@ func (s *Server) AsTools(ctx context.Context, filter ToolFilter) ([]*llm.Tool, e
 			continue
 		}
 
+		if _, ok := tool.InputSchema.(map[string]any); !ok {
+			return nil, fmt.Errorf("invalid tool input schema for tool %q: expected an object", tool.Name)
+		}
+
 		// Ensure the input schema has a "properties" field, even if empty, to be compatible with OpenAI function calling.
 		if _, ok := tool.InputSchema.(map[string]any)["properties"]; !ok {
 			tool.InputSchema.(map[string]any)["properties"] = map[string]any{}

@@ -34,6 +34,11 @@ type Agent struct {
 	memory        memory.Memory
 }
 
+// Result represents the final output of an agent after processing user input and executing any tool calls.
+type Result struct {
+	Content string
+}
+
 // New creates a new Agent.
 //
 // name and description must be non-empty. client must be non-nil.
@@ -106,10 +111,10 @@ func (a *Agent) SetMaxIterations(maxIterations int) {
 //
 // The agent calls the LLM, executes any requested tool calls, and repeats until
 // the model returns a message without tool calls.
-func (a *Agent) Run(ctx context.Context, input string) (string, error) {
+func (a *Agent) Run(ctx context.Context, input string) (*Result, error) {
 	session, sessionIndex, err := a.prepareSession(ctx, input)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// Ensure the session is saved at the end, even if an error occurs during processing.
@@ -121,18 +126,18 @@ func (a *Agent) Run(ctx context.Context, input string) (string, error) {
 	for {
 		iteration++
 		if a.maxIterations > 0 && iteration > a.maxIterations {
-			return "", ErrMaxIterationsReached
+			return nil, ErrMaxIterationsReached
 		}
 
 		var finalMessage *llm.Message
 		session, finalMessage, err = a.handleAgentIteration(ctx, session)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 
 		// If finalMessage is nil, it means the agent executed tool calls and needs to call the LLM again.
 		if finalMessage != nil {
-			return finalMessage.Content, nil
+			return &Result{Content: finalMessage.Content}, nil
 		}
 	}
 }
@@ -261,7 +266,7 @@ func (a *Agent) AsTool(toolName, toolDescription string) (*llm.Tool, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &ToolOutput{Output: response}, nil
+		return &ToolOutput{Output: response.Content}, nil
 	}
 
 	return llm.NewTool(

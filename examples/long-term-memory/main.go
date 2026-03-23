@@ -187,7 +187,7 @@ func main() {
 		if err != nil {
 			fmt.Printf("\n❌ Error: %v\n", err)
 		} else {
-			fmt.Printf("\n%s\n", strings.TrimSpace(response))
+			fmt.Printf("\n%s\n", strings.TrimSpace(response.Content))
 		}
 
 		fmt.Print("\n> ")
