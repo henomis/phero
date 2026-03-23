@@ -99,7 +99,7 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 
 		messagesToStore := []llm.Message{{
 			Role:    llm.ChatMessageRoleSystem,
-			Content: summarySystemMessagePrefix + summaryMsg.Content,
+			Content: summarySystemMessagePrefix + summaryMsg.Message.Content,
 		}}
 
 		messagesToStore = append(messagesToStore, toAppend...)

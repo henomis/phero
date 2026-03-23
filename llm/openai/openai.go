@@ -53,7 +53,7 @@ func New(apiKey string, opts ...Option) *Client {
 
 // Execute calls the Chat Completions API with the given messages and returns the
 // model's next message.
-func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Message, error) {
+func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
 	request := openai.ChatCompletionRequest{
 		Model:    c.model,
 		Messages: messages,
@@ -69,7 +69,7 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*l
 		return nil, err
 	}
 
-	return &response.Choices[0].Message, nil
+	return &llm.Result{Message: &response.Choices[0].Message}, nil
 }
 
 func (c *Client) openaiTools(tools []*llm.Tool) []openai.Tool {

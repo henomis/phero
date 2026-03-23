@@ -47,12 +47,17 @@ const ChatMessageRoleAssistant = openai.ChatMessageRoleAssistant
 // ChatMessageRoleTool is the role for tool-result messages.
 const ChatMessageRoleTool = openai.ChatMessageRoleTool
 
+// Result represents the output of an LLM execution, including the assistant message and any tool calls.
+type Result struct {
+	Message *Message
+}
+
 // LLM is the minimal interface implemented by chat-model backends.
 //
 // Implementations are expected to accept a list of messages and return the next
 // assistant message. Tools can be configured via WithTools.
 type LLM interface {
-	Execute(context.Context, []Message, []*Tool) (*Message, error)
+	Execute(context.Context, []Message, []*Tool) (*Result, error)
 }
 
 // ToolHandler is the low-level handler signature used by FunctionTool.

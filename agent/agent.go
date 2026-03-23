@@ -159,13 +159,13 @@ func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message)
 		return session, nil, err
 	}
 
-	session = append(session, *msg)
+	session = append(session, *msg.Message)
 
-	if len(msg.ToolCalls) == 0 {
-		return session, msg, nil
+	if len(msg.Message.ToolCalls) == 0 {
+		return session, msg.Message, nil
 	}
 
-	for _, toolCall := range msg.ToolCalls {
+	for _, toolCall := range msg.Message.ToolCalls {
 		resultMessage := a.handleToolCall(ctx, toolCall)
 
 		session = append(session, *resultMessage)

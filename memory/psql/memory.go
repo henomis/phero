@@ -310,7 +310,7 @@ func (m *Memory) maybeSummarize(ctx context.Context) error {
 
 	messagesToStore := []llm.Message{{
 		Role:    llm.ChatMessageRoleSystem,
-		Content: summarySystemMessagePrefix + summaryMsg.Content,
+		Content: summarySystemMessagePrefix + summaryMsg.Message.Content,
 	}}
 	messagesToStore = append(messagesToStore, toAppend...)
 

@@ -11,9 +11,9 @@ type mockSummaryLLM struct {
 	called int
 }
 
-func (m *mockSummaryLLM) Execute(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Message, error) {
+func (m *mockSummaryLLM) Execute(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
 	m.called++
-	return &llm.Message{Role: llm.ChatMessageRoleSystem, Content: "summary"}, nil
+	return &llm.Result{Message: &llm.Message{Role: llm.ChatMessageRoleSystem, Content: "summary"}}, nil
 }
 
 func TestMemorySave_SummarizationReplacesHistory(t *testing.T) {

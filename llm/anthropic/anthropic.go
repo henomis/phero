@@ -70,7 +70,7 @@ func New(apiKey string, opts ...Option) *Client {
 // Execute calls the Anthropic Messages API with the given OpenAI-shaped messages and tools.
 //
 // It converts the response to an OpenAI-shaped assistant message, including any tool calls.
-func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Message, error) {
+func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
 	system, anthropicMessages, err := openAIMessagesToAnthropic(messages)
 	if err != nil {
 		return nil, err
@@ -99,7 +99,8 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*l
 	if err != nil {
 		return nil, err
 	}
-	return msg, nil
+
+	return &llm.Result{Message: msg}, nil
 }
 
 func openAIMessagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam, []anthropicapi.MessageParam, error) {
