@@ -65,6 +65,37 @@ type LLM interface {
 // arguments is the raw JSON string received from the model.
 type ToolHandler func(ctx context.Context, arguments string) (any, error)
 
+// ToolMiddleware wraps a tool's handler.
+//
+// Middlewares are applied around ToolHandler and can implement cross-cutting
+// concerns like logging, timing, redaction, permission checks, and output
+// limiting.
+//
+// Middleware order follows common HTTP conventions:
+// WithMiddleware(m1, m2) results in m1(m2(handler)).
+type ToolMiddleware func(tool *Tool, next ToolHandler) ToolHandler
+
+// ChainToolMiddleware returns a single middleware equivalent to applying all
+// given middlewares in order.
+//
+// Nil middlewares are ignored.
+func ChainToolMiddleware(mws ...ToolMiddleware) ToolMiddleware {
+	return func(tool *Tool, next ToolHandler) ToolHandler {
+		wrapped := next
+		for i := len(mws) - 1; i >= 0; i-- {
+			if mws[i] == nil {
+				continue
+			}
+			wrapped = mws[i](tool, wrapped)
+		}
+		return wrapped
+	}
+}
+
+func applyToolMiddleware(tool *Tool, handler ToolHandler, mws ...ToolMiddleware) ToolHandler {
+	return ChainToolMiddleware(mws...)(tool, handler)
+}
+
 // Tool is a Tool that wraps a function.
 type Tool struct {
 	// The name of the tool, as shown to the LLM. Generally the name of the function.
@@ -98,6 +129,14 @@ func (t *Tool) InputSchema() map[string]any {
 // Handle calls the underlying function with the given arguments.
 func (t *Tool) Handle(ctx context.Context, arguments string) (any, error) {
 	return t.handle(ctx, arguments)
+}
+
+// WithMiddleware wraps the tool handler with the provided middleware chain.
+//
+// The tool is modified in-place and returned for fluent configuration.
+func (t *Tool) WithMiddleware(mws ...ToolMiddleware) *Tool {
+	t.handle = applyToolMiddleware(t, t.handle, mws...)
+	return t
 }
 
 // NewTool creates a new Tool with the given name, description, and handler function.
