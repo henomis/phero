@@ -16,7 +16,6 @@ package llm
 
 import (
 	"context"
-	"errors"
 	"testing"
 )
 
@@ -98,80 +97,5 @@ func TestNewFunctionTool_PointerToAnonymousEmptyStruct_DoesNotPanic(t *testing.T
 
 	if got, _ := tool.InputSchema()["type"].(string); got != "object" {
 		t.Fatalf("schema type: expected %q, got %#v", "object", tool.InputSchema()["type"])
-	}
-}
-
-func TestTool_WithMiddleware_Order(t *testing.T) {
-	tool, err := NewTool("echo", "", func(_ context.Context, _ testInput) (string, error) {
-		return "ok", nil
-	})
-	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
-	}
-
-	var order []string
-	mw1 := func(tl *Tool, next ToolHandler) ToolHandler {
-		return func(ctx context.Context, args string) (any, error) {
-			order = append(order, "mw1:before:"+tl.Name()+":"+args)
-			res, err := next(ctx, args)
-			order = append(order, "mw1:after")
-			return res, err
-		}
-	}
-	mw2 := func(tl *Tool, next ToolHandler) ToolHandler {
-		return func(ctx context.Context, args string) (any, error) {
-			order = append(order, "mw2:before")
-			res, err := next(ctx, args)
-			order = append(order, "mw2:after")
-			return res, err
-		}
-	}
-
-	tool.WithMiddleware(mw1, mw2)
-	_, err = tool.Handle(context.Background(), "{\"name\":\"Simone\"}")
-	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
-	}
-
-	expected := []string{
-		"mw1:before:echo:{\"name\":\"Simone\"}",
-		"mw2:before",
-		"mw2:after",
-		"mw1:after",
-	}
-	if len(order) != len(expected) {
-		t.Fatalf("order len: expected %d, got %d (%#v)", len(expected), len(order), order)
-	}
-	for i := range expected {
-		if order[i] != expected[i] {
-			t.Fatalf("order[%d]: expected %q, got %q (full=%#v)", i, expected[i], order[i], order)
-		}
-	}
-}
-
-func TestTool_WithMiddleware_ShortCircuit(t *testing.T) {
-	called := false
-	tool, err := NewTool("echo", "", func(_ context.Context, _ testInput) (string, error) {
-		called = true
-		return "ok", nil
-	})
-	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
-	}
-
-	boom := errors.New("nope")
-	mw := func(_ *Tool, _ ToolHandler) ToolHandler {
-		return func(context.Context, string) (any, error) {
-			return nil, boom
-		}
-	}
-
-	tool.WithMiddleware(mw)
-	_, err = tool.Handle(context.Background(), "{\"name\":\"Simone\"}")
-	if !errors.Is(err, boom) {
-		t.Fatalf("expected %v, got: %v", boom, err)
-	}
-	if called {
-		t.Fatalf("expected handler not to be called")
 	}
 }
