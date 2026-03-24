@@ -3,7 +3,9 @@ package jsonfile
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/henomis/phero/llm"
@@ -79,16 +81,38 @@ func (m *Memory) load() error {
 	return nil
 }
 
-// persist writes the current message slice to the JSON file.
-// The caller must hold at least a read lock; in practice we call this under
-// the write lock inside Save/Clear.
+// persist atomically writes the current message slice to the JSON file.
+// It writes to a temp file in the same directory first, then renames it over
+// the target to avoid partial writes corrupting the stored messages on crash.
+// The caller must hold the write lock.
 func (m *Memory) persist() error {
 	data, err := json.MarshalIndent(m.messages, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(m.filePath, data, 0o600)
+	dir := filepath.Dir(m.filePath)
+	tmp, err := os.CreateTemp(dir, ".memory-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("close temp file: %w", err)
+	}
+	if err := os.Rename(tmpName, m.filePath); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("rename temp file: %w", err)
+	}
+
+	return nil
 }
 
 func (m *Memory) needSummarization() bool {
