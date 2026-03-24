@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 	"sync"
 
+	"github.com/henomis/phero/internal/sqlutil"
 	"github.com/henomis/phero/llm"
 	"github.com/henomis/phero/memory"
 )
@@ -69,7 +69,7 @@ func New(db *sql.DB, sessionID string, options ...Option) (*Memory, error) {
 	if strings.TrimSpace(m.tableName) == "" {
 		return nil, ErrEmptyTableName
 	}
-	if _, err := quoteQualifiedIdent(m.tableName); err != nil {
+	if _, err := sqlutil.QuoteQualifiedIdent(m.tableName); err != nil {
 		return nil, ErrInvalidTableName
 	}
 
@@ -130,7 +130,7 @@ func (m *Memory) EnsureSchema(ctx context.Context) error {
 		return nil
 	}
 
-	table, err := quoteQualifiedIdent(m.tableName)
+	table, err := sqlutil.QuoteQualifiedIdent(m.tableName)
 	if err != nil {
 		return ErrInvalidTableName
 	}
@@ -140,7 +140,7 @@ func (m *Memory) EnsureSchema(ctx context.Context) error {
 	}
 	// index name uses the table name string; quoted identifiers aren't accepted
 	// for index names. Use a deterministic safe name.
-	idxName := safeIndexName(m.tableName) + "_session_seq_idx"
+	idxName := sqlutil.SafeIndexName(m.tableName) + "_session_seq_idx"
 	if _, err := m.db.ExecContext(ctx, fmt.Sprintf(createIndexSQLTemplate, idxName, table)); err != nil {
 		return err
 	}
@@ -158,7 +158,7 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 		return nil
 	}
 
-	table, err := quoteQualifiedIdent(m.tableName)
+	table, err := sqlutil.QuoteQualifiedIdent(m.tableName)
 	if err != nil {
 		return ErrInvalidTableName
 	}
@@ -198,7 +198,7 @@ func (m *Memory) Retrieve(ctx context.Context, _ string) ([]llm.Message, error) 
 		return nil, err
 	}
 
-	table, err := quoteQualifiedIdent(m.tableName)
+	table, err := sqlutil.QuoteQualifiedIdent(m.tableName)
 	if err != nil {
 		return nil, ErrInvalidTableName
 	}
@@ -234,7 +234,7 @@ func (m *Memory) Clear(ctx context.Context) error {
 		return err
 	}
 
-	table, err := quoteQualifiedIdent(m.tableName)
+	table, err := sqlutil.QuoteQualifiedIdent(m.tableName)
 	if err != nil {
 		return ErrInvalidTableName
 	}
@@ -245,7 +245,7 @@ func (m *Memory) Clear(ctx context.Context) error {
 }
 
 func (m *Memory) count(ctx context.Context) (int, error) {
-	table, err := quoteQualifiedIdent(m.tableName)
+	table, err := sqlutil.QuoteQualifiedIdent(m.tableName)
 	if err != nil {
 		return 0, ErrInvalidTableName
 	}
@@ -300,7 +300,7 @@ func (m *Memory) maybeSummarize(ctx context.Context) error {
 	}}
 	messagesToStore = append(messagesToStore, toAppend...)
 
-	table, err := quoteQualifiedIdent(m.tableName)
+	table, err := sqlutil.QuoteQualifiedIdent(m.tableName)
 	if err != nil {
 		return ErrInvalidTableName
 	}
@@ -328,32 +328,4 @@ func (m *Memory) maybeSummarize(ctx context.Context) error {
 	}
 
 	return tx.Commit()
-}
-
-var safeIdent = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
-
-func quoteQualifiedIdent(name string) (string, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "", ErrInvalidTableName
-	}
-	parts := strings.Split(name, ".")
-	if len(parts) > 2 {
-		return "", ErrInvalidTableName
-	}
-
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if !safeIdent.MatchString(p) {
-			return "", ErrInvalidTableName
-		}
-		out = append(out, `"`+p+`"`)
-	}
-	return strings.Join(out, "."), nil
-}
-
-func safeIndexName(table string) string {
-	// Convert schema.table into schema_table; strip anything unexpected. We rely
-	// on quoteQualifiedIdent validation at New-time.
-	return strings.ReplaceAll(strings.TrimSpace(table), ".", "_")
 }

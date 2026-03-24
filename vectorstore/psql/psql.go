@@ -6,10 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/henomis/phero/internal/sqlutil"
 	"github.com/henomis/phero/vectorstore"
 )
 
@@ -126,7 +126,7 @@ func New(db *sql.DB, collection string, opts ...Option) (*Store, error) {
 	if strings.TrimSpace(s.tableName) == "" {
 		return nil, ErrEmptyTableName
 	}
-	if _, err := quoteQualifiedIdent(s.tableName); err != nil {
+	if _, err := sqlutil.QuoteQualifiedIdent(s.tableName); err != nil {
 		return nil, ErrInvalidTableName
 	}
 	return s, nil
@@ -143,7 +143,7 @@ func (s *Store) EnsureCollection(ctx context.Context) error {
 		}
 	}
 
-	table, err := quoteQualifiedIdent(s.tableName)
+	table, err := sqlutil.QuoteQualifiedIdent(s.tableName)
 	if err != nil {
 		return ErrInvalidTableName
 	}
@@ -160,7 +160,7 @@ func (s *Store) Upsert(ctx context.Context, points []vectorstore.Point) error {
 		return vectorstore.ErrEmptyPoints
 	}
 
-	table, err := quoteQualifiedIdent(s.tableName)
+	table, err := sqlutil.QuoteQualifiedIdent(s.tableName)
 	if err != nil {
 		return ErrInvalidTableName
 	}
@@ -220,7 +220,7 @@ func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint6
 		return nil, &VectorSizeMismatchError{Expected: s.vectorSize, Got: len(query)}
 	}
 
-	table, err := quoteQualifiedIdent(s.tableName)
+	table, err := sqlutil.QuoteQualifiedIdent(s.tableName)
 	if err != nil {
 		return nil, ErrInvalidTableName
 	}
@@ -286,7 +286,7 @@ func (s *Store) Delete(ctx context.Context, ids []string) error {
 		return vectorstore.ErrEmptyIDs
 	}
 
-	table, err := quoteQualifiedIdent(s.tableName)
+	table, err := sqlutil.QuoteQualifiedIdent(s.tableName)
 	if err != nil {
 		return ErrInvalidTableName
 	}
@@ -306,7 +306,7 @@ func (s *Store) Delete(ctx context.Context, ids []string) error {
 
 // Clear deletes all points in the configured table.
 func (s *Store) Clear(ctx context.Context) error {
-	table, err := quoteQualifiedIdent(s.tableName)
+	table, err := sqlutil.QuoteQualifiedIdent(s.tableName)
 	if err != nil {
 		return ErrInvalidTableName
 	}
@@ -327,28 +327,6 @@ func distanceSQL(d Distance) (op, scoreExpr string, err error) {
 	default:
 		return "", "", fmt.Errorf("unknown distance: %d", d)
 	}
-}
-
-var safeIdent = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
-
-func quoteQualifiedIdent(name string) (string, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "", ErrInvalidTableName
-	}
-	parts := strings.Split(name, ".")
-	if len(parts) > 2 {
-		return "", ErrInvalidTableName
-	}
-
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if !safeIdent.MatchString(p) {
-			return "", ErrInvalidTableName
-		}
-		out = append(out, `"`+p+`"`)
-	}
-	return strings.Join(out, "."), nil
 }
 
 func vectorLiteral(vec []float32) (string, error) {
