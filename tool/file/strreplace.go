@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/henomis/phero/llm"
@@ -89,23 +88,18 @@ func (s *StrReplaceTool) replace(ctx context.Context, input *StrReplaceInput) (*
 	}
 
 	path := input.Path
-	if s.workingDir != "" && !filepath.IsAbs(path) {
-		path = filepath.Join(s.workingDir, path)
-	}
-	if s.workingDir != "" {
-		rel, relErr := filepath.Rel(filepath.Clean(s.workingDir), filepath.Clean(path))
-		if relErr != nil || strings.HasPrefix(rel, "..") {
-			return nil, errors.New("path is outside the working directory")
-		}
+	resolvedPath, err := resolveToolPath(s.workingDir, path)
+	if err != nil {
+		return nil, err
 	}
 
-	fileInfo, statErr := os.Stat(path)
+	fileInfo, statErr := os.Stat(resolvedPath)
 	if statErr != nil {
 		return nil, statErr
 	}
 	fileMode := fileInfo.Mode().Perm()
 
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(resolvedPath)
 	if err != nil {
 		return nil, err
 	}
@@ -113,15 +107,15 @@ func (s *StrReplaceTool) replace(ctx context.Context, input *StrReplaceInput) (*
 	count := countOccurrencesOverlapping(content, []byte(input.OldStr))
 	switch count {
 	case 0:
-		return nil, fmt.Errorf("old_str not found in %s", path)
+		return nil, fmt.Errorf("old_str not found in %s", resolvedPath)
 	case 1:
 		// ok
 	default:
-		return nil, fmt.Errorf("old_str found %d times in %s", count, path)
+		return nil, fmt.Errorf("old_str found %d times in %s", count, resolvedPath)
 	}
 
 	replaced := bytes.Replace(content, []byte(input.OldStr), []byte(input.NewStr), 1)
-	if err := os.WriteFile(path, replaced, fileMode); err != nil {
+	if err := os.WriteFile(resolvedPath, replaced, fileMode); err != nil {
 		return nil, err
 	}
 

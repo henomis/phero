@@ -15,11 +15,12 @@
 package file
 
 import (
-"context"
-"os"
-"path/filepath"
-"strings"
-"testing"
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
 )
 
 func TestCreateFile_Success(t *testing.T) {
@@ -106,5 +107,32 @@ func TestCreateFile_PathTraversal_AbsoluteEscape(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "outside") {
 		t.Fatalf("expected 'outside' in error, got: %v", err)
+	}
+}
+
+func TestCreateFile_PathTraversal_SymlinkEscape(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(dir, "escape")); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	tool, err := NewCreateFileTool(WithWorkingDirectory(dir))
+	if err != nil {
+		t.Fatalf("NewCreateFileTool: %v", err)
+	}
+
+	_, err = tool.write(context.Background(), &CreateFileInput{
+		Path:    filepath.Join("escape", "evil.txt"),
+		Content: "pwned",
+	})
+	if err == nil {
+		t.Fatal("expected error for symlink escape, got nil")
+	}
+	if !errors.Is(err, ErrPathOutsideWorkingDirectory) {
+		t.Fatalf("expected ErrPathOutsideWorkingDirectory, got: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(outside, "evil.txt")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected no file to be created outside workingDir, stat err: %v", statErr)
 	}
 }

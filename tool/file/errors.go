@@ -27,6 +27,10 @@ var ErrFileTooLarge = errors.New("file too large")
 // maximum size for base64 rendering.
 var ErrImageTooLarge = errors.New("image too large")
 
+// ErrPathOutsideWorkingDirectory is returned when a requested file path would
+// resolve outside the configured working directory.
+var ErrPathOutsideWorkingDirectory = errors.New("path is outside the working directory")
+
 // FileTooLargeError carries the file path, actual size, and configured limit.
 type FileTooLargeError struct {
 	Path  string

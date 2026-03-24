@@ -16,6 +16,7 @@ package file
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -181,5 +182,42 @@ func TestStrReplace_PathTraversal_AbsoluteEscape(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "outside") {
 		t.Fatalf("expected 'outside' in error, got: %v", err)
+	}
+}
+
+func TestStrReplace_PathTraversal_SymlinkEscape(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	if err := os.Symlink(outsideFile, filepath.Join(dir, "escape.txt")); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	tool, err := NewStrReplaceTool(WithWorkingDirectory(dir))
+	if err != nil {
+		t.Fatalf("NewStrReplaceTool: %v", err)
+	}
+
+	_, err = tool.replace(context.Background(), &StrReplaceInput{
+		Path:   "escape.txt",
+		OldStr: "secret",
+		NewStr: "pwned",
+	})
+	if err == nil {
+		t.Fatal("expected error for symlink escape, got nil")
+	}
+	if !errors.Is(err, ErrPathOutsideWorkingDirectory) {
+		t.Fatalf("expected ErrPathOutsideWorkingDirectory, got: %v", err)
+	}
+
+	content, readErr := os.ReadFile(outsideFile)
+	if readErr != nil {
+		t.Fatalf("read outside file: %v", readErr)
+	}
+	if string(content) != "secret" {
+		t.Fatalf("outside file was modified: %q", string(content))
 	}
 }

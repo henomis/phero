@@ -95,34 +95,29 @@ func (r *ViewTool) view(ctx context.Context, input *ViewInput) (*ViewOutput, err
 	}
 
 	path := input.Path
-	if r.workingDir != "" && !filepath.IsAbs(path) {
-		path = filepath.Join(r.workingDir, path)
-	}
-	if r.workingDir != "" {
-		rel, relErr := filepath.Rel(filepath.Clean(r.workingDir), filepath.Clean(path))
-		if relErr != nil || strings.HasPrefix(rel, "..") {
-			return nil, errors.New("path is outside the working directory")
-		}
+	resolvedPath, err := resolveToolPath(r.workingDir, path)
+	if err != nil {
+		return nil, err
 	}
 
-	info, err := os.Stat(path)
+	info, err := os.Stat(resolvedPath)
 	if err != nil {
 		return nil, err
 	}
 
 	if info.IsDir() {
-		content, err := formatDirectoryListing(path)
+		content, err := formatDirectoryListing(resolvedPath)
 		if err != nil {
 			return nil, err
 		}
 		return &ViewOutput{Content: content}, nil
 	}
 
-	if isSupportedImagePath(path) {
+	if isSupportedImagePath(resolvedPath) {
 		if r.maxFileSize > 0 && info.Size() > r.maxFileSize {
-			return nil, &ImageTooLargeError{Path: path, Size: info.Size(), Limit: r.maxFileSize}
+			return nil, &ImageTooLargeError{Path: resolvedPath, Size: info.Size(), Limit: r.maxFileSize}
 		}
-		content, err := formatImageMarkdownDataURI(path)
+		content, err := formatImageMarkdownDataURI(resolvedPath)
 		if err != nil {
 			return nil, err
 		}
@@ -130,10 +125,10 @@ func (r *ViewTool) view(ctx context.Context, input *ViewInput) (*ViewOutput, err
 	}
 
 	if r.maxFileSize > 0 && info.Size() > r.maxFileSize {
-		return nil, &FileTooLargeError{Path: path, Size: info.Size(), Limit: r.maxFileSize}
+		return nil, &FileTooLargeError{Path: resolvedPath, Size: info.Size(), Limit: r.maxFileSize}
 	}
 
-	contentBytes, err := os.ReadFile(path)
+	contentBytes, err := os.ReadFile(resolvedPath)
 	if err != nil {
 		return nil, err
 	}

@@ -16,7 +16,9 @@ package file
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -127,5 +129,30 @@ func TestFormatImageMarkdownDataURI_PNG(t *testing.T) {
 	}
 	if !bytes.Equal(decoded, original) {
 		t.Fatalf("decoded image bytes do not match original")
+	}
+}
+
+func TestView_PathTraversal_SymlinkEscape(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	if err := os.Symlink(outsideFile, filepath.Join(dir, "escape.txt")); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	tool, err := NewViewTool(WithWorkingDirectory(dir))
+	if err != nil {
+		t.Fatalf("NewViewTool: %v", err)
+	}
+
+	_, err = tool.view(context.TODO(), &ViewInput{Path: "escape.txt"})
+	if err == nil {
+		t.Fatal("expected error for symlink escape, got nil")
+	}
+	if !errors.Is(err, ErrPathOutsideWorkingDirectory) {
+		t.Fatalf("expected ErrPathOutsideWorkingDirectory, got: %v", err)
 	}
 }
