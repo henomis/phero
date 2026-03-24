@@ -256,7 +256,9 @@ func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint6
 
 		payload := map[string]any{}
 		if len(payloadBytes) > 0 {
-			_ = json.Unmarshal(payloadBytes, &payload)
+			if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+				return nil, &PayloadDecodeError{PointID: id, Cause: err}
+			}
 		}
 
 		out = append(out, vectorstore.ScoredPoint{ID: id, Score: float32(score64), Payload: payload})

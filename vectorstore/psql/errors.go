@@ -50,3 +50,16 @@ type InvalidVectorValueError struct {
 func (e *InvalidVectorValueError) Error() string {
 	return fmt.Sprintf("invalid vector value at index %d: %v", e.Index, e.Value)
 }
+
+// PayloadDecodeError is returned when a stored JSON payload cannot be
+// unmarshalled for a given point ID.
+type PayloadDecodeError struct {
+	PointID string
+	Cause   error
+}
+
+func (e *PayloadDecodeError) Error() string {
+	return fmt.Sprintf("decode payload for point %q: %v", e.PointID, e.Cause)
+}
+
+func (e *PayloadDecodeError) Unwrap() error { return e.Cause }
