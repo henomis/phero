@@ -156,3 +156,95 @@ func TestView_PathTraversal_SymlinkEscape(t *testing.T) {
 		t.Fatalf("expected ErrPathOutsideWorkingDirectory, got: %v", err)
 	}
 }
+
+func TestView_TextFile_ExceedsLimit(t *testing.T) {
+	dir := t.TempDir()
+	content := []byte("hello world")
+	filePath := filepath.Join(dir, "big.txt")
+	if err := os.WriteFile(filePath, content, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	tool, err := NewViewTool(WithWorkingDirectory(dir), WithMaxFileSize(5))
+	if err != nil {
+		t.Fatalf("NewViewTool: %v", err)
+	}
+
+	_, err = tool.view(context.TODO(), &ViewInput{Path: "big.txt"})
+	if err == nil {
+		t.Fatal("expected error for oversized text file, got nil")
+	}
+	if !errors.Is(err, ErrFileTooLarge) {
+		t.Fatalf("expected ErrFileTooLarge, got: %v", err)
+	}
+}
+
+func TestView_TextFile_AtLimit_Succeeds(t *testing.T) {
+	dir := t.TempDir()
+	content := []byte("hello")
+	filePath := filepath.Join(dir, "exact.txt")
+	if err := os.WriteFile(filePath, content, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	tool, err := NewViewTool(WithWorkingDirectory(dir), WithMaxFileSize(int64(len(content))))
+	if err != nil {
+		t.Fatalf("NewViewTool: %v", err)
+	}
+
+	_, err = tool.view(context.TODO(), &ViewInput{Path: "exact.txt"})
+	if err != nil {
+		t.Fatalf("expected no error for file at exact limit, got: %v", err)
+	}
+}
+
+func TestView_TextFile_NoLimit_LargeFile_Succeeds(t *testing.T) {
+	dir := t.TempDir()
+	content := make([]byte, 1<<20) // 1 MiB
+	filePath := filepath.Join(dir, "large.txt")
+	if err := os.WriteFile(filePath, content, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	// maxFileSize == 0 means no limit
+	tool, err := NewViewTool(WithWorkingDirectory(dir))
+	if err != nil {
+		t.Fatalf("NewViewTool: %v", err)
+	}
+
+	_, err = tool.view(context.TODO(), &ViewInput{Path: "large.txt"})
+	if err != nil {
+		t.Fatalf("expected no error when size limit is disabled, got: %v", err)
+	}
+}
+
+func TestView_Image_ExceedsLimit(t *testing.T) {
+	imgPath := filepath.Clean(filepath.Join("..", "..", "web", "images", "phero-logo.png"))
+	original, err := os.ReadFile(imgPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", imgPath, err)
+	}
+	if len(original) == 0 {
+		t.Fatalf("expected non-empty image at %s", imgPath)
+	}
+
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "phero-logo.png")
+	if err := os.WriteFile(dest, original, 0o644); err != nil {
+		t.Fatalf("write image: %v", err)
+	}
+
+	// Limit is 1 byte — guaranteed to be exceeded.
+	tool, err := NewViewTool(WithWorkingDirectory(dir), WithMaxFileSize(1))
+	if err != nil {
+		t.Fatalf("NewViewTool: %v", err)
+	}
+
+	_, err = tool.view(context.TODO(), &ViewInput{Path: "phero-logo.png"})
+	if err == nil {
+		t.Fatal("expected error for oversized image, got nil")
+	}
+	if !errors.Is(err, ErrImageTooLarge) {
+		t.Fatalf("expected ErrImageTooLarge, got: %v", err)
+	}
+}

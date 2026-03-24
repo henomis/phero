@@ -26,8 +26,6 @@ var (
 	ErrDescriptionRequired = errors.New("agent description is required")
 	// ErrNameRequired is returned when creating an agent with an empty name.
 	ErrNameRequired = errors.New("agent name is required")
-	// ErrToolNameRequired is returned when a tool operation receives an empty tool name.
-	ErrToolNameRequired = errors.New("tool name is required")
 	// ErrMaxIterationsReached is returned when the agent loop reaches the maximum number of iterations.
 	ErrMaxIterationsReached = errors.New("maximum iterations reached")
 	// ErrSessionSaveFailed is returned when the memory save after a successful run fails.

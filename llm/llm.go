@@ -234,6 +234,10 @@ func NewTool[T, R any](name, description string, handler func(ctx context.Contex
 // The handler receives the raw JSON argument string exactly as sent by the model,
 // without any intermediate unmarshaling.
 func NewRawTool(name, description string, inputSchema map[string]any, handler ToolHandler) (*Tool, error) {
+	if name == "" {
+		return nil, ErrToolNameRequired
+	}
+
 	// Deep-clone via JSON round-trip so the caller's map is never mutated.
 	schemaMap, err := jsonEncodeDecode[map[string]any](inputSchema)
 	if err != nil {
