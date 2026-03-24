@@ -17,6 +17,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/henomis/phero/llm"
@@ -111,15 +112,21 @@ func (a *Agent) SetMaxIterations(maxIterations int) {
 //
 // The agent calls the LLM, executes any requested tool calls, and repeats until
 // the model returns a message without tool calls.
-func (a *Agent) Run(ctx context.Context, input string) (*Result, error) {
+//
+// If the run succeeds but saving the session to memory fails, the result is
+// still returned together with the save error joined via errors.Join.
+func (a *Agent) Run(ctx context.Context, input string) (result *Result, err error) {
 	session, sessionIndex, err := a.prepareSession(ctx, input)
 	if err != nil {
 		return nil, err
 	}
 
-	// Ensure the session is saved at the end, even if an error occurs during processing.
+	// Save the session at the end. If the main run succeeded but the save
+	// fails, surface the save error rather than silently dropping it.
 	defer func() {
-		_ = a.saveSession(ctx, session, sessionIndex)
+		if saveErr := a.saveSession(ctx, session, sessionIndex); saveErr != nil {
+			err = errors.Join(err, fmt.Errorf("%w: %w", ErrSessionSaveFailed, saveErr))
+		}
 	}()
 
 	iteration := 0

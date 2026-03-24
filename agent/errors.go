@@ -30,6 +30,8 @@ var (
 	ErrToolNameRequired = errors.New("tool name is required")
 	// ErrMaxIterationsReached is returned when the agent loop reaches the maximum number of iterations.
 	ErrMaxIterationsReached = errors.New("maximum iterations reached")
+	// ErrSessionSaveFailed is returned when the memory save after a successful run fails.
+	ErrSessionSaveFailed = errors.New("session save failed")
 )
 
 // ToolAlreadyExistsError is returned when a tool with the same name is already registered.
