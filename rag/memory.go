@@ -60,8 +60,8 @@ func (m *Memory) Clear(ctx context.Context) error {
 
 // Retrieve searches for messages semantically similar to the given query string.
 // It embeds the query, performs a vector similarity search, and returns the matching
-// messages ordered by relevance. Returns an error if the query fails or if message
-// deserialization encounters issues (malformed messages are skipped).
+// messages ordered by relevance. Points with missing or empty "text" payloads are
+// skipped and do not appear in the result.
 func (m *Memory) Retrieve(ctx context.Context, query string) ([]llm.Message, error) {
 	return m.rag.retrieve(ctx, query)
 }
@@ -84,7 +84,9 @@ func (s *RAG) retrieve(ctx context.Context, query string) ([]llm.Message, error)
 	return []llm.Message{pointToContext(points)}, nil
 }
 
-// pointToContext converts a slice of ScoredPoint into a single llm.Message containing the concatenated text from the points' payloads.
+// pointToContext converts a slice of ScoredPoint into a single llm.Message
+// containing the concatenated text from the points' payloads.
+// Points whose payload does not contain a non-empty "text" string are skipped.
 func pointToContext(points []vectorstore.ScoredPoint) llm.Message {
 	message := llm.Message{
 		Role:    llm.ChatMessageRoleSystem,
@@ -92,7 +94,10 @@ func pointToContext(points []vectorstore.ScoredPoint) llm.Message {
 	}
 
 	for _, p := range points {
-		text, _ := p.Payload[contentKey].(string)
+		text, ok := p.Payload[contentKey].(string)
+		if !ok || strings.TrimSpace(text) == "" {
+			continue
+		}
 		message.Content += text + "\n"
 	}
 
