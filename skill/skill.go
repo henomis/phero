@@ -36,6 +36,10 @@ const (
 	defaultSkillsRootPath = "skills"
 	skillFileName         = "SKILL.md"
 	yamlFrontmatterDelim  = "---"
+	toolNameView          = "view"
+	toolNameCreateFile    = "create_file"
+	toolNameStrReplace    = "str_replace"
+	toolNameBash          = "bash"
 )
 
 // Parser discovers and parses skills under a root directory.
@@ -195,61 +199,83 @@ func (s *Skill) AsTool(client llm.LLM, opts ...Option) (*llm.Tool, error) {
 	return skillAsAgent.AsTool(s.Name, s.Description)
 }
 
+func (s *Skill) allowsTool(toolName string) bool {
+	if strings.TrimSpace(s.AllowedTools) == "" {
+		return true
+	}
+
+	for _, allowedTool := range strings.Fields(s.AllowedTools) {
+		if allowedTool == toolName {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (s *Skill) addDefaultTools(agent *agent.Agent) error {
-	viewTool, err := file.NewViewTool(file.WithWorkingDirectory(s.RootPath))
-	if err != nil {
-		return err
-	}
-	if err := agent.AddTool(viewTool.Tool()); err != nil {
-		return err
-	}
-
-	createTool, err := file.NewCreateFileTool(file.WithWorkingDirectory(s.RootPath))
-	if err != nil {
-		return err
-	}
-	createToolLLM := createTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
-		return func(ctx context.Context, arguments string) (any, error) {
-			var input *file.CreateFileInput
-			if err := json.Unmarshal([]byte(arguments), &input); err != nil {
-				return nil, &llm.ToolArgumentParseError{Err: err}
-			}
-			if err := createFileValidationFunc(ctx, input); err != nil {
-				return nil, err
-			}
-			return next(ctx, arguments)
+	if s.allowsTool(toolNameView) {
+		viewTool, err := file.NewViewTool(file.WithWorkingDirectory(s.RootPath))
+		if err != nil {
+			return err
 		}
-	})
-	if err := agent.AddTool(createToolLLM); err != nil {
-		return err
-	}
-
-	strReplaceTool, err := file.NewStrReplaceTool(file.WithWorkingDirectory(s.RootPath))
-	if err != nil {
-		return err
-	}
-	if err := agent.AddTool(strReplaceTool.Tool()); err != nil {
-		return err
-	}
-
-	bashTool, err := bash.New(bash.WithWorkingDirectory(s.RootPath))
-	if err != nil {
-		return err
-	}
-	bashToolLLM := bashTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
-		return func(ctx context.Context, arguments string) (any, error) {
-			var input *bash.Input
-			if err := json.Unmarshal([]byte(arguments), &input); err != nil {
-				return nil, &llm.ToolArgumentParseError{Err: err}
-			}
-			if err := bashValidationFunc(ctx, input); err != nil {
-				return nil, err
-			}
-			return next(ctx, arguments)
+		if err := agent.AddTool(viewTool.Tool()); err != nil {
+			return err
 		}
-	})
-	if err := agent.AddTool(bashToolLLM); err != nil {
-		return err
+	}
+
+	if s.allowsTool(toolNameCreateFile) {
+		createTool, err := file.NewCreateFileTool(file.WithWorkingDirectory(s.RootPath))
+		if err != nil {
+			return err
+		}
+		createToolLLM := createTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
+			return func(ctx context.Context, arguments string) (any, error) {
+				var input *file.CreateFileInput
+				if err := json.Unmarshal([]byte(arguments), &input); err != nil {
+					return nil, &llm.ToolArgumentParseError{Err: err}
+				}
+				if err := createFileValidationFunc(ctx, input); err != nil {
+					return nil, err
+				}
+				return next(ctx, arguments)
+			}
+		})
+		if err := agent.AddTool(createToolLLM); err != nil {
+			return err
+		}
+	}
+
+	if s.allowsTool(toolNameStrReplace) {
+		strReplaceTool, err := file.NewStrReplaceTool(file.WithWorkingDirectory(s.RootPath))
+		if err != nil {
+			return err
+		}
+		if err := agent.AddTool(strReplaceTool.Tool()); err != nil {
+			return err
+		}
+	}
+
+	if s.allowsTool(toolNameBash) {
+		bashTool, err := bash.New(bash.WithWorkingDirectory(s.RootPath))
+		if err != nil {
+			return err
+		}
+		bashToolLLM := bashTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
+			return func(ctx context.Context, arguments string) (any, error) {
+				var input *bash.Input
+				if err := json.Unmarshal([]byte(arguments), &input); err != nil {
+					return nil, &llm.ToolArgumentParseError{Err: err}
+				}
+				if err := bashValidationFunc(ctx, input); err != nil {
+					return nil, err
+				}
+				return next(ctx, arguments)
+			}
+		})
+		if err := agent.AddTool(bashToolLLM); err != nil {
+			return err
+		}
 	}
 
 	return nil
