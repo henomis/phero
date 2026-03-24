@@ -72,6 +72,9 @@ func ClampSummarySize(summarizeThreshold, summarySize uint) uint {
 	return summarySize
 }
 
+// FormatSummaryPrompt builds the summarization request message sent to the LLM
+// when a memory backend needs to condense its conversation history. The returned
+// message has the user role so that the model treats it as a regular user turn.
 func FormatSummaryPrompt(conversation []llm.Message) llm.Message {
 	var formatted string
 	for _, msg := range conversation {

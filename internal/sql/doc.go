@@ -12,6 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package sqlutil provides shared SQL identifier utilities used by the
+// Package sql provides shared SQL identifier utilities used by the
 // PostgreSQL-backed memory and vectorstore packages.
 package sql

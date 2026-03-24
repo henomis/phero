@@ -291,9 +291,6 @@ func (m *Memory) maybeSummarize(ctx context.Context) error {
 	if len(msgs) < int(m.summaryThreshold) {
 		return nil
 	}
-	if m.summarySize == 0 {
-		return nil
-	}
 	if len(msgs) <= int(m.summarySize) {
 		return nil
 	}
