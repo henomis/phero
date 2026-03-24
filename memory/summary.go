@@ -28,6 +28,36 @@ Analyze the dialogue below and generate a concise summary based on these four pi
 # CONVERSATION TO SUMMARIZE:
 %s`
 
+// SummarySystemMessagePrefix is the prefix prepended to the generated summary
+// when it is stored as a system message in memory.
+const SummarySystemMessagePrefix = "Summary of previous conversation:\n"
+
+// ClampSummarySize validates and normalises a (summarizeThreshold, summarySize)
+// pair for use by WithSummarization options across all memory backends.
+//
+// Rules applied in order:
+//  1. If summarySize is zero, derive it as summarizeThreshold/2 (minimum 1).
+//  2. If summarySize >= summarizeThreshold, cap it at summarizeThreshold-1
+//     (minimum 1) to prevent an infinite summarization loop.
+func ClampSummarySize(summarizeThreshold, summarySize uint) uint {
+	if summarySize == 0 && summarizeThreshold > 0 {
+		summarySize = summarizeThreshold / 2
+		if summarySize == 0 {
+			summarySize = 1
+		}
+	}
+
+	if summarySize >= summarizeThreshold && summarizeThreshold > 0 {
+		if summarizeThreshold > 1 {
+			summarySize = summarizeThreshold - 1
+		} else {
+			summarySize = 1
+		}
+	}
+
+	return summarySize
+}
+
 func FormatSummaryPrompt(conversation []llm.Message) llm.Message {
 	var formatted string
 	for _, msg := range conversation {

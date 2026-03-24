@@ -9,10 +9,6 @@ import (
 
 var _ memory.Memory = (*Memory)(nil)
 
-const (
-	summarySystemMessagePrefix = "Summary of previous conversation:\n"
-)
-
 // Option configures a Memory instance.
 type Option func(*Memory)
 
@@ -54,22 +50,8 @@ func WithSummarization(summaryLLM llm.LLM, summarizeThreshold, summarySize uint)
 		}
 
 		// if summarySize is zero, derive a default value from summarizeThreshold
-		if summarySize == 0 && summarizeThreshold > 0 {
-			summarySize = summarizeThreshold / 2
-			if summarySize == 0 {
-				summarySize = 1
-			}
-		}
-
-		// check that summarySize is less than summarizeThreshold to avoid infinite summarization loop
-		if summarySize >= summarizeThreshold && summarizeThreshold > 0 {
-			if summarizeThreshold > 1 {
-				summarySize = summarizeThreshold - 1
-			} else {
-				summarySize = 1
-			}
-		}
-		m.summarySize = summarySize
+		// To avoid an infinite summarization loop, summarySize must be less than summarizeThreshold.
+		m.summarySize = memory.ClampSummarySize(summarizeThreshold, summarySize)
 		m.summaryThreshold = summarizeThreshold
 	}
 }
@@ -99,7 +81,7 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 
 		messagesToStore := []llm.Message{{
 			Role:    llm.ChatMessageRoleSystem,
-			Content: summarySystemMessagePrefix + summaryMsg.Message.Content,
+			Content: memory.SummarySystemMessagePrefix + summaryMsg.Message.Content,
 		}}
 
 		messagesToStore = append(messagesToStore, toAppend...)

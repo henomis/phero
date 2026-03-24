@@ -18,8 +18,6 @@ var _ memory.Memory = (*Memory)(nil)
 const (
 	defaultTableName          = "conversation_memory"
 	defaultSummarizeThreshold = 50
-
-	summarySystemMessagePrefix = "Summary of previous conversation:\n"
 )
 
 // Option configures a Memory instance.
@@ -110,22 +108,7 @@ func WithSummarization(summaryLLM llm.LLM, summarizeThreshold, summarySize uint)
 			summarizeThreshold = defaultSummarizeThreshold
 		}
 
-		if summarySize == 0 && summarizeThreshold > 0 {
-			summarySize = summarizeThreshold / 2
-			if summarySize == 0 {
-				summarySize = 1
-			}
-		}
-
-		if summarySize >= summarizeThreshold && summarizeThreshold > 0 {
-			if summarizeThreshold > 1 {
-				summarySize = summarizeThreshold - 1
-			} else {
-				summarySize = 1
-			}
-		}
-
-		m.summarySize = summarySize
+		m.summarySize = memory.ClampSummarySize(summarizeThreshold, summarySize)
 		m.summaryThreshold = summarizeThreshold
 	}
 }
@@ -313,7 +296,7 @@ func (m *Memory) maybeSummarize(ctx context.Context) error {
 
 	messagesToStore := []llm.Message{{
 		Role:    llm.ChatMessageRoleSystem,
-		Content: summarySystemMessagePrefix + summaryMsg.Message.Content,
+		Content: memory.SummarySystemMessagePrefix + summaryMsg.Message.Content,
 	}}
 	messagesToStore = append(messagesToStore, toAppend...)
 
