@@ -78,6 +78,12 @@ func (s *StrReplaceTool) replace(ctx context.Context, input *StrReplaceInput) (*
 	if s.workingDir != "" && !filepath.IsAbs(path) {
 		path = filepath.Join(s.workingDir, path)
 	}
+	if s.workingDir != "" {
+		rel, relErr := filepath.Rel(filepath.Clean(s.workingDir), filepath.Clean(path))
+		if relErr != nil || strings.HasPrefix(rel, "..") {
+			return nil, errors.New("path is outside the working directory")
+		}
+	}
 
 	fileInfo, statErr := os.Stat(path)
 	if statErr != nil {

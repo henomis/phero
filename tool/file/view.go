@@ -80,6 +80,12 @@ func (r *ViewTool) view(ctx context.Context, input *ViewInput) (*ViewOutput, err
 	if r.workingDir != "" && !filepath.IsAbs(path) {
 		path = filepath.Join(r.workingDir, path)
 	}
+	if r.workingDir != "" {
+		rel, relErr := filepath.Rel(filepath.Clean(r.workingDir), filepath.Clean(path))
+		if relErr != nil || strings.HasPrefix(rel, "..") {
+			return nil, errors.New("path is outside the working directory")
+		}
+	}
 
 	info, err := os.Stat(path)
 	if err != nil {

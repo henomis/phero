@@ -128,3 +128,44 @@ func TestStrReplace_OverlappingMatches_CountsAsMultiple(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestStrReplace_PathTraversal_RelativeEscape(t *testing.T) {
+	dir := t.TempDir()
+	tool, err := NewStrReplaceTool(WithWorkingDirectory(dir))
+	if err != nil {
+		t.Fatalf("NewStrReplaceTool: %v", err)
+	}
+
+	_, err = tool.replace(context.Background(), &StrReplaceInput{
+		Path:   "../../etc/passwd",
+		OldStr: "root",
+		NewStr: "pwned",
+	})
+	if err == nil {
+		t.Fatal("expected error for traversal path, got nil")
+	}
+	if !strings.Contains(err.Error(), "outside") {
+		t.Fatalf("expected 'outside' in error, got: %v", err)
+	}
+}
+
+func TestStrReplace_PathTraversal_AbsoluteEscape(t *testing.T) {
+	dir := t.TempDir()
+	tool, err := NewStrReplaceTool(WithWorkingDirectory(dir))
+	if err != nil {
+		t.Fatalf("NewStrReplaceTool: %v", err)
+	}
+
+	// An absolute path outside workingDir must be rejected too.
+	_, err = tool.replace(context.Background(), &StrReplaceInput{
+		Path:   "/etc/passwd",
+		OldStr: "root",
+		NewStr: "pwned",
+	})
+	if err == nil {
+		t.Fatal("expected error for absolute path outside workingDir, got nil")
+	}
+	if !strings.Contains(err.Error(), "outside") {
+		t.Fatalf("expected 'outside' in error, got: %v", err)
+	}
+}

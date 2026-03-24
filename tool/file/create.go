@@ -88,6 +88,12 @@ func (w *CreateFileTool) write(ctx context.Context, input *CreateFileInput) (*Cr
 	if w.workingDir != "" && !filepath.IsAbs(path) {
 		path = filepath.Join(w.workingDir, path)
 	}
+	if w.workingDir != "" {
+		rel, relErr := filepath.Rel(filepath.Clean(w.workingDir), filepath.Clean(path))
+		if relErr != nil || strings.HasPrefix(rel, "..") {
+			return nil, errors.New("path is outside the working directory")
+		}
+	}
 
 	err := os.WriteFile(path, []byte(input.Content), 0o644)
 	if err != nil {
