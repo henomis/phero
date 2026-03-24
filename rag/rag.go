@@ -98,7 +98,7 @@ func (s *RAG) ensureCollection(ctx context.Context) error {
 	}
 
 	if err := s.store.EnsureCollection(ctx); err != nil {
-		return err
+		return &EnsureCollectionError{Cause: err}
 	}
 
 	s.ensureDone = true
