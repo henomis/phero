@@ -14,6 +14,7 @@
       <li><a href="index.html">Home</a></li>
       <li><a href="llm.html">LLM</a></li>
       <li><a href="agent.html">Agent</a></li>
+      <li><a href="trace.html">Trace</a></li>
       <li><a href="tool.html">Tool</a></li>
       <li><a href="mcp.html">MCP</a></li>
       <li><a href="embedding.html">Embedding</a></li>
@@ -144,6 +145,22 @@ timeTool.Use(func(tool *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
     </section>
 
     <section>
+      <h2>Tracing raw LLM calls</h2>
+      <p>
+        The <code>trace</code> package can wrap any <code>llm.LLM</code> with <code>trace.NewLLM</code>. This is useful when you want
+        observability around direct <code>Execute</code> calls without going through an agent.
+      </p>
+
+      <pre><code class="language-go">traced := trace.NewLLM(llmClient, trace.New(os.Stderr))
+
+result, err := traced.Execute(ctx, messages, tools)</code></pre>
+
+      <p>
+        When called inside an agent, request and response events are automatically annotated with the agent name and iteration number.
+      </p>
+    </section>
+
+    <section>
       <h2>Putting it together</h2>
       <p>
         The minimal loop is: create an LLM client, register one or more tools, then run an agent.
@@ -160,6 +177,7 @@ go run ./examples/conversational-agent</code></pre>
       <h2>Related packages</h2>
       <ul>
         <li><a href="agent.html">agent</a>: orchestration loop around <code>llm.LLM</code> + tools</li>
+        <li><a href="trace.html">trace</a>: observability wrapper for agents and standalone LLM calls</li>
         <li><a href="tool.html">tool</a>: prebuilt tools you can attach to agents/models</li>
         <li><a href="embedding.html">embedding</a>: vector embeddings for RAG and memory</li>
       </ul>

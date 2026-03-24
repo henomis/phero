@@ -14,6 +14,7 @@
       <li><a href="index.html">Home</a></li>
       <li><a href="llm.html">LLM</a></li>
       <li><a href="agent.html">Agent</a></li>
+      <li><a href="trace.html">Trace</a></li>
       <li><a href="tool.html">Tool</a></li>
       <li><a href="mcp.html">MCP</a></li>
       <li><a href="embedding.html">Embedding</a></li>
@@ -132,6 +133,27 @@ func main() {
     </section>
 
     <section>
+      <h2>Tracing</h2>
+      <p>
+        Agents support opt-in observability via <code>SetTracer</code>. When a tracer is attached, the agent emits typed events for
+        start and end, each loop iteration, tool calls and results, plus memory retrieval and persistence.
+      </p>
+
+      <pre><code class="language-go">import (
+    "os"
+
+    "github.com/henomis/phero/trace"
+)
+
+a.SetTracer(trace.New(os.Stderr))</code></pre>
+
+      <p>
+        The built-in text tracer is intended for local development and debugging. For raw LLM tracing outside the agent loop,
+        see <a href="trace.html">trace.NewLLM</a>.
+      </p>
+    </section>
+
+    <section>
       <h2>Memory</h2>
       <p>
         If you attach a <code>memory.Memory</code>, the agent will retrieve messages before each run and will save the
@@ -192,6 +214,7 @@ go run ./examples/conversational-agent</code></pre>
       <h2>Related packages</h2>
       <ul>
         <li><a href="llm.html">llm</a>: LLM interface + tools</li>
+        <li><a href="trace.html">trace</a>: tracing hooks for agent and LLM execution</li>
         <li><a href="memory.html">memory</a>: memory implementations used by agents</li>
         <li><a href="tool.html">tool</a>: prebuilt tools you can attach to an agent</li>
       </ul>
