@@ -33,7 +33,7 @@ type CreateFileTool struct {
 // path specifies the base directory for writing files.
 func NewCreateFileTool() (*CreateFileTool, error) {
 	name := "create_file"
-	description := "use this tool to create a file with specified content."
+	description := "use this tool to create or overwrite a file with the specified content."
 
 	createFileTool := &CreateFileTool{}
 
