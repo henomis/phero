@@ -125,7 +125,7 @@ func (s *RAG) Ingest(ctx context.Context, texts []string) error {
 		chunk := texts[start:end]
 		vectors, err := s.embedder.Embed(ctx, chunk)
 		if err != nil {
-			return err
+			return &IngestError{Op: "embed", BatchStart: start, BatchEnd: end, Cause: err}
 		}
 		if len(vectors) != len(chunk) {
 			return &EmbedderVectorCountMismatchError{Got: len(vectors), Want: len(chunk)}
@@ -144,7 +144,7 @@ func (s *RAG) Ingest(ctx context.Context, texts []string) error {
 		}
 
 		if err := s.store.Upsert(ctx, points); err != nil {
-			return err
+			return &IngestError{Op: "upsert", BatchStart: start, BatchEnd: end, Cause: err}
 		}
 	}
 
@@ -162,13 +162,17 @@ func (s *RAG) Query(ctx context.Context, queryText string) ([]vectorstore.Scored
 
 	vectors, err := s.embedder.Embed(ctx, []string{queryText})
 	if err != nil {
-		return nil, err
+		return nil, &QueryError{Op: "embed", Cause: err}
 	}
 	if len(vectors) != 1 {
 		return nil, &EmbedderVectorCountMismatchError{Got: len(vectors), Want: 1, SingleQuery: true}
 	}
 
-	return s.store.Query(ctx, vectors[0], s.topk)
+	results, err := s.store.Query(ctx, vectors[0], s.topk)
+	if err != nil {
+		return nil, &QueryError{Op: "store query", Cause: err}
+	}
+	return results, nil
 }
 
 // AsTool exposes this RAG instance as an llm.FunctionTool.
