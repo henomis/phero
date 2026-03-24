@@ -114,7 +114,13 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*l
 		return nil, err
 	}
 
-	return &llm.Result{Message: msg}, nil
+	return &llm.Result{
+		Message: msg,
+		Usage: &llm.Usage{
+			InputTokens:  int(res.Usage.InputTokens),
+			OutputTokens: int(res.Usage.OutputTokens),
+		},
+	}, nil
 }
 
 func openAIMessagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam, []anthropicapi.MessageParam, error) {

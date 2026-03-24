@@ -47,9 +47,20 @@ const ChatMessageRoleAssistant = openai.ChatMessageRoleAssistant
 // ChatMessageRoleTool is the role for tool-result messages.
 const ChatMessageRoleTool = openai.ChatMessageRoleTool
 
+// Usage holds token consumption figures from a single LLM call.
+type Usage struct {
+	// InputTokens is the number of tokens in the prompt sent to the model.
+	InputTokens int
+	// OutputTokens is the number of tokens produced by the model.
+	OutputTokens int
+}
+
 // Result represents the output of an LLM execution, including the assistant message and any tool calls.
 type Result struct {
 	Message *Message
+	// Usage holds token counts for this call. May be nil when the provider does
+	// not return usage information.
+	Usage *Usage
 }
 
 // LLM is the minimal interface implemented by chat-model backends.

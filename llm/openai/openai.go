@@ -85,7 +85,13 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*l
 		return nil, ErrEmptyResponse
 	}
 
-	return &llm.Result{Message: &response.Choices[0].Message}, nil
+	return &llm.Result{
+		Message: &response.Choices[0].Message,
+		Usage: &llm.Usage{
+			InputTokens:  response.Usage.PromptTokens,
+			OutputTokens: response.Usage.CompletionTokens,
+		},
+	}, nil
 }
 
 func (c *Client) openaiTools(tools []*llm.Tool) []openai.Tool {
