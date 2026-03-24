@@ -22,7 +22,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/henomis/phero/internal/sqlutil"
+	sqlutil "github.com/henomis/phero/internal/sql"
 	"github.com/henomis/phero/llm"
 	"github.com/henomis/phero/memory"
 )

@@ -14,4 +14,4 @@
 
 // Package sqlutil provides shared SQL identifier utilities used by the
 // PostgreSQL-backed memory and vectorstore packages.
-package sqlutil
+package sql
