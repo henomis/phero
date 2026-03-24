@@ -46,8 +46,8 @@ type RAG struct {
 	topk              uint64
 	embedderBatchSize int
 
-	ensureOnce    sync.Once
-	ensureOnceErr error
+	ensureMu   sync.Mutex
+	ensureDone bool
 }
 
 // New constructs a glue component that embeds texts and persists
@@ -88,16 +88,21 @@ func WithBatchSize(batchSize int) Option {
 
 // ensureCollection calls EnsureCollection on the backing store exactly once
 // per RAG instance. A successful call is permanently cached; a failed call
-// resets the once so the next caller will retry.
+// is not cached so the next caller will retry.
 func (s *RAG) ensureCollection(ctx context.Context) error {
-	s.ensureOnce.Do(func() {
-		s.ensureOnceErr = s.store.EnsureCollection(ctx)
-		if s.ensureOnceErr != nil {
-			// Reset so the next call retries after a transient failure.
-			s.ensureOnce = sync.Once{}
-		}
-	})
-	return s.ensureOnceErr
+	s.ensureMu.Lock()
+	defer s.ensureMu.Unlock()
+
+	if s.ensureDone {
+		return nil
+	}
+
+	if err := s.store.EnsureCollection(ctx); err != nil {
+		return err
+	}
+
+	s.ensureDone = true
+	return nil
 }
 
 // Ingest embeds the provided texts and upserts them into the underlying Store.

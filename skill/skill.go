@@ -231,9 +231,9 @@ func (s *Skill) addDefaultTools(agent *agent.Agent) error {
 		}
 		createToolLLM := createTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
 			return func(ctx context.Context, arguments string) (any, error) {
-				var input *file.CreateFileInput
-				if err := json.Unmarshal([]byte(arguments), &input); err != nil {
-					return nil, &llm.ToolArgumentParseError{Err: err}
+				input, err := decodeToolInput[file.CreateFileInput](arguments)
+				if err != nil {
+					return nil, err
 				}
 				if err := createFileValidationFunc(ctx, input); err != nil {
 					return nil, err
@@ -263,9 +263,9 @@ func (s *Skill) addDefaultTools(agent *agent.Agent) error {
 		}
 		bashToolLLM := bashTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
 			return func(ctx context.Context, arguments string) (any, error) {
-				var input *bash.Input
-				if err := json.Unmarshal([]byte(arguments), &input); err != nil {
-					return nil, &llm.ToolArgumentParseError{Err: err}
+				input, err := decodeToolInput[bash.Input](arguments)
+				if err != nil {
+					return nil, err
 				}
 				if err := bashValidationFunc(ctx, input); err != nil {
 					return nil, err
@@ -279,6 +279,18 @@ func (s *Skill) addDefaultTools(agent *agent.Agent) error {
 	}
 
 	return nil
+}
+
+func decodeToolInput[T any](arguments string) (*T, error) {
+	var input *T
+	if err := json.Unmarshal([]byte(arguments), &input); err != nil {
+		return nil, &llm.ToolArgumentParseError{Err: err}
+	}
+	if input == nil {
+		return nil, &llm.ToolArgumentParseError{Err: fmt.Errorf("tool arguments must be a JSON object")}
+	}
+
+	return input, nil
 }
 
 func createFileValidationFunc(_ context.Context, input *file.CreateFileInput) error {
