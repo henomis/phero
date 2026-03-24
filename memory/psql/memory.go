@@ -33,10 +33,13 @@ type Memory struct {
 	db        *sql.DB
 	sessionID string
 
-	tableName     string
-	ensureSchema  bool
-	ensureOnce    sync.Once
-	ensureOnceErr error
+	tableName    string
+	ensureSchema bool
+
+	// schemaMu guards schemaDone so that a transient failure during EnsureSchema
+	// does not permanently prevent future attempts (unlike sync.Once).
+	schemaMu   sync.Mutex
+	schemaDone bool
 
 	llm              llm.LLM
 	summaryThreshold uint
@@ -134,33 +137,33 @@ func (m *Memory) needSummarization() bool {
 // EnsureSchema creates the backing table and index if they do not exist.
 //
 // This is called automatically by Save/Retrieve/Clear when WithEnsureSchema(true)
-// is enabled.
+// is enabled. Unlike a sync.Once-based guard, a failed attempt can be retried on
+// the next call, which allows recovery from transient database outages.
 func (m *Memory) EnsureSchema(ctx context.Context) error {
-	m.ensureOnce.Do(func() {
-		if !m.ensureSchema {
-			return
-		}
+	m.schemaMu.Lock()
+	defer m.schemaMu.Unlock()
 
-		table, err := quoteQualifiedIdent(m.tableName)
-		if err != nil {
-			m.ensureOnceErr = ErrInvalidTableName
-			return
-		}
+	if m.schemaDone || !m.ensureSchema {
+		return nil
+	}
 
-		if _, err := m.db.ExecContext(ctx, fmt.Sprintf(createTableSQLTemplate, table)); err != nil {
-			m.ensureOnceErr = err
-			return
-		}
-		// index name uses the table name string; quoted identifiers aren't accepted
-		// for index names. Use a deterministic safe name.
-		idxName := safeIndexName(m.tableName) + "_session_seq_idx"
-		if _, err := m.db.ExecContext(ctx, fmt.Sprintf(createIndexSQLTemplate, idxName, table)); err != nil {
-			m.ensureOnceErr = err
-			return
-		}
-	})
+	table, err := quoteQualifiedIdent(m.tableName)
+	if err != nil {
+		return ErrInvalidTableName
+	}
 
-	return m.ensureOnceErr
+	if _, err := m.db.ExecContext(ctx, fmt.Sprintf(createTableSQLTemplate, table)); err != nil {
+		return err
+	}
+	// index name uses the table name string; quoted identifiers aren't accepted
+	// for index names. Use a deterministic safe name.
+	idxName := safeIndexName(m.tableName) + "_session_seq_idx"
+	if _, err := m.db.ExecContext(ctx, fmt.Sprintf(createIndexSQLTemplate, idxName, table)); err != nil {
+		return err
+	}
+
+	m.schemaDone = true
+	return nil
 }
 
 // Save appends messages to the session history.
