@@ -107,8 +107,8 @@ func (h *Tool) ask(ctx context.Context, input *Input) (*Output, error) {
 		return nil, ErrNilInput
 	}
 
-	fmt.Fprintf(h.writer, "\n🤔 Human Input Required:\n%s\n\n", input.Question)
-	fmt.Fprint(h.writer, "Your response: ")
+	_, _ = fmt.Fprintf(h.writer, "\n🤔 Human Input Required:\n%s\n\n", input.Question)
+	_, _ = fmt.Fprint(h.writer, "Your response: ")
 
 	response, err := h.reader.ReadString('\n')
 	if err != nil {
