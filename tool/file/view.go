@@ -14,11 +14,16 @@ import (
 	"github.com/henomis/phero/llm"
 )
 
+type ViewRange struct {
+	Start int `json:"start" jsonschema:"description=The starting line number (inclusive) for viewing a text file. Line numbers are 0-based."`
+	End   int `json:"end" jsonschema:"description=The ending line number (exclusive) for viewing a text file. Line numbers are 0-based. Specify -1 to indicate the end of the file."`
+}
+
 // ViewInput represents the input for the ReadTool, containing the path of the file to read.
 type ViewInput struct {
-	Description string `json:"description" jsonschema:"description=Why you're viewing this file."`
-	Path        string `json:"path" jsonschema:"description=The path of the file or directory to view."`
-	ViewRange   [2]int `json:"view_range,omitempty" jsonschema:"description=Optional range of lines to view when reading text files. Specify as [start, end], where start is the starting line number (inclusive) and end is the ending line number (exclusive), -1 for the end. Line numbers are 1-based. If not provided, the entire file will be read."`
+	Description string     `json:"description" jsonschema:"description=Why you're viewing this file."`
+	Path        string     `json:"path" jsonschema:"description=The path of the file or directory to view."`
+	ViewRange   *ViewRange `json:"view_range,omitempty" jsonschema:"description=Optional range of lines to view when reading text files. start is inclusive, end is exclusive, -1 for the end. Line numbers are 0-based. If not provided, the entire file will be read."`
 }
 
 // ViewOutput represents the output from running the ReadTool, containing the content of the file.
@@ -104,24 +109,23 @@ func (r *ViewTool) view(ctx context.Context, input *ViewInput) (*ViewOutput, err
 }
 
 type normalizedRange struct {
-	start int // 1-based inclusive
-	end   int // 1-based exclusive; -1 means end of file
+	start int // 0-based inclusive
+	end   int // 0-based exclusive; -1 means end of file
 }
 
-func normalizeViewRange(rng [2]int) (*normalizedRange, error) {
-	// If omitted in JSON, arrays decode to zero values.
-	if rng[0] == 0 && rng[1] == 0 {
+func normalizeViewRange(rng *ViewRange) (*normalizedRange, error) {
+	if rng == nil || (rng.Start == 0 && rng.End == 0) {
 		return nil, nil
 	}
 
-	start := rng[0]
-	end := rng[1]
+	start := rng.Start
+	end := rng.End
 
-	if start < 1 {
-		return nil, fmt.Errorf("view_range start must be >= 1 (got %d)", start)
+	if start < 0 {
+		return nil, fmt.Errorf("view_range start must be >= 0 (got %d)", start)
 	}
-	if end != -1 && end < 1 {
-		return nil, fmt.Errorf("view_range end must be -1 or >= 1 (got %d)", end)
+	if end != -1 && end < 0 {
+		return nil, fmt.Errorf("view_range end must be -1 or >= 0 (got %d)", end)
 	}
 	if end != -1 && end < start {
 		return nil, fmt.Errorf("view_range end must be -1 or >= start (got start=%d end=%d)", start, end)
@@ -258,34 +262,30 @@ func formatTextWithLineNumbers(content []byte, rng *normalizedRange) string {
 	decoded := bytesToUTF8WithHexEscapes(content)
 	lines := strings.Split(decoded, "\n")
 
-	start := 1
-	end := len(lines) + 1 // 1-based exclusive
+	start := 0
+	end := len(lines) // 0-based exclusive
 	if rng != nil {
 		start = rng.start
 		if rng.end == -1 {
-			end = len(lines) + 1
+			end = len(lines)
 		} else {
 			end = rng.end
 		}
 	}
 
-	if start > len(lines)+1 {
+	if start >= len(lines) {
 		return ""
 	}
-	if end > len(lines)+1 {
-		end = len(lines) + 1
+	if end > len(lines) {
+		end = len(lines)
 	}
 	if end < start {
 		return ""
 	}
 
 	var b strings.Builder
-	for lineNum := start; lineNum < end; lineNum++ {
-		idx := lineNum - 1
-		if idx < 0 || idx >= len(lines) {
-			break
-		}
-		fmt.Fprintf(&b, "%d\t%s\n", lineNum, lines[idx])
+	for i := start; i < end; i++ {
+		fmt.Fprintf(&b, "%d\t%s\n", i, lines[i])
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

@@ -10,7 +10,7 @@ import (
 )
 
 func TestNormalizeViewRange_Omitted(t *testing.T) {
-	rng, err := normalizeViewRange([2]int{0, 0})
+	rng, err := normalizeViewRange(&ViewRange{0, 0})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -20,9 +20,9 @@ func TestNormalizeViewRange_Omitted(t *testing.T) {
 }
 
 func TestFormatTextWithLineNumbers_ViewRange(t *testing.T) {
-	rng := &normalizedRange{start: 2, end: 4}
+	rng := &normalizedRange{start: 1, end: 3}
 	out := formatTextWithLineNumbers([]byte("a\nb\nc"), rng)
-	expected := "2\tb\n3\tc"
+	expected := "1\tb\n2\tc"
 	if out != expected {
 		t.Fatalf("unexpected output\nexpected: %q\n     got: %q", expected, out)
 	}
