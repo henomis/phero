@@ -17,6 +17,7 @@ package rag
 import (
 	"context"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 
@@ -44,6 +45,9 @@ type RAG struct {
 
 	topk              uint64
 	embedderBatchSize int
+
+	ensureOnce    sync.Once
+	ensureOnceErr error
 }
 
 // New constructs a glue component that embeds texts and persists
@@ -82,6 +86,20 @@ func WithBatchSize(batchSize int) Option {
 	}
 }
 
+// ensureCollection calls EnsureCollection on the backing store exactly once
+// per RAG instance. A successful call is permanently cached; a failed call
+// resets the once so the next caller will retry.
+func (s *RAG) ensureCollection(ctx context.Context) error {
+	s.ensureOnce.Do(func() {
+		s.ensureOnceErr = s.store.EnsureCollection(ctx)
+		if s.ensureOnceErr != nil {
+			// Reset so the next call retries after a transient failure.
+			s.ensureOnce = sync.Once{}
+		}
+	})
+	return s.ensureOnceErr
+}
+
 // Ingest embeds the provided texts and upserts them into the underlying Store.
 //
 // Each text is stored in the point payload under the "text" key.
@@ -89,7 +107,7 @@ func (s *RAG) Ingest(ctx context.Context, texts []string) error {
 	if len(texts) == 0 {
 		return ErrEmptyTexts
 	}
-	if err := s.store.EnsureCollection(ctx); err != nil {
+	if err := s.ensureCollection(ctx); err != nil {
 		return err
 	}
 
@@ -138,7 +156,7 @@ func (s *RAG) Query(ctx context.Context, queryText string) ([]vectorstore.Scored
 	if strings.TrimSpace(queryText) == "" {
 		return nil, ErrEmptyQueryText
 	}
-	if err := s.store.EnsureCollection(ctx); err != nil {
+	if err := s.ensureCollection(ctx); err != nil {
 		return nil, err
 	}
 
