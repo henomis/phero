@@ -4,10 +4,27 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/henomis/phero/llm"
 )
+
+// toolOptions holds shared configuration for file tools in this package.
+type toolOptions struct {
+	workingDir string
+}
+
+// Option is a configuration function for file tools.
+type Option func(*toolOptions)
+
+// WithWorkingDirectory sets the working directory used to resolve relative paths.
+// When an input path is not absolute it is joined with this directory.
+func WithWorkingDirectory(dir string) Option {
+	return func(o *toolOptions) {
+		o.workingDir = dir
+	}
+}
 
 // CreateFileInput represents the input for the CreateFileTool, containing the path of the file to create and the content to write.
 type CreateFileInput struct {
@@ -23,19 +40,21 @@ type CreateFileOutput struct {
 
 // CreateFileTool is a tool that allows writing content to a file.
 type CreateFileTool struct {
-	tool *llm.Tool
+	tool       *llm.Tool
+	workingDir string
 }
 
 // NewCreateFileTool creates a new instance of CreateFileTool.
-//
-// If skipPermission is true, the tool will run without asking for user confirmation.
-// Otherwise, it will prompt the user for permission before executing the command.
-// path specifies the base directory for writing files.
-func NewCreateFileTool() (*CreateFileTool, error) {
+func NewCreateFileTool(opts ...Option) (*CreateFileTool, error) {
 	name := "create_file"
 	description := "use this tool to create or overwrite a file with the specified content."
 
-	createFileTool := &CreateFileTool{}
+	o := &toolOptions{}
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	createFileTool := &CreateFileTool{workingDir: o.workingDir}
 
 	tool, err := llm.NewTool(
 		name,
@@ -64,7 +83,13 @@ func (w *CreateFileTool) write(ctx context.Context, input *CreateFileInput) (*Cr
 	if strings.TrimSpace(input.Path) == "" {
 		return nil, errors.New("path is required")
 	}
-	err := os.WriteFile(input.Path, []byte(input.Content), 0o644)
+
+	path := input.Path
+	if w.workingDir != "" && !filepath.IsAbs(path) {
+		path = filepath.Join(w.workingDir, path)
+	}
+
+	err := os.WriteFile(path, []byte(input.Content), 0o644)
 	if err != nil {
 		return nil, err
 	}

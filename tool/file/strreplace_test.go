@@ -29,7 +29,7 @@ func TestStrReplace_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("replace: %v", err)
 	}
-	if out == nil || out.Result != "ok" {
+	if out == nil || out.Replaced != true {
 		t.Fatalf("unexpected result: %+v", out)
 	}
 

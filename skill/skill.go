@@ -48,7 +48,7 @@ type Parser struct {
 // Fields correspond to YAML frontmatter keys. Body contains the remaining
 // content after the frontmatter.
 type Skill struct {
-	BasePath      string         `yaml:"-"`
+	RootPath      string         `yaml:"-"`
 	Name          string         `yaml:"name"`
 	Description   string         `yaml:"description"`
 	License       string         `yaml:"license,omitempty"`
@@ -112,7 +112,7 @@ func (p *Parser) Parse(skillName string) (*Skill, error) {
 	if err != nil {
 		return nil, err
 	}
-	skill.BasePath = absPath
+	skill.RootPath = absPath
 
 	return skill, nil
 }
@@ -196,7 +196,7 @@ func (s *Skill) AsTool(client llm.LLM, opts ...Option) (*llm.Tool, error) {
 }
 
 func (s *Skill) addDefaultTools(agent *agent.Agent) error {
-	viewTool, err := file.NewViewTool()
+	viewTool, err := file.NewViewTool(file.WithWorkingDirectory(s.RootPath))
 	if err != nil {
 		return err
 	}
@@ -204,7 +204,7 @@ func (s *Skill) addDefaultTools(agent *agent.Agent) error {
 		return err
 	}
 
-	createTool, err := file.NewCreateFileTool()
+	createTool, err := file.NewCreateFileTool(file.WithWorkingDirectory(s.RootPath))
 	if err != nil {
 		return err
 	}
@@ -224,7 +224,7 @@ func (s *Skill) addDefaultTools(agent *agent.Agent) error {
 		return err
 	}
 
-	strReplaceTool, err := file.NewStrReplaceTool()
+	strReplaceTool, err := file.NewStrReplaceTool(file.WithWorkingDirectory(s.RootPath))
 	if err != nil {
 		return err
 	}
@@ -232,7 +232,7 @@ func (s *Skill) addDefaultTools(agent *agent.Agent) error {
 		return err
 	}
 
-	bashTool, err := bash.New()
+	bashTool, err := bash.New(bash.WithWorkingDirectory(s.RootPath))
 	if err != nil {
 		return err
 	}

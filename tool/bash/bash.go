@@ -27,15 +27,23 @@ type Output struct {
 
 // Tool is a tool that runs bash commands.
 type Tool struct {
-	tool *llm.Tool
+	tool       *llm.Tool
+	workingDir string
 }
 
+// Option represents a configuration option for the bash_tool.
+type Option func(*Tool)
+
 // New creates a new instance of the bash_tool.
-func New() (*Tool, error) {
+func New(options ...Option) (*Tool, error) {
 	name := "bash"
 	description := "Use this tool to run bash commands"
 
 	bashTool := &Tool{}
+
+	for _, option := range options {
+		option(bashTool)
+	}
 
 	tool, err := llm.NewTool(
 		name,
@@ -55,6 +63,12 @@ func (t *Tool) Tool() *llm.Tool {
 	return t.tool
 }
 
+func WithWorkingDirectory(dir string) Option {
+	return func(t *Tool) {
+		t.workingDir = dir
+	}
+}
+
 func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 	if input == nil {
 		return nil, errors.New("nil input")
@@ -64,6 +78,10 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 	}
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", input.Command)
+	if t.workingDir != "" {
+		cmd.Dir = t.workingDir
+	}
+
 	combined, err := cmd.CombinedOutput()
 	out := string(combined)
 

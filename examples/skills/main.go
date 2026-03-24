@@ -29,7 +29,7 @@ func main() {
 	llmClient, llmInfo := buildLLMFromEnv()
 	ctx := context.Background()
 
-	skillMemory, _ := memory.New("skill_memory.json")
+	history, _ := memory.New("memory.json")
 
 	skillParser := skill.New("./skills")
 	list, err := skillParser.List()
@@ -44,7 +44,7 @@ func main() {
 			panic(err)
 		}
 
-		skillAsTool, err := skillItem.AsTool(llmClient, skill.WithMemory(skillMemory))
+		skillAsTool, err := skillItem.AsTool(llmClient, skill.WithMemory(history))
 		if err != nil {
 			panic(err)
 		}
@@ -79,10 +79,16 @@ func main() {
 		}
 	}
 
-	history, _ := memory.New("memory.json")
 	a.SetMemory(history)
 
-	res, err := a.Run(ctx, "get a random quote and check whether the quote.html file exists. If the quote.html file doesn't exist, create it and write the quote inside. Quote must be inserted into <div id=\"quote\"></div> in the html file. If the file already exists, just overwrite the content inside the <div id=\"quote\"></div> tags.")
+	res, err := a.Run(ctx, `Your task:
+1. Check if the file "/tmp/quote.html" exists.
+2. If the file does not exist, create a valid HTML file at "/tmp/quote.html" with a <div id="quote"></div> element, and insert a random quote inside this div.
+3. If the file already exists, update only the content inside the <div id="quote"></div> tags with a new random quote. Do not modify any other part of the file.
+4. Ensure the quote is properly escaped for HTML.
+
+Respond only with a summary of the action taken and the quote used. Do not include any code or file content in your response.
+`)
 	if err != nil {
 		panic(err)
 	}

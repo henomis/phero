@@ -23,7 +23,7 @@ type ViewRange struct {
 type ViewInput struct {
 	Description string     `json:"description" jsonschema:"description=Why you're viewing this file."`
 	Path        string     `json:"path" jsonschema:"description=The path of the file or directory to view."`
-	ViewRange   *ViewRange `json:"view_range,omitempty" jsonschema:"description=Optional range of lines to view when reading text files. start is inclusive, end is exclusive, -1 for the end. Line numbers are 0-based. If not provided, the entire file will be read."`
+	ViewRange   *ViewRange `json:"view_range,omitempty" jsonschema:"description=Optional range of lines to view when reading text files. If not provided, the entire file will be read. Try to read at least 200 lines."`
 }
 
 // ViewOutput represents the output from running the ReadTool, containing the content of the file.
@@ -33,19 +33,21 @@ type ViewOutput struct {
 
 // ViewTool is a tool that allows reading the content of a file.
 type ViewTool struct {
-	tool *llm.Tool
+	tool       *llm.Tool
+	workingDir string
 }
 
 // NewViewTool creates a new instance of ViewTool.
-//
-// If skipPermission is true, the tool will run without asking for user confirmation.
-// Otherwise, it will prompt the user for permission before executing the command.
-// path specifies the base directory for reading files.
-func NewViewTool() (*ViewTool, error) {
+func NewViewTool(opts ...Option) (*ViewTool, error) {
 	name := "view"
 	description := "Supported path types: Directories (lists files and directories up to 2 levels deep, ignoring hidden items and node_modules), Image files (.jpg, .jpeg, .png, .gif, .webp) (displays the image visually), Text files (displays numbered lines). You can optionally specify a view_range to see specific lines. Note: Files with non-UTF-8 encoding will display hex escapes for invalid bytes."
 
-	viewTool := &ViewTool{}
+	o := &toolOptions{}
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	viewTool := &ViewTool{workingDir: o.workingDir}
 
 	tool, err := llm.NewTool(
 		name,
@@ -74,28 +76,33 @@ func (r *ViewTool) view(ctx context.Context, input *ViewInput) (*ViewOutput, err
 		return nil, errors.New("path is required")
 	}
 
-	info, err := os.Stat(input.Path)
+	path := input.Path
+	if r.workingDir != "" && !filepath.IsAbs(path) {
+		path = filepath.Join(r.workingDir, path)
+	}
+
+	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
 	}
 
 	if info.IsDir() {
-		content, err := formatDirectoryListing(input.Path)
+		content, err := formatDirectoryListing(path)
 		if err != nil {
 			return nil, err
 		}
 		return &ViewOutput{Content: content}, nil
 	}
 
-	if isSupportedImagePath(input.Path) {
-		content, err := formatImageMarkdownDataURI(input.Path)
+	if isSupportedImagePath(path) {
+		content, err := formatImageMarkdownDataURI(path)
 		if err != nil {
 			return nil, err
 		}
 		return &ViewOutput{Content: content}, nil
 	}
 
-	contentBytes, err := os.ReadFile(input.Path)
+	contentBytes, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}

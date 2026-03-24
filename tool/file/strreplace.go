@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/henomis/phero/llm"
@@ -26,19 +27,25 @@ type StrReplaceInput struct {
 
 // StrReplaceOutput represents the output from running the StrReplaceTool.
 type StrReplaceOutput struct {
-	Result string `json:"result"`
+	Replaced bool `json:"replaced"`
 }
 
 // StrReplaceTool is a tool that allows replacing a unique string in a file.
 type StrReplaceTool struct {
-	tool *llm.Tool
+	tool       *llm.Tool
+	workingDir string
 }
 
-func NewStrReplaceTool() (*StrReplaceTool, error) {
+func NewStrReplaceTool(opts ...Option) (*StrReplaceTool, error) {
 	name := "str_replace"
 	description := "Replace a unique string in a file with another string. old_str must match the raw file content exactly and appear exactly once. When copying from view output, do NOT include the line number prefix (spaces + line number + tab) — it is display-only. View the file immediately before editing; after any successful str_replace, earlier view output of that file in your context is stale — re-view before further edits to the same file."
 
-	strReplaceTool := &StrReplaceTool{}
+	o := &toolOptions{}
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	strReplaceTool := &StrReplaceTool{workingDir: o.workingDir}
 
 	tool, err := llm.NewTool(
 		name,
@@ -67,13 +74,18 @@ func (s *StrReplaceTool) replace(ctx context.Context, input *StrReplaceInput) (*
 		return nil, errors.New("old_str is required")
 	}
 
-	fileInfo, statErr := os.Stat(input.Path)
+	path := input.Path
+	if s.workingDir != "" && !filepath.IsAbs(path) {
+		path = filepath.Join(s.workingDir, path)
+	}
+
+	fileInfo, statErr := os.Stat(path)
 	if statErr != nil {
 		return nil, statErr
 	}
 	fileMode := fileInfo.Mode().Perm()
 
-	content, err := os.ReadFile(input.Path)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -81,19 +93,19 @@ func (s *StrReplaceTool) replace(ctx context.Context, input *StrReplaceInput) (*
 	count := countOccurrencesOverlapping(content, []byte(input.OldStr))
 	switch count {
 	case 0:
-		return nil, fmt.Errorf("old_str not found in %s", input.Path)
+		return nil, fmt.Errorf("old_str not found in %s", path)
 	case 1:
 		// ok
 	default:
-		return nil, fmt.Errorf("old_str found %d times in %s", count, input.Path)
+		return nil, fmt.Errorf("old_str found %d times in %s", count, path)
 	}
 
 	replaced := bytes.Replace(content, []byte(input.OldStr), []byte(input.NewStr), 1)
-	if err := os.WriteFile(input.Path, replaced, fileMode); err != nil {
+	if err := os.WriteFile(path, replaced, fileMode); err != nil {
 		return nil, err
 	}
 
-	return &StrReplaceOutput{Result: "ok"}, nil
+	return &StrReplaceOutput{Replaced: true}, nil
 }
 
 func countOccurrencesOverlapping(haystack []byte, needle []byte) int {
