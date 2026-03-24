@@ -154,6 +154,10 @@ func (t *Tool) Use(middlewares ...ToolMiddleware) *Tool {
 //		// handle error
 //	}
 func NewTool[T, R any](name, description string, handler func(ctx context.Context, args T) (R, error)) (*Tool, error) {
+	if name == "" {
+		return nil, ErrToolNameRequired
+	}
+
 	reflector := &jsonschema.Reflector{
 		ExpandedStruct:             true,
 		RequiredFromJSONSchemaTags: false,
