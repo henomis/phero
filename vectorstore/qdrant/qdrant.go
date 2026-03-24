@@ -288,9 +288,18 @@ func (s *Store) Delete(ctx context.Context, ids []string) error {
 	return err
 }
 
-// Clear delete the entire collection and all its points.
+// Clear removes all points from the collection while preserving the collection
+// structure (vector config, distance metric, indexes).
+//
+// This matches the semantics of the vectorstore.Store interface, which requires
+// only the points to be removed, not the collection itself.
 func (s *Store) Clear(ctx context.Context) error {
-	return s.client.DeleteCollection(ctx, s.collection)
+	_, err := s.client.Delete(ctx, &qdrantapi.DeletePoints{
+		CollectionName: s.collection,
+		Points:         qdrantapi.NewPointsSelectorFilter(&qdrantapi.Filter{}),
+		Wait:           s.wait,
+	})
+	return err
 }
 
 func idToPointID(id string) *qdrantapi.PointId {
