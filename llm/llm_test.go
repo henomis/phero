@@ -163,3 +163,64 @@ func TestToolMiddleware_InputValidation_ShortCircuits(t *testing.T) {
 		t.Fatalf("expected handler not to run")
 	}
 }
+
+func TestNewRawTool_PreservesObjectSchema(t *testing.T) {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"city": map[string]any{"type": "string"},
+		},
+	}
+	tool, err := NewRawTool("weather", "get weather", schema, func(_ context.Context, args string) (any, error) {
+		return args, nil
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if got, _ := tool.InputSchema()["type"].(string); got != "object" {
+		t.Fatalf("schema type: expected %q, got %#v", "object", tool.InputSchema()["type"])
+	}
+	props, ok := tool.InputSchema()["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected properties map, got %#v", tool.InputSchema()["properties"])
+	}
+	if _, ok := props["city"]; !ok {
+		t.Fatalf("expected 'city' property, got %#v", props)
+	}
+}
+
+func TestNewRawTool_HandlerReceivesRawJSON(t *testing.T) {
+	var got string
+	tool, err := NewRawTool("echo", "", map[string]any{
+		"type":       "object",
+		"properties": map[string]any{},
+	}, func(_ context.Context, args string) (any, error) {
+		got = args
+		return "ok", nil
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	payload := `{"hello":"world"}`
+	_, err = tool.Handle(context.Background(), payload)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if got != payload {
+		t.Fatalf("handler got %q, want %q", got, payload)
+	}
+}
+
+func TestNewRawTool_DoesNotMutateCallerSchema(t *testing.T) {
+	original := map[string]any{
+		"type":       "object",
+		"properties": map[string]any{"x": map[string]any{"type": "integer"}},
+	}
+	_, err := NewRawTool("t", "desc", original, func(_ context.Context, _ string) (any, error) { return nil, nil })
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if _, ok := original["description"]; ok {
+		t.Fatalf("original schema was mutated: 'description' key was added")
+	}
+}

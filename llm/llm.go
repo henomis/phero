@@ -218,3 +218,37 @@ func NewTool[T, R any](name, description string, handler func(ctx context.Contex
 		},
 	}, nil
 }
+
+// NewRawTool creates a new Tool from an externally supplied JSON Schema and a raw handler.
+//
+// Use this when the input schema is already known rather than inferred from a Go type —
+// for example when forwarding tools from an MCP server or loading them from configuration.
+//
+// The provided schema is deep-cloned via a JSON round-trip and then normalized through
+// ensureStrictJSONSchema, so the caller's original map is never mutated.
+//
+// The handler receives the raw JSON argument string exactly as sent by the model,
+// without any intermediate unmarshaling.
+func NewRawTool(name, description string, inputSchema map[string]any, handler ToolHandler) (*Tool, error) {
+	// Deep-clone via JSON round-trip so the caller's map is never mutated.
+	schemaMap, err := jsonEncodeDecode[map[string]any](inputSchema)
+	if err != nil {
+		return nil, &ToolSchemaTransformError{Err: err}
+	}
+
+	schemaMap, err = ensureStrictJSONSchema(schemaMap)
+	if err != nil {
+		return nil, &ToolSchemaStrictnessError{Err: err}
+	}
+
+	if description != "" && schemaMap != nil {
+		schemaMap["description"] = description
+	}
+
+	return &Tool{
+		name:        name,
+		description: description,
+		inputSchema: schemaMap,
+		handle:      handler,
+	}, nil
+}

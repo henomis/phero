@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -60,18 +61,16 @@ func (s *Server) AsTools(ctx context.Context, filter ToolFilter) ([]*llm.Tool, e
 			continue
 		}
 
-		if _, ok := tool.InputSchema.(map[string]any); !ok {
-			return nil, fmt.Errorf("invalid tool input schema for tool %q: expected an object", tool.Name)
+		schema, err := normalizeMCPInputSchema(tool.InputSchema)
+		if err != nil {
+			return nil, fmt.Errorf("invalid tool input schema for tool %q: %w", tool.Name, err)
 		}
 
-		// Ensure the input schema has a "properties" field, even if empty, to be compatible with OpenAI function calling.
-		if _, ok := tool.InputSchema.(map[string]any)["properties"]; !ok {
-			tool.InputSchema.(map[string]any)["properties"] = map[string]any{}
-		}
-
-		newTool, err := llm.NewTool(
-			tool.Name,
+		toolName := tool.Name
+		newTool, err := llm.NewRawTool(
+			toolName,
 			tool.Description,
+			schema,
 			func(ctx context.Context, arguments string) (any, error) {
 				argumentsAsMap := make(map[string]any)
 				if err := json.Unmarshal([]byte(arguments), &argumentsAsMap); err != nil {
@@ -81,7 +80,7 @@ func (s *Server) AsTools(ctx context.Context, filter ToolFilter) ([]*llm.Tool, e
 				result, err := s.session.CallTool(
 					ctx,
 					&mcp.CallToolParams{
-						Name:      tool.Name,
+						Name:      toolName,
 						Arguments: argumentsAsMap,
 					},
 				)
@@ -100,6 +99,30 @@ func (s *Server) AsTools(ctx context.Context, filter ToolFilter) ([]*llm.Tool, e
 	}
 
 	return functionTools, nil
+}
+
+// normalizeMCPInputSchema validates and clones the raw InputSchema value from an MCP
+// tool into a normalized map[string]any ready for the LLM layer.
+//
+// It never mutates the caller-supplied value. A shallow clone of the top-level map
+// is sufficient here because llm.NewRawTool performs a full deep clone via JSON
+// round-trip before storing the schema.
+func normalizeMCPInputSchema(raw any) (map[string]any, error) {
+	schemaMap, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("expected an object schema, got %T", raw)
+	}
+
+	// Shallow-clone the top level so we never add keys to the SDK-owned map.
+	clone := make(map[string]any, len(schemaMap)+1)
+	maps.Copy(clone, schemaMap)
+
+	// Ensure a "properties" key exists for OpenAI function-calling compatibility.
+	if _, ok := clone["properties"]; !ok {
+		clone["properties"] = map[string]any{}
+	}
+
+	return clone, nil
 }
 
 // callToolResultText extracts a readable textual representation of an MCP tool
