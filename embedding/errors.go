@@ -14,25 +14,7 @@
 
 package embedding
 
-import (
-	"context"
-)
+import "errors"
 
-// Vector is an embedding vector.
-//
-// Most OpenAI-compatible embedding endpoints return float32 vectors.
-type Vector = []float32
-
-// Model identifies an embedding model name.
-//
-// Examples:
-// - OpenAI: "text-embedding-3-small"
-// - Ollama: "nomic-embed-text".
-type Model string
-
-// Embedder generates vector embeddings for input texts.
-//
-// Implementations should preserve the ordering of inputs.
-type Embedder interface {
-	Embed(ctx context.Context, texts []string) ([]Vector, error)
-}
+// ErrEmptyInput is returned when an Embed call receives no input texts.
+var ErrEmptyInput = errors.New("empty input")

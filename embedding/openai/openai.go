@@ -51,7 +51,13 @@ func New(apiKey string, opts ...Option) *Client {
 }
 
 // Embed generates embeddings for the given input texts.
+//
+// Returns embedding.ErrEmptyInput if texts is empty.
 func (c *Client) Embed(ctx context.Context, texts []string) ([]embedding.Vector, error) {
+	if len(texts) == 0 {
+		return nil, embedding.ErrEmptyInput
+	}
+
 	request := openaiapi.EmbeddingRequest{
 		Model: c.model,
 		Input: texts,
