@@ -260,7 +260,7 @@ func createFileValidationFunc(_ context.Context, input *file.CreateFileInput) er
 	var permission string
 	_, scanErr := fmt.Scanln(&permission)
 	if scanErr != nil {
-		return fmt.Errorf("failed to read user input: %w", scanErr)
+		return fmt.Errorf("user permission denied")
 	}
 
 	if strings.EqualFold(permission, "y") {
@@ -275,7 +275,7 @@ func bashValidationFunc(_ context.Context, input *bash.Input) error {
 	var permission string
 	_, scanErr := fmt.Scanln(&permission)
 	if scanErr != nil {
-		return fmt.Errorf("failed to read user input: %w", scanErr)
+		return fmt.Errorf("user permission denied")
 	}
 
 	if strings.EqualFold(permission, "y") {

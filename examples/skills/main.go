@@ -10,6 +10,7 @@ import (
 	"github.com/henomis/phero/agent"
 	"github.com/henomis/phero/llm"
 	"github.com/henomis/phero/llm/openai"
+	memory "github.com/henomis/phero/memory/jsonfile"
 	"github.com/henomis/phero/skill"
 	"github.com/henomis/phero/tool/file"
 )
@@ -28,6 +29,8 @@ func main() {
 	llmClient, llmInfo := buildLLMFromEnv()
 	ctx := context.Background()
 
+	skillMemory, _ := memory.New("skill_memory.json")
+
 	skillParser := skill.New("./skills")
 	list, err := skillParser.List()
 	if err != nil {
@@ -36,12 +39,12 @@ func main() {
 
 	tools := make([]*llm.Tool, 0, len(list))
 	for _, skillName := range list {
-		skill, err := skillParser.Parse(skillName)
+		skillItem, err := skillParser.Parse(skillName)
 		if err != nil {
 			panic(err)
 		}
 
-		skillAsTool, err := skill.AsTool(llmClient)
+		skillAsTool, err := skillItem.AsTool(llmClient, skill.WithMemory(skillMemory))
 		if err != nil {
 			panic(err)
 		}
@@ -76,7 +79,10 @@ func main() {
 		}
 	}
 
-	res, err := a.Run(ctx, "create a web page containing a random quote, and save the html to a file called quote.html")
+	history, _ := memory.New("memory.json")
+	a.SetMemory(history)
+
+	res, err := a.Run(ctx, "get a random quote and check whether the quote.html file exists. If the quote.html file doesn't exist, create it and write the quote inside. Quote must be inserted into <div id=\"quote\"></div> in the html file. If the file already exists, just overwrite the content inside the <div id=\"quote\"></div> tags.")
 	if err != nil {
 		panic(err)
 	}
