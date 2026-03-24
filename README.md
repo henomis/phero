@@ -15,7 +15,7 @@ Phero is a modern Go framework for building multi-agent AI systems. Like ants in
 - **🎯 Purpose-built for agents** Not an LLM wrapper; a framework for orchestrating cooperative agent systems
 - **🧩 Composable primitives** Small, focused packages that solve specific problems
 - **🔧 Tool-first design** Built-in support for function tools, skills, RAG, and MCP
-- **🎨 Developer-friendly** Clean APIs, opt-in tracing, OpenAI-compatible LLM support
+- **🎨 Developer-friendly** Clean APIs, opt-in tracing, OpenAI-compatible + Anthropic support
 - **🪶 Lightweight** No heavy dependencies; just Go and your choice of LLM provider
 
 
@@ -69,7 +69,7 @@ Phero is organized into focused packages, each solving a specific problem:
 ### 🤖 Agent Layer
 
 - **`agent`** Core orchestration for LLM-based agents with tool execution and chat loops
-- **`memory`** Conversational context management for multi-turn interactions (in-process, RAG-backed, or PostgreSQL-backed)
+- **`memory`** Conversational context management for multi-turn interactions (in-process, file-backed, RAG-backed, or PostgreSQL-backed)
 
 ### 💬 LLM Layer
 
@@ -91,9 +91,8 @@ Phero is organized into focused packages, each solving a specific problem:
 
 - **`skill`** Parse SKILL.md files and expose them as agent capabilities
 - **`mcp`** Model Context Protocol adapter for external tool integration
-- **`tool/file`** File system operations
-- **`tool/go`** Safe Go command execution
-- **`tool/python`** Python script execution
+- **`tool/file`** File viewing and editing helpers (`view`, `create_file`, `str_replace`)
+- **`tool/bash`** Bash command execution
 - **`tool/human`** Human-in-the-loop input collection
 
 

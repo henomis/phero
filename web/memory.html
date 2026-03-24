@@ -43,6 +43,8 @@
       </p>
       <ul>
         <li><strong>Short-term</strong>: keep the last N messages (fast, simple)</li>
+        <li><strong>File-backed</strong>: persist messages locally as JSON across runs</li>
+        <li><strong>PostgreSQL-backed</strong>: persist session history in a shared database</li>
         <li><strong>Summarized</strong>: compress older history into a structured summary</li>
         <li><strong>Semantic</strong>: retrieve by similarity search (RAG-backed)</li>
       </ul>
@@ -67,9 +69,30 @@ a.SetMemory(conversationMemory)</code></pre>
     </section>
 
     <section>
+      <h2>JSON file memory (persistent local state)</h2>
+      <p>
+        <code>memory/jsonfile</code> stores the full conversation in a JSON file on disk.
+        The file path acts as the session identifier, so restarting the process and pointing at the same file resumes the same history.
+      </p>
+
+      <pre><code class="language-go">import memory "github.com/henomis/phero/memory/jsonfile"
+
+conversationMemory, err := memory.New("memory.json")
+if err != nil {
+    panic(err)
+}
+
+a.SetMemory(conversationMemory)</code></pre>
+
+      <p>
+        This is a good fit for local assistants or skill workflows that need persistence without introducing a database.
+      </p>
+    </section>
+
+    <section>
       <h2>Optional summarization</h2>
       <p>
-        The simple memory can optionally summarize history when the number of stored messages reaches a threshold.
+        The in-process and persistent memories can optionally summarize history when the number of stored messages reaches a threshold.
         The idea is to keep a compact “state snapshot” plus the most recent turns.
       </p>
 
@@ -162,6 +185,12 @@ go run ./examples/conversational-agent
 go run ./examples/conversational-agent -summarize -summary-threshold 8 -summary-size 15 -max-messages 20</code></pre>
 
       <p>
+        The skills example uses local JSON-backed memory:
+      </p>
+      <pre><code class="language-bash">cd ./examples/skills
+go run .</code></pre>
+
+      <p>
         For semantic recall, try the long-term memory example (requires Qdrant):
       </p>
       <pre><code class="language-bash">go run ./examples/long-term-memory -qdrant-host localhost -qdrant-collection long_term_memory</code></pre>
@@ -171,6 +200,8 @@ go run ./examples/conversational-agent -summarize -summary-threshold 8 -summary-
       <h2>Picking the right memory</h2>
       <ul>
         <li><strong>Fast prototyping</strong>: use <code>memory/simple</code> with a reasonable max messages value</li>
+        <li><strong>Local persistence</strong>: use <code>memory/jsonfile</code> when you want history to survive restarts on one machine</li>
+        <li><strong>Shared persistence</strong>: use <code>memory/psql</code> when sessions should live in PostgreSQL</li>
         <li><strong>Long conversations</strong>: enable summarization to keep context compact</li>
         <li><strong>Long-term recall</strong>: use semantic memory via <code>memory/rag</code></li>
       </ul>

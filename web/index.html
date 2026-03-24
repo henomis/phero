@@ -61,7 +61,7 @@
         <li><strong>Agent Layer</strong>
           <ul>
             <li><code>agent</code>: Core orchestration for LLM-based agents with tool execution and chat loops</li>
-            <li><code>memory</code>: Conversational context management for multi-turn interactions</li>
+            <li><code>memory</code>: Conversational context management for multi-turn interactions (in-process, file-backed, PostgreSQL-backed, or semantic RAG-backed)</li>
           </ul>
         </li>
         <li><strong>LLM Layer</strong>
@@ -86,9 +86,8 @@
           <ul>
             <li><code>skill</code>: Parse SKILL.md files and expose them as agent capabilities</li>
             <li><code>mcp</code>: Model Context Protocol adapter for external tool integration</li>
-            <li><code>tool/file</code>: File system operations</li>
-            <li><code>tool/go</code>: Safe Go command execution</li>
-            <li><code>tool/python</code>: Python script execution</li>
+            <li><code>tool/file</code>: File viewing and editing helpers (<code>view</code>, <code>create_file</code>, <code>str_replace</code>)</li>
+            <li><code>tool/bash</code>: Bash command execution</li>
             <li><code>tool/human</code>: Human-in-the-loop input collection</li>
           </ul>
         </li>

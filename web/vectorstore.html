@@ -184,6 +184,10 @@ if err != nil {
 }
 
 _ = store.EnsureCollection(ctx)</code></pre>
+
+      <p>
+        The PostgreSQL adapter also lets you pick the distance metric with <code>vspql.WithDistance(...)</code>, disable automatic extension setup with <code>vspql.WithEnsureExtension(false)</code>, and override the backing table with <code>vspql.WithTable("...")</code>.
+      </p>
     </section>
 
     <section>
