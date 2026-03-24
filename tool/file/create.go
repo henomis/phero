@@ -10,22 +10,6 @@ import (
 	"github.com/henomis/phero/llm"
 )
 
-// toolOptions holds shared configuration for file tools in this package.
-type toolOptions struct {
-	workingDir string
-}
-
-// Option is a configuration function for file tools.
-type Option func(*toolOptions)
-
-// WithWorkingDirectory sets the working directory used to resolve relative paths.
-// When an input path is not absolute it is joined with this directory.
-func WithWorkingDirectory(dir string) Option {
-	return func(o *toolOptions) {
-		o.workingDir = dir
-	}
-}
-
 // CreateFileInput represents the input for the CreateFileTool, containing the path of the file to create and the content to write.
 type CreateFileInput struct {
 	Description string `json:"description" jsonschema:"description=Why you're creating this file."`

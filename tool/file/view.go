@@ -33,8 +33,9 @@ type ViewOutput struct {
 
 // ViewTool is a tool that allows reading the content of a file.
 type ViewTool struct {
-	tool       *llm.Tool
-	workingDir string
+	tool        *llm.Tool
+	workingDir  string
+	maxFileSize int64
 }
 
 // NewViewTool creates a new instance of ViewTool.
@@ -47,7 +48,10 @@ func NewViewTool(opts ...Option) (*ViewTool, error) {
 		opt(o)
 	}
 
-	viewTool := &ViewTool{workingDir: o.workingDir}
+	viewTool := &ViewTool{
+		workingDir:  o.workingDir,
+		maxFileSize: o.maxFileSize,
+	}
 
 	tool, err := llm.NewTool(
 		name,
@@ -101,11 +105,18 @@ func (r *ViewTool) view(ctx context.Context, input *ViewInput) (*ViewOutput, err
 	}
 
 	if isSupportedImagePath(path) {
+		if r.maxFileSize > 0 && info.Size() > r.maxFileSize {
+			return nil, &ImageTooLargeError{Path: path, Size: info.Size(), Limit: r.maxFileSize}
+		}
 		content, err := formatImageMarkdownDataURI(path)
 		if err != nil {
 			return nil, err
 		}
 		return &ViewOutput{Content: content}, nil
+	}
+
+	if r.maxFileSize > 0 && info.Size() > r.maxFileSize {
+		return nil, &FileTooLargeError{Path: path, Size: info.Size(), Limit: r.maxFileSize}
 	}
 
 	contentBytes, err := os.ReadFile(path)
