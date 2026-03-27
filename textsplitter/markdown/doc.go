@@ -12,8 +12,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package textsplitter defines the shared abstractions for text splitting.
-//
-// Concrete splitter implementations live in subpackages such as
-// textsplitter/recursive and textsplitter/markdown.
-package textsplitter
+// Package markdown provides a Markdown-aware text splitter.
+package markdown

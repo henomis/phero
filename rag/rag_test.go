@@ -17,9 +17,11 @@ package rag
 import (
 	"context"
 	"errors"
+	"iter"
 	"sync"
 	"testing"
 
+	"github.com/henomis/phero/document"
 	"github.com/henomis/phero/embedding"
 	"github.com/henomis/phero/vectorstore"
 )
@@ -89,16 +91,31 @@ func (s *stubStore) EnsureCalls() int {
 	return s.ensureCalls
 }
 
+type stubSplitter struct {
+	chunks []string
+}
+
+func (s *stubSplitter) Split(_ context.Context) iter.Seq2[document.Document, error] {
+	return func(yield func(document.Document, error) bool) {
+		for _, chunk := range s.chunks {
+			if !yield(document.Document{Content: chunk}, nil) {
+				return
+			}
+		}
+	}
+}
+
 func TestRAGEnsureCollectionCachedAfterSuccess(t *testing.T) {
 	store := &stubStore{}
+	splitter := &stubSplitter{chunks: []string{"first"}}
 	r, err := New(store, stubEmbedder{})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
 
 	ctx := context.Background()
-	if err := r.Ingest(ctx, []string{"first"}); err != nil {
-		t.Fatalf("Ingest() error = %v", err)
+	if err := r.Ingest(ctx, splitter); err != nil {
+		t.Fatalf("IngestFile() error = %v", err)
 	}
 	if _, err := r.Query(ctx, "question"); err != nil {
 		t.Fatalf("Query() error = %v", err)
@@ -111,17 +128,18 @@ func TestRAGEnsureCollectionCachedAfterSuccess(t *testing.T) {
 
 func TestRAGEnsureCollectionRetriesAfterFailure(t *testing.T) {
 	store := &stubStore{ensureErrs: []error{errors.New("temporary ensure failure"), nil}}
+	splitter := &stubSplitter{chunks: []string{"first"}}
 	r, err := New(store, stubEmbedder{})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
 
 	ctx := context.Background()
-	if err := r.Ingest(ctx, []string{"first"}); err == nil {
-		t.Fatal("Ingest() error = nil, want transient ensure error")
+	if err := r.Ingest(ctx, splitter); err == nil {
+		t.Fatal("IngestFile() error = nil, want transient ensure error")
 	}
-	if err := r.Ingest(ctx, []string{"second"}); err != nil {
-		t.Fatalf("second Ingest() error = %v", err)
+	if err := r.Ingest(ctx, splitter); err != nil {
+		t.Fatalf("second IngestFile() error = %v", err)
 	}
 
 	if got := store.EnsureCalls(); got != 2 {

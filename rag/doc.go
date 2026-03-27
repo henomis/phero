@@ -27,6 +27,6 @@
 // - Clear: remove all stored messages
 //
 // This package does not implement chunking/splitting; pair it with a splitter
-// (for example, textsplitter.RecursiveCharacterTextSplitter) to turn documents
-// into chunks before ingestion.
+// implementation (for example, textsplitter/recursive) to turn documents into
+// chunks before ingestion.
 package rag

@@ -32,7 +32,7 @@ import (
 	llmopenai "github.com/henomis/phero/llm/openai"
 	memory "github.com/henomis/phero/memory/simple"
 	"github.com/henomis/phero/rag"
-	"github.com/henomis/phero/textsplitter"
+	textsplitterrecursive "github.com/henomis/phero/textsplitter/recursive"
 	vsqdrant "github.com/henomis/phero/vectorstore/qdrant"
 )
 
@@ -69,18 +69,12 @@ func main() {
 		os.Exit(2)
 	}
 
-	b, err := os.ReadFile(filePath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to read file: %v\n", err)
-		os.Exit(1)
+	if _, err := os.Stat(filePath); err != nil {
+		fmt.Fprintf(os.Stderr, "file not accessible: %v\n", err)
+		os.Exit(2)
 	}
 
-	splitter := textsplitter.NewRecursiveCharacterTextSplitter(chunkSize, chunkOverlap)
-	chunks := compactStrings(splitter.SplitText(string(b)))
-	if len(chunks) == 0 {
-		fmt.Fprintln(os.Stderr, "no non-empty chunks produced by splitter")
-		os.Exit(1)
-	}
+	splitter := textsplitterrecursive.New(filePath, chunkSize, chunkOverlap)
 
 	llmClient, llmInfo := buildLLMFromEnv()
 	embedder, embedderInfo := buildEmbedderFromEnv()
@@ -88,8 +82,9 @@ func main() {
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer bootstrapCancel()
 
-	// Qdrant collections require a fixed vector size. Infer it from the embedder.
-	vecs, err := embedder.Embed(bootstrapCtx, []string{chunks[0]})
+	// Qdrant collections require a fixed vector size; probe the embedder with a
+	// known string to discover the model's output dimension.
+	vecs, err := embedder.Embed(bootstrapCtx, []string{"dimension probe"})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to embed first chunk (to infer vector size): %v\n", err)
 		return
@@ -128,8 +123,8 @@ func main() {
 		return
 	}
 
-	if err := ragEngine.Ingest(bootstrapCtx, chunks); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to ingest chunks: %v\n", err)
+	if err := ragEngine.Ingest(bootstrapCtx, splitter); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to ingest file: %v\n", err)
 		return
 	}
 
@@ -168,7 +163,6 @@ Document: %s`, filepath.Base(filePath)))
 	fmt.Println("- llm:", llmInfo)
 	fmt.Println("- embedder:", embedderInfo)
 	fmt.Println("- file:", filePath)
-	fmt.Println("- chunks:", len(chunks))
 	fmt.Println("- qdrant:", fmt.Sprintf("%s:%d tls=%v collection=%s", qdrantHost, qdrantPort, qdrantUseTLS, qdrantCollection))
 	fmt.Println("- vector_size:", vectorSize)
 	fmt.Println()
@@ -205,18 +199,6 @@ Document: %s`, filepath.Base(filePath)))
 		fmt.Fprintln(os.Stderr, "stdin error:", err)
 		return
 	}
-}
-
-func compactStrings(in []string) []string {
-	out := make([]string, 0, len(in))
-	for _, s := range in {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			continue
-		}
-		out = append(out, s)
-	}
-	return out
 }
 
 func buildLLMFromEnv() (llm.LLM, string) {
