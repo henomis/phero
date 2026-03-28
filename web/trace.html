@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phero • Trace</title>
+  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css?family=Space+Grotesk:700|Inter:400,500|JetBrains+Mono:400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+  <nav class="navbar">
+    <ul>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="llm.html">LLM</a></li>
+      <li><a href="agent.html">Agent</a></li>
+      <li><a href="trace.html">Trace</a></li>
+      <li><a href="tool.html">Tool</a></li>
+      <li><a href="mcp.html">MCP</a></li>
+      <li><a href="embedding.html">Embedding</a></li>
+      <li><a href="textsplitter.html">Textsplitter</a></li>
+      <li><a href="vectorstore.html">Vectorstore</a></li>
+      <li><a href="rag.html">RAG</a></li>
+      <li><a href="memory.html">Memory</a></li>
+      <li><a href="skill.html">Skill</a></li>
+    </ul>
+  </nav>
+
+  <header>
+    <h1>Trace</h1>
+    <p class="subtitle">Typed observability hooks for agents, LLM calls, tools, and memory.</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>What it does</h2>
+      <p>
+        The <code>trace</code> package provides opt-in observability for Phero. A tracer receives typed <code>Event</code> values
+        at each significant lifecycle point: agent start and end, loop iterations, LLM requests and responses, tool calls and
+        results, and memory retrieval and persistence.
+      </p>
+    </section>
+
+    <section>
+      <h2>Built-in tracers</h2>
+      <ul>
+        <li><code>trace.Noop</code>: default zero-cost tracer that discards all events</li>
+        <li><code>trace.New(w)</code>: returns a <code>TextTracer</code> that writes human-readable, colorized trace lines</li>
+        <li><code>trace.NewDefault()</code>: writes the same text output to <code>os.Stderr</code></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Attach tracing to an agent</h2>
+      <p>
+        Agents expose <code>SetTracer</code>. Once attached, every <code>Run</code> emits lifecycle events automatically.
+      </p>
+
+      <pre><code class="language-go">import (
+    "context"
+    "fmt"
+    "os"
+
+    "github.com/henomis/phero/agent"
+    "github.com/henomis/phero/llm"
+    "github.com/henomis/phero/llm/openai"
+    "github.com/henomis/phero/trace"
+)
+
+func main() {
+    client := openai.New(os.Getenv("OPENAI_API_KEY"))
+
+    a, err := agent.New(
+        client,
+        "math-agent",
+        "You are a helpful math assistant.",
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    a.SetTracer(trace.New(os.Stderr))
+
+    result, err := a.Run(context.Background(), "What is 12 * 9?")
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Println(result.Content)
+}</code></pre>
+    </section>
+
+    <section>
+      <h2>Trace raw LLM calls</h2>
+      <p>
+        If you want observability around direct <code>llm.LLM.Execute</code> calls, wrap any backend with <code>trace.NewLLM</code>.
+      </p>
+
+      <pre><code class="language-go">tracedClient := trace.NewLLM(client, trace.New(os.Stderr))
+
+result, err := tracedClient.Execute(ctx, messages, tools)</code></pre>
+
+      <p>
+        When the wrapper runs inside an agent, request and response events are automatically annotated with the agent name and
+        iteration number via context propagation.
+      </p>
+    </section>
+
+    <section>
+      <h2>Event types</h2>
+      <ul>
+        <li><code>AgentStartEvent</code> and <code>AgentEndEvent</code></li>
+        <li><code>AgentIterationEvent</code></li>
+        <li><code>LLMRequestEvent</code> and <code>LLMResponseEvent</code></li>
+        <li><code>ToolCallEvent</code> and <code>ToolResultEvent</code></li>
+        <li><code>MemoryRetrieveEvent</code> and <code>MemorySaveEvent</code></li>
+      </ul>
+      <p>
+        Implement the <code>trace.Tracer</code> interface if you want to send these events somewhere other than the terminal.
+      </p>
+    </section>
+
+    <section>
+      <h2>Context propagation</h2>
+      <p>
+        The tracer is carried through the request context with <code>trace.WithTracer</code> and read back with <code>trace.FromContext</code>.
+        This lets tool handlers and lower-level helpers emit their own trace events without depending directly on the agent type.
+      </p>
+    </section>
+
+    <section>
+      <h2>Try it</h2>
+      <p>
+        The tracing example shows a calculator tool plus a traced agent run from the terminal.
+      </p>
+
+      <pre><code class="language-bash"># from repo root
+go run ./examples/tracing</code></pre>
+    </section>
+
+    <section>
+      <h2>Related packages</h2>
+      <ul>
+        <li><a href="agent.html">agent</a>: emits trace events during orchestration</li>
+        <li><a href="llm.html">llm</a>: backends can be wrapped with <code>trace.NewLLM</code></li>
+        <li><a href="memory.html">memory</a>: memory retrieval and save operations are traced when used through agents</li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-go.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
+</body>
+</html>

@@ -17,10 +17,13 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/henomis/phero/llm"
 	"github.com/henomis/phero/memory"
+	"github.com/henomis/phero/trace"
 )
 
 // Agent runs a chat loop using an llm.LLM, optionally with tools and memory.
@@ -32,6 +35,12 @@ type Agent struct {
 	maxIterations int
 	tools         []*llm.Tool
 	memory        memory.Memory
+	tracer        trace.Tracer
+}
+
+// Result represents the final output of an agent after processing user input and executing any tool calls.
+type Result struct {
+	Content string
 }
 
 // New creates a new Agent.
@@ -55,6 +64,7 @@ func New(client llm.LLM, name, description string) (*Agent, error) {
 		name:        name,
 		description: description,
 		tools:       make([]*llm.Tool, 0),
+		tracer:      trace.Noop,
 	}, nil
 }
 
@@ -102,37 +112,83 @@ func (a *Agent) SetMaxIterations(maxIterations int) {
 	a.maxIterations = maxIterations
 }
 
+// SetTracer configures the Tracer used to observe agent lifecycle events.
+//
+// If not set, all events are discarded (trace.Noop is the default).
+func (a *Agent) SetTracer(t trace.Tracer) {
+	a.tracer = t
+}
+
 // Run executes the agent loop for the given user input.
 //
 // The agent calls the LLM, executes any requested tool calls, and repeats until
 // the model returns a message without tool calls.
-func (a *Agent) Run(ctx context.Context, input string) (string, error) {
+//
+// If the run succeeds but saving the session to memory fails, the result is
+// still returned together with the save error joined via errors.Join.
+func (a *Agent) Run(ctx context.Context, input string) (result *Result, err error) {
+	ctx = trace.WithTracer(ctx, a.tracer)
+	ctx = trace.WithAgentName(ctx, a.name)
+
 	session, sessionIndex, err := a.prepareSession(ctx, input)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	// Ensure the session is saved at the end, even if an error occurs during processing.
-	defer func() {
-		_ = a.saveSession(ctx, session, sessionIndex)
-	}()
+	a.tracer.Trace(trace.AgentStartEvent{
+		AgentName: a.name,
+		Input:     input,
+		Timestamp: time.Now(),
+	})
 
 	iteration := 0
+
+	// Emit AgentEnd before saveSession (LIFO: this defer runs first).
+	defer func() {
+		output := ""
+		if result != nil {
+			output = result.Content
+		}
+		a.tracer.Trace(trace.AgentEndEvent{
+			AgentName:  a.name,
+			Output:     output,
+			Err:        err,
+			Iterations: iteration,
+			Timestamp:  time.Now(),
+		})
+	}()
+
+	// Save the session at the end. If the main run succeeded but the save
+	// fails, surface the save error rather than silently dropping it.
+	defer func() {
+		if saveErr := a.saveSession(ctx, session, sessionIndex); saveErr != nil {
+			err = errors.Join(err, fmt.Errorf("%w: %w", ErrSessionSaveFailed, saveErr))
+		}
+	}()
+
 	for {
 		iteration++
 		if a.maxIterations > 0 && iteration > a.maxIterations {
-			return "", ErrMaxIterationsReached
+			return nil, ErrMaxIterationsReached
 		}
 
+		a.tracer.Trace(trace.AgentIterationEvent{
+			AgentName: a.name,
+			Iteration: iteration,
+			Timestamp: time.Now(),
+		})
+
+		iterCtx := trace.WithIteration(ctx, iteration)
+
 		var finalMessage *llm.Message
-		session, finalMessage, err = a.handleAgentIteration(ctx, session)
+		session, finalMessage, err = a.handleAgentIteration(iterCtx, session, iteration)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 
 		// If finalMessage is nil, it means the agent executed tool calls and needs to call the LLM again.
 		if finalMessage != nil {
-			return finalMessage.Content, nil
+			return &Result{Content: finalMessage.Content}, nil
 		}
 	}
 }
@@ -143,25 +199,34 @@ func (a *Agent) saveSession(ctx context.Context, messages []llm.Message, session
 		return nil
 	}
 
-	return a.memory.Save(ctx, messages[sessionIndex:])
+	err := a.memory.Save(ctx, messages[sessionIndex:])
+	if err == nil {
+		a.tracer.Trace(trace.MemorySaveEvent{
+			AgentName: a.name,
+			Count:     len(messages) - sessionIndex,
+			Timestamp: time.Now(),
+		})
+	}
+	return err
 }
 
 // handleAgentIteration executes one iteration of the agent loop: it calls the LLM with the current messages,
 // adds the response to the messages and memory, and executes any tool calls in the response.
-func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message) ([]llm.Message, *llm.Message, error) {
-	msg, err := a.llm.Execute(ctx, session, a.tools)
+func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message, iteration int) ([]llm.Message, *llm.Message, error) {
+	tracedLLM := trace.NewLLM(a.llm, a.tracer)
+	msg, err := tracedLLM.Execute(ctx, session, a.tools)
 	if err != nil {
 		return session, nil, err
 	}
 
-	session = append(session, *msg)
+	session = append(session, *msg.Message)
 
-	if len(msg.ToolCalls) == 0 {
-		return session, msg, nil
+	if len(msg.Message.ToolCalls) == 0 {
+		return session, msg.Message, nil
 	}
 
-	for _, toolCall := range msg.ToolCalls {
-		resultMessage := a.handleToolCall(ctx, toolCall)
+	for _, toolCall := range msg.Message.ToolCalls {
+		resultMessage := a.handleToolCall(ctx, toolCall, iteration)
 
 		session = append(session, *resultMessage)
 	}
@@ -170,19 +235,37 @@ func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message)
 }
 
 // handleToolCall executes a tool call and returns the result as a message to be added to the conversation.
-func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall) *llm.Message {
+func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, iteration int) *llm.Message {
+	a.tracer.Trace(trace.ToolCallEvent{
+		AgentName: a.name,
+		ToolName:  toolCall.Function.Name,
+		Arguments: toolCall.Function.Arguments,
+		CallID:    toolCall.ID,
+		Iteration: iteration,
+		Timestamp: time.Now(),
+	})
+
 	result, err := a.executeToolCall(ctx, toolCall)
+
+	a.tracer.Trace(trace.ToolResultEvent{
+		AgentName: a.name,
+		ToolName:  toolCall.Function.Name,
+		Result:    result,
+		Err:       err,
+		CallID:    toolCall.ID,
+		Iteration: iteration,
+		Timestamp: time.Now(),
+	})
+
 	if err != nil {
 		result = fmt.Sprintf("Error executing tool '%s': %v", toolCall.Function.Name, err)
 	}
 
-	resultMessage := &llm.Message{
+	return &llm.Message{
 		Role:       llm.ChatMessageRoleTool,
 		Content:    result,
 		ToolCallID: toolCall.ID,
 	}
-
-	return resultMessage
 }
 
 // prepareSession prepares the messages for the LLM call, including the system prompt, memory messages, and user input.
@@ -199,6 +282,12 @@ func (a *Agent) prepareSession(ctx context.Context, input string) ([]llm.Message
 		if err != nil {
 			return nil, 0, err
 		}
+
+		a.tracer.Trace(trace.MemoryRetrieveEvent{
+			AgentName: a.name,
+			Count:     len(memoryMessages),
+			Timestamp: time.Now(),
+		})
 
 		messages = append(messages, memoryMessages...)
 	}
@@ -261,7 +350,7 @@ func (a *Agent) AsTool(toolName, toolDescription string) (*llm.Tool, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &ToolOutput{Output: response}, nil
+		return &ToolOutput{Output: response.Content}, nil
 	}
 
 	return llm.NewTool(

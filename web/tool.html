@@ -14,6 +14,7 @@
       <li><a href="index.html">Home</a></li>
       <li><a href="llm.html">LLM</a></li>
       <li><a href="agent.html">Agent</a></li>
+      <li><a href="trace.html">Trace</a></li>
       <li><a href="tool.html">Tool</a></li>
       <li><a href="mcp.html">MCP</a></li>
       <li><a href="embedding.html">Embedding</a></li>
@@ -47,37 +48,46 @@
       <h2>Built-in tool packages</h2>
       <p>
         Phero includes a few ready-to-use tools under <code>tool/</code>. These are designed to be easy to attach to an agent.
-        (Exact behavior can be customized via validation hooks.)
+        Exact behavior can be customized with <code>llm.Tool.Use(...)</code> middleware.
       </p>
 
       <ul>
-        <li><strong>File tools</strong> (<code>tool/file</code>):
-          <code>list_files</code>, <code>read_file</code>, <code>write_file</code></li>
-        <li><strong>Go tool</strong> (<code>tool/go</code>): run <code>go</code> commands (use validation to restrict args)</li>
-        <li><strong>Python tool</strong> (<code>tool/python</code>): run <code>python</code> commands (use validation to restrict args)</li>
+        <li><strong>File tools</strong> (<code>tool/file</code>): <code>view</code>, <code>create_file</code>, <code>str_replace</code></li>
+        <li><strong>Bash tool</strong> (<code>tool/bash</code>): run bash commands in an optional working directory</li>
         <li><strong>Human tool</strong> (<code>tool/human</code>): ask the user for input/approval mid-run</li>
       </ul>
 
       <p>
-        Tip: for anything with side effects (writes, deletes, shell commands), add a validation/approval step.
+        Tip: for anything with side effects (writes or shell commands), add an approval middleware.
       </p>
     </section>
 
     <section>
-      <h2>Example: safe file writes (with approval)</h2>
+      <h2>Example: middleware for approval</h2>
       <p>
         The <a href="https://github.com/henomis/phero/tree/main/examples/skills">examples/skills</a> program combines skills with a
-        file-writing tool that asks the user to approve writes.
+        file-writing tool that asks the user to approve writes before the underlying tool handler runs.
       </p>
 
       <pre><code class="language-go">// From examples/skills (edited for brevity)
 
-writeTool, err := file.NewWriteTool()
+createFileTool, err := file.NewCreateFileTool()
 if err != nil {
     panic(err)
 }
 
-tools = append(tools, writeTool.WithValidation(writeValidationFunc).Tool())
+tools = append(tools, createFileTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
+    return func(ctx context.Context, arguments string) (any, error) {
+        var input *file.CreateFileInput
+        if err := json.Unmarshal([]byte(arguments), &input); err != nil {
+            return nil, &llm.ToolArgumentParseError{Err: err}
+        }
+        if err := writeValidationFunc(ctx, input); err != nil {
+            return nil, err
+        }
+        return next(ctx, arguments)
+    }
+}))
 
 for _, tool := range tools {
     if err := a.AddTool(tool); err != nil {
@@ -107,6 +117,17 @@ func writeValidationFunc(_ context.Context, input *file.WriteInput) error {
       </p>
     </section>
 
+    <section>
+      <h2>Default tools inside skills</h2>
+      <p>
+        When you convert a <a href="skill.html">skill</a> into a tool, Phero automatically gives the skill-agent a small local toolbox rooted at the skill directory:
+        <code>view</code>, <code>create_file</code>, <code>str_replace</code>, and <code>bash</code>.
+      </p>
+      <p>
+        That makes skill execution self-contained: the skill can inspect files, make targeted edits, or run commands without needing separate tool wiring in the caller.
+      </p>
+    </section>
+
     
 
     <section>
@@ -115,11 +136,11 @@ func writeValidationFunc(_ context.Context, input *file.WriteInput) error {
         These are good starting points to see tools in action (provider setup is described in each example README):
       </p>
 
-      <pre><code class="language-bash"># Skills + file tool (run from example dir)
+      <pre><code class="language-bash"># Skills + built-in file/bash tools (run from example dir)
 cd ./examples/skills
 go run .
 
-# Multi-agent workflow (uses a restricted command tool)
+    # Multi-agent workflow (uses a custom restricted command tool)
 cd -
 go run ./examples/multi-agent-workflow</code></pre>
     </section>

@@ -16,6 +16,7 @@ package skill
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -26,14 +27,19 @@ import (
 
 	"github.com/henomis/phero/agent"
 	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/memory"
+	"github.com/henomis/phero/tool/bash"
 	"github.com/henomis/phero/tool/file"
-	golang "github.com/henomis/phero/tool/go"
 )
 
 const (
 	defaultSkillsRootPath = "skills"
 	skillFileName         = "SKILL.md"
 	yamlFrontmatterDelim  = "---"
+	toolNameView          = "view"
+	toolNameCreateFile    = "create_file"
+	toolNameStrReplace    = "str_replace"
+	toolNameBash          = "bash"
 )
 
 // Parser discovers and parses skills under a root directory.
@@ -46,7 +52,7 @@ type Parser struct {
 // Fields correspond to YAML frontmatter keys. Body contains the remaining
 // content after the frontmatter.
 type Skill struct {
-	BasePath      string         `yaml:"-"`
+	RootPath      string         `yaml:"-"`
 	Name          string         `yaml:"name"`
 	Description   string         `yaml:"description"`
 	License       string         `yaml:"license,omitempty"`
@@ -54,6 +60,9 @@ type Skill struct {
 	Metadata      map[string]any `yaml:"metadata,omitempty"`
 	AllowedTools  string         `yaml:"allowed-tools,omitempty"`
 	Body          string         `yaml:"-"`
+
+	memory        memory.Memory `yaml:"-"`
+	maxIterations int           `yaml:"-"`
 }
 
 // New returns a Parser rooted at skillsRootPath.
@@ -107,7 +116,7 @@ func (p *Parser) Parse(skillName string) (*Skill, error) {
 	if err != nil {
 		return nil, err
 	}
-	skill.BasePath = absPath
+	skill.RootPath = absPath
 
 	return skill, nil
 }
@@ -141,8 +150,25 @@ func Parse(r io.Reader) (*Skill, error) {
 	return &skill, nil
 }
 
+// Option is a functional option for configuring a Skill when converting it to a tool.
+type Option func(*Skill)
+
+// WithMemory sets a memory.Memory instance to be used by the skill's agent.
+func WithMemory(memory memory.Memory) Option {
+	return func(s *Skill) {
+		s.memory = memory
+	}
+}
+
+// WithMaxIterations sets the maximum number of iterations the skill's agent can execute before stopping.
+func WithMaxIterations(maxIterations int) Option {
+	return func(s *Skill) {
+		s.maxIterations = maxIterations
+	}
+}
+
 // AsTool converts a Skill into an llm.FunctionTool.
-func (s *Skill) AsTool(client llm.LLM) (*llm.Tool, error) {
+func (s *Skill) AsTool(client llm.LLM, opts ...Option) (*llm.Tool, error) {
 	skillAsAgent, err := agent.New(
 		client,
 		s.Name,
@@ -152,6 +178,20 @@ func (s *Skill) AsTool(client llm.LLM) (*llm.Tool, error) {
 		return nil, err
 	}
 
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
+	}
+
+	if s.memory != nil {
+		skillAsAgent.SetMemory(s.memory)
+	}
+
+	if s.maxIterations > 0 {
+		skillAsAgent.SetMaxIterations(s.maxIterations)
+	}
+
 	if err := s.addDefaultTools(skillAsAgent); err != nil {
 		return nil, err
 	}
@@ -159,63 +199,106 @@ func (s *Skill) AsTool(client llm.LLM) (*llm.Tool, error) {
 	return skillAsAgent.AsTool(s.Name, s.Description)
 }
 
+func (s *Skill) allowsTool(toolName string) bool {
+	if strings.TrimSpace(s.AllowedTools) == "" {
+		return true
+	}
+
+	for _, allowedTool := range strings.Fields(s.AllowedTools) {
+		if allowedTool == toolName {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (s *Skill) addDefaultTools(agent *agent.Agent) error {
-	goTool, err := golang.New()
-	if err != nil {
-		return err
-	}
-	if err := agent.AddTool(goTool.WithValidation(goValidationFunc).WithWorkingDirectory(s.BasePath).Tool()); err != nil {
-		return err
-	}
-
-	listTool, err := file.NewListTool()
-	if err != nil {
-		return err
-	}
-	if err := agent.AddTool(listTool.WithValidation(listValidationFunc).Tool()); err != nil {
-		return err
+	if s.allowsTool(toolNameView) {
+		viewTool, err := file.NewViewTool(file.WithWorkingDirectory(s.RootPath))
+		if err != nil {
+			return err
+		}
+		if err := agent.AddTool(viewTool.Tool()); err != nil {
+			return err
+		}
 	}
 
-	readTool, err := file.NewReadTool()
-	if err != nil {
-		return err
-	}
-	if err := agent.AddTool(readTool.WithValidation(readValidationFunc).Tool()); err != nil {
-		return err
+	if s.allowsTool(toolNameCreateFile) {
+		createTool, err := file.NewCreateFileTool(file.WithWorkingDirectory(s.RootPath))
+		if err != nil {
+			return err
+		}
+		createToolLLM := createTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
+			return func(ctx context.Context, arguments string) (any, error) {
+				input, err := decodeToolInput[file.CreateFileInput](arguments)
+				if err != nil {
+					return nil, err
+				}
+				if err := createFileValidationFunc(ctx, input); err != nil {
+					return nil, err
+				}
+				return next(ctx, arguments)
+			}
+		})
+		if err := agent.AddTool(createToolLLM); err != nil {
+			return err
+		}
 	}
 
-	writeTool, err := file.NewWriteTool()
-	if err != nil {
-		return err
+	if s.allowsTool(toolNameStrReplace) {
+		strReplaceTool, err := file.NewStrReplaceTool(file.WithWorkingDirectory(s.RootPath))
+		if err != nil {
+			return err
+		}
+		if err := agent.AddTool(strReplaceTool.Tool()); err != nil {
+			return err
+		}
 	}
-	if err := agent.AddTool(writeTool.WithValidation(writeValidationFunc).Tool()); err != nil {
-		return err
+
+	if s.allowsTool(toolNameBash) {
+		bashTool, err := bash.New(bash.WithWorkingDirectory(s.RootPath))
+		if err != nil {
+			return err
+		}
+		bashToolLLM := bashTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
+			return func(ctx context.Context, arguments string) (any, error) {
+				input, err := decodeToolInput[bash.Input](arguments)
+				if err != nil {
+					return nil, err
+				}
+				if err := bashValidationFunc(ctx, input); err != nil {
+					return nil, err
+				}
+				return next(ctx, arguments)
+			}
+		})
+		if err := agent.AddTool(bashToolLLM); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
-func goValidationFunc(_ context.Context, input *golang.Input) error {
-	fmt.Printf("Do you want to run the command 'go %s'? (y/N): ", strings.Join(input.Args, " "))
-	var permission string
-	_, scanErr := fmt.Scanln(&permission)
-	if scanErr != nil {
-		return fmt.Errorf("failed to read user input: %w", scanErr)
+func decodeToolInput[T any](arguments string) (*T, error) {
+	var input *T
+	if err := json.Unmarshal([]byte(arguments), &input); err != nil {
+		return nil, &llm.ToolArgumentParseError{Err: err}
+	}
+	if input == nil {
+		return nil, &llm.ToolArgumentParseError{Err: fmt.Errorf("tool arguments must be a JSON object")}
 	}
 
-	if strings.EqualFold(permission, "y") {
-		return nil
-	}
-
-	return fmt.Errorf("user permission denied")
+	return input, nil
 }
 
-func writeValidationFunc(_ context.Context, input *file.WriteInput) error {
+func createFileValidationFunc(_ context.Context, input *file.CreateFileInput) error {
 	fmt.Printf("Do you want to write to the file '%s'? (y/N): ", input.Path)
 	var permission string
 	_, scanErr := fmt.Scanln(&permission)
 	if scanErr != nil {
-		return fmt.Errorf("failed to read user input: %w", scanErr)
+		return fmt.Errorf("user permission denied")
 	}
 
 	if strings.EqualFold(permission, "y") {
@@ -225,27 +308,12 @@ func writeValidationFunc(_ context.Context, input *file.WriteInput) error {
 	return fmt.Errorf("user permission denied")
 }
 
-func readValidationFunc(_ context.Context, input *file.ReadInput) error {
-	fmt.Printf("Do you want to read the file '%s'? (y/N): ", input.Path)
+func bashValidationFunc(_ context.Context, input *bash.Input) error {
+	fmt.Printf("Do you want to execute the bash command '%s'? (y/N): ", input.Command)
 	var permission string
 	_, scanErr := fmt.Scanln(&permission)
 	if scanErr != nil {
-		return fmt.Errorf("failed to read user input: %w", scanErr)
-	}
-
-	if strings.EqualFold(permission, "y") {
-		return nil
-	}
-
-	return fmt.Errorf("user permission denied")
-}
-
-func listValidationFunc(_ context.Context, input *file.ListInput) error {
-	fmt.Printf("Do you want to list the files in the directory '%s'? (y/N): ", input.Path)
-	var permission string
-	_, scanErr := fmt.Scanln(&permission)
-	if scanErr != nil {
-		return fmt.Errorf("failed to read user input: %w", scanErr)
+		return fmt.Errorf("user permission denied")
 	}
 
 	if strings.EqualFold(permission, "y") {

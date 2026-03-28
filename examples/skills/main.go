@@ -1,7 +1,22 @@
+// Copyright 2026 Simone Vellei
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +24,7 @@ import (
 	"github.com/henomis/phero/agent"
 	"github.com/henomis/phero/llm"
 	"github.com/henomis/phero/llm/openai"
+	memory "github.com/henomis/phero/memory/jsonfile"
 	"github.com/henomis/phero/skill"
 	"github.com/henomis/phero/tool/file"
 )
@@ -27,6 +43,8 @@ func main() {
 	llmClient, llmInfo := buildLLMFromEnv()
 	ctx := context.Background()
 
+	history, _ := memory.New("memory.json")
+
 	skillParser := skill.New("./skills")
 	list, err := skillParser.List()
 	if err != nil {
@@ -35,12 +53,12 @@ func main() {
 
 	tools := make([]*llm.Tool, 0, len(list))
 	for _, skillName := range list {
-		skill, err := skillParser.Parse(skillName)
+		skillItem, err := skillParser.Parse(skillName)
 		if err != nil {
 			panic(err)
 		}
 
-		skillAsTool, err := skill.AsTool(llmClient)
+		skillAsTool, err := skillItem.AsTool(llmClient, skill.WithMemory(history))
 		if err != nil {
 			panic(err)
 		}
@@ -52,11 +70,22 @@ func main() {
 		panic(err)
 	}
 
-	writeTool, err := file.NewWriteTool()
+	createFileTool, err := file.NewCreateFileTool()
 	if err != nil {
 		panic(err)
 	}
-	tools = append(tools, writeTool.WithValidation(writeValidationFunc).Tool())
+	tools = append(tools, createFileTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
+		return func(ctx context.Context, arguments string) (any, error) {
+			var input *file.CreateFileInput
+			if err := json.Unmarshal([]byte(arguments), &input); err != nil {
+				return nil, &llm.ToolArgumentParseError{Err: err}
+			}
+			if err := writeValidationFunc(ctx, input); err != nil {
+				return nil, err
+			}
+			return next(ctx, arguments)
+		}
+	}))
 
 	for _, tool := range tools {
 		if err := a.AddTool(tool); err != nil {
@@ -64,7 +93,16 @@ func main() {
 		}
 	}
 
-	res, err := a.Run(ctx, "create a web page containing a random quote, and save the html to a file called quote.html")
+	a.SetMemory(history)
+
+	res, err := a.Run(ctx, `Your task:
+1. Check if the file "/tmp/quote.html" exists.
+2. If the file does not exist, create a valid HTML file at "/tmp/quote.html" with a <div id="quote"></div> element, and insert a random quote inside this div.
+3. If the file already exists, update only the content inside the <div id="quote"></div> tags with a new random quote. Do not modify any other part of the file.
+4. Ensure the quote is properly escaped for HTML.
+
+Respond only with a summary of the action taken and the quote used. Do not include any code or file content in your response.
+`)
 	if err != nil {
 		panic(err)
 	}
@@ -105,7 +143,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	return client, info
 }
 
-func writeValidationFunc(_ context.Context, input *file.WriteInput) error {
+func writeValidationFunc(_ context.Context, input *file.CreateFileInput) error {
 	fmt.Printf("Do you want to write to the file '%s'? (y/N): ", input.Path)
 	var permission string
 	_, scanErr := fmt.Scanln(&permission)

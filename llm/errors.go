@@ -78,6 +78,9 @@ func (e *ToolNilInputTypeError) Error() string {
 	return fmt.Sprintf("failed to infer tool input type for %q: type parameter has nil zero value", e.ToolName)
 }
 
+// ErrToolNameRequired is returned by NewTool when the tool name is empty.
+var ErrToolNameRequired = errors.New("tool name is required")
+
 // ToolSchemaTransformError is returned when transforming a jsonschema.Schema to a map fails.
 type ToolSchemaTransformError struct {
 	Err error

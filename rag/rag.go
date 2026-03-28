@@ -17,6 +17,7 @@ package rag
 import (
 	"context"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 
@@ -44,6 +45,9 @@ type RAG struct {
 
 	topk              uint64
 	embedderBatchSize int
+
+	ensureMu   sync.Mutex
+	ensureDone bool
 }
 
 // New constructs a glue component that embeds texts and persists
@@ -82,6 +86,25 @@ func WithBatchSize(batchSize int) Option {
 	}
 }
 
+// ensureCollection calls EnsureCollection on the backing store exactly once
+// per RAG instance. A successful call is permanently cached; a failed call
+// is not cached so the next caller will retry.
+func (s *RAG) ensureCollection(ctx context.Context) error {
+	s.ensureMu.Lock()
+	defer s.ensureMu.Unlock()
+
+	if s.ensureDone {
+		return nil
+	}
+
+	if err := s.store.EnsureCollection(ctx); err != nil {
+		return &EnsureCollectionError{Cause: err}
+	}
+
+	s.ensureDone = true
+	return nil
+}
+
 // Ingest embeds the provided texts and upserts them into the underlying Store.
 //
 // Each text is stored in the point payload under the "text" key.
@@ -89,7 +112,7 @@ func (s *RAG) Ingest(ctx context.Context, texts []string) error {
 	if len(texts) == 0 {
 		return ErrEmptyTexts
 	}
-	if err := s.store.EnsureCollection(ctx); err != nil {
+	if err := s.ensureCollection(ctx); err != nil {
 		return err
 	}
 
@@ -107,7 +130,7 @@ func (s *RAG) Ingest(ctx context.Context, texts []string) error {
 		chunk := texts[start:end]
 		vectors, err := s.embedder.Embed(ctx, chunk)
 		if err != nil {
-			return err
+			return &IngestError{Op: "embed", BatchStart: start, BatchEnd: end, Cause: err}
 		}
 		if len(vectors) != len(chunk) {
 			return &EmbedderVectorCountMismatchError{Got: len(vectors), Want: len(chunk)}
@@ -126,7 +149,7 @@ func (s *RAG) Ingest(ctx context.Context, texts []string) error {
 		}
 
 		if err := s.store.Upsert(ctx, points); err != nil {
-			return err
+			return &IngestError{Op: "upsert", BatchStart: start, BatchEnd: end, Cause: err}
 		}
 	}
 
@@ -138,19 +161,23 @@ func (s *RAG) Query(ctx context.Context, queryText string) ([]vectorstore.Scored
 	if strings.TrimSpace(queryText) == "" {
 		return nil, ErrEmptyQueryText
 	}
-	if err := s.store.EnsureCollection(ctx); err != nil {
+	if err := s.ensureCollection(ctx); err != nil {
 		return nil, err
 	}
 
 	vectors, err := s.embedder.Embed(ctx, []string{queryText})
 	if err != nil {
-		return nil, err
+		return nil, &QueryError{Op: "embed", Cause: err}
 	}
 	if len(vectors) != 1 {
 		return nil, &EmbedderVectorCountMismatchError{Got: len(vectors), Want: 1, SingleQuery: true}
 	}
 
-	return s.store.Query(ctx, vectors[0], s.topk)
+	results, err := s.store.Query(ctx, vectors[0], s.topk)
+	if err != nil {
+		return nil, &QueryError{Op: "store query", Cause: err}
+	}
+	return results, nil
 }
 
 // AsTool exposes this RAG instance as an llm.FunctionTool.

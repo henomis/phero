@@ -1,3 +1,17 @@
+// Copyright 2026 Simone Vellei
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package main
 
 import (
@@ -206,12 +220,12 @@ Be direct and practical.`))
 }
 
 func makePlan(ctx context.Context, planner *agent.Agent, goal string) (Plan, error) {
-	out, err := planner.Run(ctx, goal)
+	response, err := planner.Run(ctx, goal)
 	if err != nil {
 		return Plan{}, err
 	}
 
-	out = extractJSONObject(out)
+	out := extractJSONObject(response.Content)
 	var plan Plan
 	if err := json.Unmarshal([]byte(out), &plan); err != nil {
 		return Plan{}, fmt.Errorf("failed to parse planner JSON: %w\nraw=%s", err, out)
@@ -258,12 +272,12 @@ func executePlan(ctx context.Context, runner *agent.Agent, plan Plan) ([]StepRes
 	results := make([]StepResult, 0, len(plan.Steps))
 	for _, step := range plan.Steps {
 		prompt := fmt.Sprintf("Execute this step now. step_name=%q go_args=%s", step.Name, mustJSON(step.GoArgs))
-		out, err := runner.Run(ctx, prompt)
+		response, err := runner.Run(ctx, prompt)
 		if err != nil {
 			return nil, err
 		}
 
-		out = extractJSONObject(out)
+		out := extractJSONObject(response.Content)
 		var r GoRunResult
 		if err := json.Unmarshal([]byte(out), &r); err != nil {
 			return nil, fmt.Errorf("failed to parse runner JSON: %w\nraw=%s", err, out)
@@ -279,7 +293,11 @@ func executePlan(ctx context.Context, runner *agent.Agent, plan Plan) ([]StepRes
 
 func synthesize(ctx context.Context, analyst *agent.Agent, goal string, plan Plan, stepResults []StepResult) (string, error) {
 	in := RunSummaryInput{Goal: goal, Plan: plan, StepResults: stepResults}
-	return analyst.Run(ctx, mustJSON(in))
+	response, err := analyst.Run(ctx, mustJSON(in))
+	if err != nil {
+		return "", err
+	}
+	return response.Content, nil
 }
 
 func reviewReport(ctx context.Context, critic *agent.Agent, goal string, plan Plan, stepResults []StepResult, report string) (string, error) {
@@ -295,7 +313,11 @@ func reviewReport(ctx context.Context, critic *agent.Agent, goal string, plan Pl
 		Report:      report,
 	}
 
-	return critic.Run(ctx, mustJSON(in))
+	response, err := critic.Run(ctx, mustJSON(in))
+	if err != nil {
+		return "", err
+	}
+	return response.Content, nil
 }
 
 func mustJSON(v any) string {

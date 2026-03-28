@@ -1,3 +1,17 @@
+// Copyright 2026 Simone Vellei
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package psql
 
 import (
@@ -6,10 +20,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"regexp"
 	"strconv"
 	"strings"
 
+	sqlutil "github.com/henomis/phero/internal/sql"
 	"github.com/henomis/phero/vectorstore"
 )
 
@@ -33,14 +47,19 @@ const (
 	DistanceDot
 )
 
+const defaultTableName = "vector_store"
+
 // Store is a PostgreSQL-backed implementation of vectorstore.Store.
 //
-// A Store is bound to a single SQL table.
+// A Store is bound to a single logical collection.
+// Points for all collections are stored in a single SQL table (by default
+// "vector_store") and separated by a `collection` column.
 //
 // The provided *sql.DB is treated as an injected dependency and is not owned by
 // the Store (i.e. Store does not Close it).
 type Store struct {
 	db              *sql.DB
+	collection      string
 	vectorSize      uint64
 	tableName       string
 	distance        Distance
@@ -79,20 +98,33 @@ func WithEnsureExtension(ensure bool) Option {
 	}
 }
 
-// New constructs a PostgreSQL-backed vectorstore bound to a single SQL table.
+// WithTable overrides the SQL table used by the store.
 //
-// tableName must be a safe identifier in the form `table` or `schema.table`.
-func New(db *sql.DB, tableName string, opts ...Option) (*Store, error) {
+// Default is "vector_store".
+//
+// table must be a safe identifier in the form `table` or `schema.table`.
+func WithTable(table string) Option {
+	return func(s *Store) {
+		s.tableName = table
+	}
+}
+
+// New constructs a PostgreSQL-backed vectorstore bound to a single collection.
+//
+// Points for all collections are stored in a single SQL table (by default
+// "vector_store") and separated by a `collection` column.
+func New(db *sql.DB, collection string, opts ...Option) (*Store, error) {
 	if db == nil {
 		return nil, ErrNilDB
 	}
-	if strings.TrimSpace(tableName) == "" {
-		return nil, ErrEmptyTableName
+	if strings.TrimSpace(collection) == "" {
+		return nil, ErrEmptyCollection
 	}
 
 	s := &Store{
 		db:              db,
-		tableName:       tableName,
+		collection:      collection,
+		tableName:       defaultTableName,
 		distance:        DistanceCosine,
 		ensureExtension: true,
 	}
@@ -105,7 +137,10 @@ func New(db *sql.DB, tableName string, opts ...Option) (*Store, error) {
 	if s.vectorSize == 0 {
 		return nil, ErrInvalidVectorSize
 	}
-	if _, err := quoteQualifiedIdent(s.tableName); err != nil {
+	if strings.TrimSpace(s.tableName) == "" {
+		return nil, ErrEmptyTableName
+	}
+	if _, err := sqlutil.QuoteQualifiedIdent(s.tableName); err != nil {
 		return nil, ErrInvalidTableName
 	}
 	return s, nil
@@ -122,7 +157,7 @@ func (s *Store) EnsureCollection(ctx context.Context) error {
 		}
 	}
 
-	table, err := quoteQualifiedIdent(s.tableName)
+	table, err := sqlutil.QuoteQualifiedIdent(s.tableName)
 	if err != nil {
 		return ErrInvalidTableName
 	}
@@ -139,7 +174,7 @@ func (s *Store) Upsert(ctx context.Context, points []vectorstore.Point) error {
 		return vectorstore.ErrEmptyPoints
 	}
 
-	table, err := quoteQualifiedIdent(s.tableName)
+	table, err := sqlutil.QuoteQualifiedIdent(s.tableName)
 	if err != nil {
 		return ErrInvalidTableName
 	}
@@ -179,7 +214,7 @@ func (s *Store) Upsert(ctx context.Context, points []vectorstore.Point) error {
 			payload = nil
 		}
 
-		if _, err := tx.ExecContext(ctx, stmt, p.ID, vecLit, payload); err != nil {
+		if _, err := tx.ExecContext(ctx, stmt, s.collection, p.ID, vecLit, payload); err != nil {
 			return err
 		}
 	}
@@ -199,7 +234,7 @@ func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint6
 		return nil, &VectorSizeMismatchError{Expected: s.vectorSize, Got: len(query)}
 	}
 
-	table, err := quoteQualifiedIdent(s.tableName)
+	table, err := sqlutil.QuoteQualifiedIdent(s.tableName)
 	if err != nil {
 		return nil, ErrInvalidTableName
 	}
@@ -216,7 +251,7 @@ func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint6
 
 	stmt := fmt.Sprintf(querySQLTemplate, scoreExpr, table, op)
 
-	rows, err := s.db.QueryContext(ctx, stmt, vecLit, limit)
+	rows, err := s.db.QueryContext(ctx, stmt, vecLit, s.collection, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +270,9 @@ func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint6
 
 		payload := map[string]any{}
 		if len(payloadBytes) > 0 {
-			_ = json.Unmarshal(payloadBytes, &payload)
+			if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+				return nil, &PayloadDecodeError{PointID: id, Cause: err}
+			}
 		}
 
 		out = append(out, vectorstore.ScoredPoint{ID: id, Score: float32(score64), Payload: payload})
@@ -263,15 +300,16 @@ func (s *Store) Delete(ctx context.Context, ids []string) error {
 		return vectorstore.ErrEmptyIDs
 	}
 
-	table, err := quoteQualifiedIdent(s.tableName)
+	table, err := sqlutil.QuoteQualifiedIdent(s.tableName)
 	if err != nil {
 		return ErrInvalidTableName
 	}
 
 	placeholders := make([]string, 0, len(filtered))
-	args := make([]any, 0, len(filtered))
+	args := make([]any, 0, len(filtered)+1)
+	args = append(args, s.collection)
 	for i, id := range filtered {
-		placeholders = append(placeholders, fmt.Sprintf("$%d", i+1))
+		placeholders = append(placeholders, fmt.Sprintf("$%d", i+2))
 		args = append(args, id)
 	}
 
@@ -282,13 +320,13 @@ func (s *Store) Delete(ctx context.Context, ids []string) error {
 
 // Clear deletes all points in the configured table.
 func (s *Store) Clear(ctx context.Context) error {
-	table, err := quoteQualifiedIdent(s.tableName)
+	table, err := sqlutil.QuoteQualifiedIdent(s.tableName)
 	if err != nil {
 		return ErrInvalidTableName
 	}
 
 	stmt := fmt.Sprintf(clearSQLTemplate, table)
-	_, err = s.db.ExecContext(ctx, stmt)
+	_, err = s.db.ExecContext(ctx, stmt, s.collection)
 	return err
 }
 
@@ -303,28 +341,6 @@ func distanceSQL(d Distance) (op, scoreExpr string, err error) {
 	default:
 		return "", "", fmt.Errorf("unknown distance: %d", d)
 	}
-}
-
-var safeIdent = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
-
-func quoteQualifiedIdent(name string) (string, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "", ErrInvalidTableName
-	}
-	parts := strings.Split(name, ".")
-	if len(parts) > 2 {
-		return "", ErrInvalidTableName
-	}
-
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if !safeIdent.MatchString(p) {
-			return "", ErrInvalidTableName
-		}
-		out = append(out, `"`+p+`"`)
-	}
-	return strings.Join(out, "."), nil
 }
 
 func vectorLiteral(vec []float32) (string, error) {

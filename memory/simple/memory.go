@@ -1,3 +1,17 @@
+// Copyright 2026 Simone Vellei
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package simple
 
 import (
@@ -8,10 +22,6 @@ import (
 )
 
 var _ memory.Memory = (*Memory)(nil)
-
-const (
-	summarySystemMessagePrefix = "Summary of previous conversation:\n"
-)
 
 // Option configures a Memory instance.
 type Option func(*Memory)
@@ -54,22 +64,8 @@ func WithSummarization(summaryLLM llm.LLM, summarizeThreshold, summarySize uint)
 		}
 
 		// if summarySize is zero, derive a default value from summarizeThreshold
-		if summarySize == 0 && summarizeThreshold > 0 {
-			summarySize = summarizeThreshold / 2
-			if summarySize == 0 {
-				summarySize = 1
-			}
-		}
-
-		// check that summarySize is less than summarizeThreshold to avoid infinite summarization loop
-		if summarySize >= summarizeThreshold && summarizeThreshold > 0 {
-			if summarizeThreshold > 1 {
-				summarySize = summarizeThreshold - 1
-			} else {
-				summarySize = 1
-			}
-		}
-		m.summarySize = summarySize
+		// To avoid an infinite summarization loop, summarySize must be less than summarizeThreshold.
+		m.summarySize = memory.ClampSummarySize(summarizeThreshold, summarySize)
 		m.summaryThreshold = summarizeThreshold
 	}
 }
@@ -90,7 +86,7 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 		toAppend := toSummarize[m.summarySize:]
 		toSummarize = toSummarize[:m.summarySize]
 
-		history := formatSummaryPrompt(toSummarize)
+		history := memory.FormatSummaryPrompt(toSummarize)
 
 		summaryMsg, err := m.llm.Execute(ctx, []llm.Message{history}, nil)
 		if err != nil {
@@ -99,7 +95,7 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 
 		messagesToStore := []llm.Message{{
 			Role:    llm.ChatMessageRoleSystem,
-			Content: summarySystemMessagePrefix + summaryMsg.Content,
+			Content: memory.SummarySystemMessagePrefix + summaryMsg.Message.Content,
 		}}
 
 		messagesToStore = append(messagesToStore, toAppend...)

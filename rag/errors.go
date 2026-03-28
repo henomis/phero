@@ -45,3 +45,42 @@ var ErrEmptyTexts = errors.New("empty texts")
 
 // ErrEmptyQueryText is returned when a query-by-text operation receives an empty query string.
 var ErrEmptyQueryText = errors.New("empty query text")
+
+// EnsureCollectionError is returned when the backing store fails to initialize its collection.
+type EnsureCollectionError struct {
+	Cause error
+}
+
+func (e *EnsureCollectionError) Error() string {
+	return fmt.Sprintf("ensure collection: %v", e.Cause)
+}
+
+func (e *EnsureCollectionError) Unwrap() error { return e.Cause }
+
+// IngestError is returned when an ingest operation fails at the embed or upsert step.
+// Op is "embed" or "upsert". BatchStart and BatchEnd identify the failing text slice.
+type IngestError struct {
+	Op         string
+	BatchStart int
+	BatchEnd   int
+	Cause      error
+}
+
+func (e *IngestError) Error() string {
+	return fmt.Sprintf("ingest: %s batch [%d:%d]: %v", e.Op, e.BatchStart, e.BatchEnd, e.Cause)
+}
+
+func (e *IngestError) Unwrap() error { return e.Cause }
+
+// QueryError is returned when a query operation fails at the embed or store-query step.
+// Op is "embed" or "store query".
+type QueryError struct {
+	Op    string
+	Cause error
+}
+
+func (e *QueryError) Error() string {
+	return fmt.Sprintf("query: %s: %v", e.Op, e.Cause)
+}
+
+func (e *QueryError) Unwrap() error { return e.Cause }

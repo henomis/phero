@@ -16,11 +16,7 @@ package embedding
 
 import (
 	"context"
-	"errors"
 )
-
-// ErrEmptyInput is returned when an embedding call receives no input texts.
-var ErrEmptyInput = errors.New("empty input")
 
 // Vector is an embedding vector.
 //

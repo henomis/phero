@@ -14,6 +14,7 @@
       <li><a href="index.html">Home</a></li>
       <li><a href="llm.html">LLM</a></li>
       <li><a href="agent.html">Agent</a></li>
+      <li><a href="trace.html">Trace</a></li>
       <li><a href="tool.html">Tool</a></li>
       <li><a href="mcp.html">MCP</a></li>
       <li><a href="embedding.html">Embedding</a></li>
@@ -64,7 +65,7 @@
       <h2>SKILL.md format</h2>
       <p>
         Skills are written in Markdown with a small YAML frontmatter header. The body describes when to use the skill and
-        the tool-call contract.
+        the execution contract.
       </p>
 
       <pre><code class="language-markdown">---
@@ -82,7 +83,7 @@ Use this skill when the user asks for a random quote (inspirational, motivationa
 
 ### Primary Action
 
-- Always run the Go program at `scripts/get_random_quote/main.go` via the `go` tool.
+- Always run `go run ./scripts/get_random_quote/main.go` via the `bash` tool.
 - Return exactly the quote line printed by the program (trim surrounding whitespace).</code></pre>
 
       <p>
@@ -92,10 +93,28 @@ Use this skill when the user asks for a random quote (inspirational, motivationa
     </section>
 
     <section>
+      <h2>Default tools available to skills</h2>
+      <p>
+        Each skill is executed by an internal agent. The agent automatically gets a small built-in toolbox rooted at the skill directory:
+        <code>view</code>, <code>create_file</code>, <code>str_replace</code>, and <code>bash</code>.
+      </p>
+      <p>
+        That means a skill can inspect local files, edit them, or run commands without extra setup in your application code.
+      </p>
+    </section>
+
+    <section>
       <h2>Example: a skill-backed script</h2>
       <p>
-        The bundled <code>get-random-quote</code> skill fetches a quote by running a small Go program.
+        The bundled <code>get-random-quote</code> skill fetches a quote by running a small Go program through the skill's <code>bash</code> tool.
       </p>
+
+      <pre><code class="language-markdown"># From examples/skills/skills/get-random-quote/SKILL.md
+
+1. Run the script:
+   go run ./scripts/get_random_quote/main.go
+2. Return the stdout output exactly as printed, trimming surrounding whitespace.
+3. If the script fails, surface the error instead of fabricating a quote.</code></pre>
 
       <pre><code class="language-go">// From examples/skills/skills/get-random-quote/scripts/get_random_quote/main.go
 
@@ -131,7 +150,13 @@ for _, skillName := range list {
         panic(err)
     }
 
-    tool, err := s.AsTool(llmClient)
+    tool, err := s.AsTool(
+        llmClient,
+        // Optional: give the skill-agent memory so it can do multi-step work.
+        skill.WithMemory(memory.New(20)),
+        // Optional: prevent runaway tool loops.
+        skill.WithMaxIterations(10),
+    )
     if err != nil {
         panic(err)
     }
@@ -144,14 +169,14 @@ for _, tool := range tools {
 }</code></pre>
 
       <p>
-        The example also adds a file-writing tool with interactive validation so the user can approve writes.
+        The examples/skills program uses <code>memory/jsonfile</code> for persistent history, and also adds a separate file-writing tool with interactive approval middleware.
       </p>
     </section>
 
     <section>
       <h2>Run the example</h2>
       <p>
-        The example loads skills from a relative path (<code>./skills</code>), so run it from its directory.
+        The example loads skills from a relative path (<code>./skills</code>) and stores history in <code>memory.json</code>, so run it from its directory.
         Provider setup depends on your chosen LLM; follow the example README.
       </p>
 
@@ -178,7 +203,7 @@ go run .</code></pre>
       <ul>
         <li><a href="agent.html">agent</a>: orchestrates tool calls and memory</li>
         <li><a href="llm.html">llm</a>: function tools used by skills</li>
-        <li><a href="tool.html">tool</a>: built-in tools often used in skills (file/go/python/human)</li>
+        <li><a href="tool.html">tool</a>: built-in tools often used in skills (file/bash/human)</li>
       </ul>
     </section>
   </main>

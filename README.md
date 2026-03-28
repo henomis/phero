@@ -15,7 +15,7 @@ Phero is a modern Go framework for building multi-agent AI systems. Like ants in
 - **🎯 Purpose-built for agents** Not an LLM wrapper; a framework for orchestrating cooperative agent systems
 - **🧩 Composable primitives** Small, focused packages that solve specific problems
 - **🔧 Tool-first design** Built-in support for function tools, skills, RAG, and MCP
-- **🎨 Developer-friendly** Clean APIs, opt-in tracing, OpenAI-compatible LLM support
+- **🎨 Developer-friendly** Clean APIs, opt-in tracing, OpenAI-compatible + Anthropic support
 - **🪶 Lightweight** No heavy dependencies; just Go and your choice of LLM provider
 
 
@@ -25,12 +25,13 @@ Phero is a modern Go framework for building multi-agent AI systems. Like ants in
 ### Core Capabilities
 
 - **🤝 Agent orchestration** Multi-agent workflows with role specialization and coordination
-- **🧩 LLM abstraction** Work with OpenAI, Ollama, or any OpenAI-compatible endpoint
+- **🧩 LLM abstraction** Work with OpenAI-compatible endpoints (OpenAI, Ollama, etc.) and Anthropic
 - **🛠️ Function tools** Expose Go functions as callable tools with automatic JSON Schema generation
 - **📚 RAG (Retrieval-Augmented Generation)** Built-in vector storage and semantic search
 - **🧠 Skills system** Define reusable agent capabilities in `SKILL.md` files
 - **🔌 MCP support** Integrate Model Context Protocol servers as agent tools
 - **🧾 Memory management** Conversational context storage for agents
+- **🔍 Tracing** Observe agent, LLM, tool, and memory lifecycle events with colorized terminal output
 - **✂️ Text splitting** Document chunking for RAG workflows
 - **🧬 Embeddings** Semantic search capabilities via OpenAI embeddings
 - **🗄️ Vector stores** Vector database integration
@@ -40,7 +41,7 @@ Phero is a modern Go framework for building multi-agent AI systems. Like ants in
 ### Requirements
 
 - Go 1.25.5 or later
-- An LLM provider (OpenAI, Ollama, or OpenAI-compatible endpoint)
+- An LLM provider (OpenAI / Ollama / OpenAI-compatible endpoint, or Anthropic)
 
 
 
@@ -69,12 +70,13 @@ Phero is organized into focused packages, each solving a specific problem:
 ### 🤖 Agent Layer
 
 - **`agent`** Core orchestration for LLM-based agents with tool execution and chat loops
-- **`memory`** Conversational context management for multi-turn interactions
+- **`memory`** Conversational context management for multi-turn interactions (in-process, file-backed, RAG-backed, or PostgreSQL-backed)
 
 ### 💬 LLM Layer
 
 - **`llm`** Clean LLM interface with function tool support and JSON Schema utilities
 - **`llm/openai`** OpenAI-compatible client (works with OpenAI, Ollama, and compatible endpoints)
+- **`llm/anthropic`** Anthropic API client
 
 ### 🧠 Knowledge Layer
 
@@ -90,9 +92,9 @@ Phero is organized into focused packages, each solving a specific problem:
 
 - **`skill`** Parse SKILL.md files and expose them as agent capabilities
 - **`mcp`** Model Context Protocol adapter for external tool integration
-- **`tool/file`** File system operations
-- **`tool/go`** Safe Go command execution
-- **`tool/python`** Python script execution
+- **`trace`** Typed observability hooks plus a human-readable text tracer for agent and LLM activity
+- **`tool/file`** File viewing and editing helpers (`view`, `create_file`, `str_replace`)
+- **`tool/bash`** Bash command execution
 - **`tool/human`** Human-in-the-loop input collection
 
 
@@ -112,6 +114,7 @@ Comprehensive examples are included in the [`examples/`](examples/) directory:
 | [Skill](examples/skills/) | Discover SKILL.md files and expose them as callable agent tools |
 | [MCP Integration](examples/mcp/) | Run an MCP server as a subprocess and expose its tools to agents |
 | [Supervisor Blackboard](examples/supervisor-blackboard/) | Supervisor-worker pattern with a shared blackboard for coordination |
+| [Tracing](examples/tracing/) | Attach a colorized tracer to an agent and inspect LLM requests, tool calls, and memory events in real time |
 
 
 

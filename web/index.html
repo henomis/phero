@@ -14,6 +14,7 @@
       <li><a href="index.html">Home</a></li>
       <li><a href="llm.html">LLM</a></li>
       <li><a href="agent.html">Agent</a></li>
+      <li><a href="trace.html">Trace</a></li>
       <li><a href="tool.html">Tool</a></li>
       <li><a href="mcp.html">MCP</a></li>
       <li><a href="embedding.html">Embedding</a></li>
@@ -36,7 +37,7 @@
         <li>🎯 <strong>Purpose-built for agents</strong>: Not an LLM wrapper; a framework for orchestrating cooperative agent systems</li>
         <li>🧩 <strong>Composable primitives</strong>: Small, focused packages that solve specific problems</li>
         <li>🔧 <strong>Tool-first design</strong>: Built-in support for function tools, skills, RAG, and MCP</li>
-        <li>🎨 <strong>Developer-friendly</strong>: Clean APIs, opt-in tracing, OpenAI-compatible LLM support</li>
+        <li>🎨 <strong>Developer-friendly</strong>: Clean APIs, opt-in tracing, OpenAI-compatible + Anthropic support</li>
         <li>🪶 <strong>Lightweight</strong>: No heavy dependencies; just Go and your choice of LLM provider</li>
       </ul>
     </section>
@@ -44,12 +45,13 @@
       <h2>Features</h2>
       <ul>
         <li>🤝 <strong>Agent orchestration</strong>: Multi-agent workflows with role specialization and coordination</li>
-        <li>🧩 <strong>LLM abstraction</strong>: Work with OpenAI, Ollama, or any OpenAI-compatible endpoint</li>
+        <li>🧩 <strong>LLM abstraction</strong>: Work with OpenAI-compatible endpoints (OpenAI, Ollama, etc.) and Anthropic</li>
         <li>🛠️ <strong>Function tools</strong>: Expose Go functions as callable tools with automatic JSON Schema generation</li>
         <li>📚 <strong>RAG (Retrieval-Augmented Generation)</strong>: Built-in vector storage and semantic search</li>
         <li>🧠 <strong>Skills system</strong>: Define reusable agent capabilities in SKILL.md files</li>
         <li>🔌 <strong>MCP support</strong>: Integrate Model Context Protocol servers as agent tools</li>
         <li>🧾 <strong>Memory management</strong>: Conversational context storage for agents</li>
+        <li>🔍 <strong>Tracing</strong>: Observe agent, LLM, tool, and memory lifecycle events with colorized terminal output</li>
         <li>✂️ <strong>Text splitting</strong>: Document chunking for RAG workflows</li>
         <li>🧬 <strong>Embeddings</strong>: Semantic search capabilities via OpenAI embeddings</li>
         <li>🗄️ <strong>Vector stores</strong>: Vector database integration</li>
@@ -61,13 +63,19 @@
         <li><strong>Agent Layer</strong>
           <ul>
             <li><code>agent</code>: Core orchestration for LLM-based agents with tool execution and chat loops</li>
-            <li><code>memory</code>: Conversational context management for multi-turn interactions</li>
+            <li><code>memory</code>: Conversational context management for multi-turn interactions (in-process, file-backed, PostgreSQL-backed, or semantic RAG-backed)</li>
           </ul>
         </li>
         <li><strong>LLM Layer</strong>
           <ul>
             <li><code>llm</code>: Clean LLM interface with function tool support and JSON Schema utilities</li>
             <li><code>llm/openai</code>: OpenAI-compatible client (works with OpenAI, Ollama, and compatible endpoints)</li>
+            <li><code>llm/anthropic</code>: Anthropic API client</li>
+          </ul>
+        </li>
+        <li><strong>Observability</strong>
+          <ul>
+            <li><code>trace</code>: Typed lifecycle events and a human-readable text tracer for agents and raw LLM calls</li>
           </ul>
         </li>
         <li><strong>Knowledge Layer</strong>
@@ -85,9 +93,8 @@
           <ul>
             <li><code>skill</code>: Parse SKILL.md files and expose them as agent capabilities</li>
             <li><code>mcp</code>: Model Context Protocol adapter for external tool integration</li>
-            <li><code>tool/file</code>: File system operations</li>
-            <li><code>tool/go</code>: Safe Go command execution</li>
-            <li><code>tool/python</code>: Python script execution</li>
+            <li><code>tool/file</code>: File viewing and editing helpers (<code>view</code>, <code>create_file</code>, <code>str_replace</code>)</li>
+            <li><code>tool/bash</code>: Bash command execution</li>
             <li><code>tool/human</code>: Human-in-the-loop input collection</li>
           </ul>
         </li>
@@ -109,8 +116,24 @@
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/skills">Skill</a></td><td>Discover SKILL.md files and expose them as callable agent tools</td></tr>
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/mcp">MCP Integration</a></td><td>Run an MCP server as a subprocess and expose its tools to agents</td></tr>
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/supervisor-blackboard">Supervisor Blackboard</a></td><td>Supervisor-worker pattern with a shared blackboard for coordination</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/tracing">Tracing</a></td><td>Attach a colorized tracer to an agent and inspect LLM requests, tool calls, and memory events in real time</td></tr>
         </tbody>
       </table>
+    </section>
+
+    <section>
+      <h2>Tracing</h2>
+      <p>
+        Tracing is opt-in. Attach a tracer to an agent with <code>SetTracer</code> to observe typed events for agent lifecycle,
+        LLM requests and responses, tool calls and results, and memory operations.
+      </p>
+
+      <pre><code class="language-go">a.SetTracer(trace.New(os.Stderr))</code></pre>
+
+      <p>
+        The built-in text tracer writes colorized, human-readable lines to the terminal. See <a href="trace.html">Trace</a>
+        for the full package overview and usage examples.
+      </p>
     </section>
     <section>
       <h2>Design Philosophy</h2>

@@ -1,3 +1,17 @@
+// Copyright 2026 Simone Vellei
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package psql
 
 import (
@@ -8,11 +22,11 @@ import (
 var (
 	// ErrNilDB is returned when New receives a nil *sql.DB.
 	ErrNilDB = errors.New("nil db")
-	// ErrEmptyTableName is returned when New receives an empty table name.
+	// ErrEmptyCollection is returned when New receives an empty collection name.
+	ErrEmptyCollection = errors.New("empty collection")
+	// ErrEmptyTableName is returned when WithTable (or internal defaults) result
+	// in an empty table name.
 	ErrEmptyTableName = errors.New("empty table name")
-	// ErrEmptyCollection is kept for backward compatibility with earlier versions
-	// that used a logical collection name.
-	ErrEmptyCollection = ErrEmptyTableName
 	// ErrInvalidVectorSize is returned when the vector size is missing or invalid.
 	ErrInvalidVectorSize = errors.New("invalid vector size")
 	// ErrInvalidTableName is returned when the configured table name is not a safe SQL identifier.
@@ -50,3 +64,16 @@ type InvalidVectorValueError struct {
 func (e *InvalidVectorValueError) Error() string {
 	return fmt.Sprintf("invalid vector value at index %d: %v", e.Index, e.Value)
 }
+
+// PayloadDecodeError is returned when a stored JSON payload cannot be
+// unmarshalled for a given point ID.
+type PayloadDecodeError struct {
+	PointID string
+	Cause   error
+}
+
+func (e *PayloadDecodeError) Error() string {
+	return fmt.Sprintf("decode payload for point %q: %v", e.PointID, e.Cause)
+}
+
+func (e *PayloadDecodeError) Unwrap() error { return e.Cause }

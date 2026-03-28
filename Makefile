@@ -65,7 +65,7 @@ clean:
 ## license: Add Apache license headers to all Go files
 license:
 	@echo "Adding license headers..."
-	addlicense -c "Simone Vellei" -l apache ./**/*.go
+	find . -type f -name '*.go' -exec addlicense -c "Simone Vellei" -l apache {} +
 
 ## doc: Generate Go documentation in HTML format
 doc:

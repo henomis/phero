@@ -14,6 +14,7 @@
       <li><a href="index.html">Home</a></li>
       <li><a href="llm.html">LLM</a></li>
       <li><a href="agent.html">Agent</a></li>
+      <li><a href="trace.html">Trace</a></li>
       <li><a href="tool.html">Tool</a></li>
       <li><a href="mcp.html">MCP</a></li>
       <li><a href="embedding.html">Embedding</a></li>
@@ -47,14 +48,39 @@
       <h2>Using an LLM backend</h2>
       <p>
         Any backend that implements <code>llm.LLM</code> can power agents and tools.
-        Phero includes an OpenAI-compatible client at <code>llm/openai</code>.
+        Phero includes an OpenAI-compatible client at <code>llm/openai</code> and an Anthropic Messages API client at <code>llm/anthropic</code>.
       </p>
 
       <ul>
-        <li>Choose a backend (e.g. <code>llm/openai</code> or your own implementation)</li>
+        <li>Choose a backend (e.g. <code>llm/openai</code>, <code>llm/anthropic</code>, or your own implementation)</li>
         <li>Pass that client into <a href="agent.html">agent.New</a></li>
         <li>Optionally attach tools created via <code>llm.NewTool</code></li>
       </ul>
+    </section>
+
+    <section>
+      <h2>Anthropic backend</h2>
+      <p>
+        <code>llm/anthropic</code> implements <code>llm.LLM</code> using Anthropic's Messages API.
+        It keeps the same OpenAI-shaped message/tool types at the boundary, so the rest of the framework (agents, tools, memory)
+        doesn't need to change.
+      </p>
+
+      <pre><code class="language-go">import (
+    "os"
+
+    "github.com/henomis/phero/llm/anthropic"
+)
+
+llmClient := anthropic.New(
+    os.Getenv("ANTHROPIC_API_KEY"),
+    anthropic.WithModel("claude-sonnet-4-6"),
+    anthropic.WithMaxTokens(2048),
+)</code></pre>
+
+      <p>
+        If you pass an empty API key, the underlying Anthropic SDK will fall back to its environment variable configuration.
+      </p>
     </section>
 
     <section>
@@ -90,6 +116,51 @@ if err != nil {
     </section>
 
     <section>
+      <h2>Tool middleware</h2>
+      <p>
+        Tools support middleware via <code>tool.Use(...)</code>.
+        This is the place to add validation, permission checks, logging, or other cross-cutting behavior without baking it into each tool handler.
+      </p>
+
+      <pre><code class="language-go">timeTool, err := llm.NewTool(
+    "get_current_time",
+    "Get the current local time",
+    getCurrentTime,
+)
+if err != nil {
+    panic(err)
+}
+
+timeTool.Use(func(tool *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
+    return func(ctx context.Context, arguments string) (any, error) {
+        fmt.Printf("running %s with args %s\n", tool.Name(), arguments)
+        return next(ctx, arguments)
+    }
+})</code></pre>
+
+      <p>
+        Middleware order is preserved: if you call <code>tool.Use(m1, m2)</code>, then <code>m1</code> runs before <code>m2</code>.
+        This replaces older per-tool validation helpers and keeps approval logic at wiring time.
+      </p>
+    </section>
+
+    <section>
+      <h2>Tracing raw LLM calls</h2>
+      <p>
+        The <code>trace</code> package can wrap any <code>llm.LLM</code> with <code>trace.NewLLM</code>. This is useful when you want
+        observability around direct <code>Execute</code> calls without going through an agent.
+      </p>
+
+      <pre><code class="language-go">traced := trace.NewLLM(llmClient, trace.New(os.Stderr))
+
+result, err := traced.Execute(ctx, messages, tools)</code></pre>
+
+      <p>
+        When called inside an agent, request and response events are automatically annotated with the agent name and iteration number.
+      </p>
+    </section>
+
+    <section>
       <h2>Putting it together</h2>
       <p>
         The minimal loop is: create an LLM client, register one or more tools, then run an agent.
@@ -106,6 +177,7 @@ go run ./examples/conversational-agent</code></pre>
       <h2>Related packages</h2>
       <ul>
         <li><a href="agent.html">agent</a>: orchestration loop around <code>llm.LLM</code> + tools</li>
+        <li><a href="trace.html">trace</a>: observability wrapper for agents and standalone LLM calls</li>
         <li><a href="tool.html">tool</a>: prebuilt tools you can attach to agents/models</li>
         <li><a href="embedding.html">embedding</a>: vector embeddings for RAG and memory</li>
       </ul>

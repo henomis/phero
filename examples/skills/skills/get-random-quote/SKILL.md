@@ -1,48 +1,27 @@
 ---
 name: get-random-quote
-description: Fetches and returns a single random quote by running the Go script scripts/get_random_quote/main.go.
+description: Fetches and displays a random inspirational or motivational quote by running the project's Go script. Use this skill whenever the user asks for a quote, wants motivation or inspiration, or says anything like "give me a quote", "random quote", "inspire me", or "motivational quote". Always use this skill rather than making up a quote yourself.
 ---
 
-# Random Quote Retriever
+# Get Random Quote
 
-## Overview
+Fetches a single random quote from the remote API by executing the Go script at `scripts/get_random_quote/main.go`.
 
-Use this skill when the user asks for a random quote (inspirational, motivational, general). This skill must retrieve the quote by executing the repository's Go script and returning its stdout.
+## Steps
 
-**Keywords**: quote, random quote, inspirational quote, motivational quote, zenquotes, golang, go run, stdout
+1. Run the script:
+```
+   go run ./scripts/get_random_quote/main.go
+```
+2. Return the stdout output exactly as printed, trimming surrounding whitespace.
+   - Expected format: `Quote text - Author`
 
-## How It Works
+## Error Handling
 
-### Primary Action
+- If stdout is empty and stderr has content, return a brief failure message and include the stderr text.
+- Do not fabricate a quote if the script fails — surface the error instead.
 
-- Always run the Go program at `scripts/get_random_quote/main.go` via the `go` tool.
-- Return exactly the quote line printed by the program (trim surrounding whitespace).
+## Requirements
 
-### Tool Call Contract
-
-- Call `go` with args equivalent to:
-	- `go run ./scripts/get_random_quote/main.go`
-- If `stdout` is empty but `stderr` contains an explanation, return a short failure message and include the `stderr`.
-
-## Features
-
-### Single Quote Output
-
-- Produces one quote per request
-- Preserves punctuation and attribution as printed by the script
-
-### Robust Error Handling
-
-- If the API is unreachable or returns an unexpected payload, surface the script's error output
-- Do not fabricate quotes if the tool execution fails
-
-## Technical Details
-
-### Runtime Requirements
-
-- Requires the `go` toolchain available on PATH
-- Requires outbound network access to fetch a quote from the remote API
-
-### Output Format
-
-- Expected output is a single line in the form: `Quote - Author`
+- `go` toolchain must be on PATH
+- Outbound network access is required to reach the quote API

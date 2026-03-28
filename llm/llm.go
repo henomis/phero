@@ -47,18 +47,42 @@ const ChatMessageRoleAssistant = openai.ChatMessageRoleAssistant
 // ChatMessageRoleTool is the role for tool-result messages.
 const ChatMessageRoleTool = openai.ChatMessageRoleTool
 
+// Usage holds token consumption figures from a single LLM call.
+type Usage struct {
+	// InputTokens is the number of tokens in the prompt sent to the model.
+	InputTokens int
+	// OutputTokens is the number of tokens produced by the model.
+	OutputTokens int
+}
+
+// Result represents the output of an LLM execution, including the assistant message and any tool calls.
+type Result struct {
+	Message *Message
+	// Usage holds token counts for this call. May be nil when the provider does
+	// not return usage information.
+	Usage *Usage
+}
+
 // LLM is the minimal interface implemented by chat-model backends.
 //
 // Implementations are expected to accept a list of messages and return the next
 // assistant message. Tools can be configured via WithTools.
 type LLM interface {
-	Execute(context.Context, []Message, []*Tool) (*Message, error)
+	Execute(context.Context, []Message, []*Tool) (*Result, error)
 }
 
 // ToolHandler is the low-level handler signature used by FunctionTool.
 //
 // arguments is the raw JSON string received from the model.
 type ToolHandler func(ctx context.Context, arguments string) (any, error)
+
+// ToolMiddleware wraps a tool handler.
+//
+// Middlewares can be used to add cross-cutting behavior (e.g. input validation,
+// permission checks, logging) without baking that logic into each tool implementation.
+//
+// Middleware order is preserved: if you call tool.Use(m1, m2), m1 runs before m2.
+type ToolMiddleware func(tool *Tool, next ToolHandler) ToolHandler
 
 // Tool is a Tool that wraps a function.
 type Tool struct {
@@ -73,6 +97,10 @@ type Tool struct {
 
 	// Handle calls the underlying function with the given arguments.
 	handle ToolHandler
+
+	// middlewares wraps the tool handler to provide cross-cutting behavior
+	// (e.g., input validation, permission checks, logging).
+	middlewares []ToolMiddleware
 }
 
 // Name returns the stable name used to identify this tool to the LLM.
@@ -92,7 +120,19 @@ func (t *Tool) InputSchema() map[string]any {
 
 // Handle calls the underlying function with the given arguments.
 func (t *Tool) Handle(ctx context.Context, arguments string) (any, error) {
-	return t.handle(ctx, arguments)
+	h := t.handle
+	for i := len(t.middlewares) - 1; i >= 0; i-- {
+		h = t.middlewares[i](t, h)
+	}
+	return h(ctx, arguments)
+}
+
+// Use appends middleware(s) to this tool.
+//
+// Middlewares are executed in the order they are added.
+func (t *Tool) Use(middlewares ...ToolMiddleware) *Tool {
+	t.middlewares = append(t.middlewares, middlewares...)
+	return t
 }
 
 // NewTool creates a new Tool with the given name, description, and handler function.
@@ -125,6 +165,10 @@ func (t *Tool) Handle(ctx context.Context, arguments string) (any, error) {
 //		// handle error
 //	}
 func NewTool[T, R any](name, description string, handler func(ctx context.Context, args T) (R, error)) (*Tool, error) {
+	if name == "" {
+		return nil, ErrToolNameRequired
+	}
+
 	reflector := &jsonschema.Reflector{
 		ExpandedStruct:             true,
 		RequiredFromJSONSchemaTags: false,
@@ -187,5 +231,43 @@ func NewTool[T, R any](name, description string, handler func(ctx context.Contex
 			}
 			return handler(ctx, args)
 		},
+	}, nil
+}
+
+// NewRawTool creates a new Tool from an externally supplied JSON Schema and a raw handler.
+//
+// Use this when the input schema is already known rather than inferred from a Go type —
+// for example when forwarding tools from an MCP server or loading them from configuration.
+//
+// The provided schema is deep-cloned via a JSON round-trip and then normalized through
+// ensureStrictJSONSchema, so the caller's original map is never mutated.
+//
+// The handler receives the raw JSON argument string exactly as sent by the model,
+// without any intermediate unmarshaling.
+func NewRawTool(name, description string, inputSchema map[string]any, handler ToolHandler) (*Tool, error) {
+	if name == "" {
+		return nil, ErrToolNameRequired
+	}
+
+	// Deep-clone via JSON round-trip so the caller's map is never mutated.
+	schemaMap, err := jsonEncodeDecode[map[string]any](inputSchema)
+	if err != nil {
+		return nil, &ToolSchemaTransformError{Err: err}
+	}
+
+	schemaMap, err = ensureStrictJSONSchema(schemaMap)
+	if err != nil {
+		return nil, &ToolSchemaStrictnessError{Err: err}
+	}
+
+	if description != "" && schemaMap != nil {
+		schemaMap["description"] = description
+	}
+
+	return &Tool{
+		name:        name,
+		description: description,
+		inputSchema: schemaMap,
+		handle:      handler,
 	}, nil
 }

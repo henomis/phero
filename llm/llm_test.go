@@ -16,6 +16,8 @@ package llm
 
 import (
 	"context"
+	"errors"
+	"reflect"
 	"testing"
 )
 
@@ -97,5 +99,128 @@ func TestNewFunctionTool_PointerToAnonymousEmptyStruct_DoesNotPanic(t *testing.T
 
 	if got, _ := tool.InputSchema()["type"].(string); got != "object" {
 		t.Fatalf("schema type: expected %q, got %#v", "object", tool.InputSchema()["type"])
+	}
+}
+
+func TestToolMiddleware_Order(t *testing.T) {
+	var calls []string
+	tool, err := NewTool("nick", "", func(_ context.Context, in *testInput) (*testOutput, error) {
+		calls = append(calls, "handler")
+		return &testOutput{NickName: in.Name}, nil
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	tool.Use(
+		func(_ *Tool, next ToolHandler) ToolHandler {
+			return func(ctx context.Context, arguments string) (any, error) {
+				calls = append(calls, "mw1")
+				return next(ctx, arguments)
+			}
+		},
+		func(_ *Tool, next ToolHandler) ToolHandler {
+			return func(ctx context.Context, arguments string) (any, error) {
+				calls = append(calls, "mw2")
+				return next(ctx, arguments)
+			}
+		},
+	)
+
+	_, err = tool.Handle(context.Background(), `{"name":"Simone"}`)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if !reflect.DeepEqual(calls, []string{"mw1", "mw2", "handler"}) {
+		t.Fatalf("unexpected call order: %#v", calls)
+	}
+}
+
+func TestToolMiddleware_InputValidation_ShortCircuits(t *testing.T) {
+	var handled bool
+	tool, err := NewTool("nick", "", func(_ context.Context, _ *testInput) (*testOutput, error) {
+		handled = true
+		return &testOutput{NickName: "x"}, nil
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	tool.Use(func(_ *Tool, next ToolHandler) ToolHandler {
+		return func(ctx context.Context, arguments string) (any, error) {
+			// For this test we don't need to decode JSON; just reject based on raw args.
+			_ = arguments
+			return nil, errors.New("invalid")
+		}
+	})
+
+	_, err = tool.Handle(context.Background(), `{"name":"nope"}`)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if handled {
+		t.Fatalf("expected handler not to run")
+	}
+}
+
+func TestNewRawTool_PreservesObjectSchema(t *testing.T) {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"city": map[string]any{"type": "string"},
+		},
+	}
+	tool, err := NewRawTool("weather", "get weather", schema, func(_ context.Context, args string) (any, error) {
+		return args, nil
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if got, _ := tool.InputSchema()["type"].(string); got != "object" {
+		t.Fatalf("schema type: expected %q, got %#v", "object", tool.InputSchema()["type"])
+	}
+	props, ok := tool.InputSchema()["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected properties map, got %#v", tool.InputSchema()["properties"])
+	}
+	if _, ok := props["city"]; !ok {
+		t.Fatalf("expected 'city' property, got %#v", props)
+	}
+}
+
+func TestNewRawTool_HandlerReceivesRawJSON(t *testing.T) {
+	var got string
+	tool, err := NewRawTool("echo", "", map[string]any{
+		"type":       "object",
+		"properties": map[string]any{},
+	}, func(_ context.Context, args string) (any, error) {
+		got = args
+		return "ok", nil
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	payload := `{"hello":"world"}`
+	_, err = tool.Handle(context.Background(), payload)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if got != payload {
+		t.Fatalf("handler got %q, want %q", got, payload)
+	}
+}
+
+func TestNewRawTool_DoesNotMutateCallerSchema(t *testing.T) {
+	original := map[string]any{
+		"type":       "object",
+		"properties": map[string]any{"x": map[string]any{"type": "integer"}},
+	}
+	_, err := NewRawTool("t", "desc", original, func(_ context.Context, _ string) (any, error) { return nil, nil })
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if _, ok := original["description"]; ok {
+		t.Fatalf("original schema was mutated: 'description' key was added")
 	}
 }
