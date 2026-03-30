@@ -103,7 +103,7 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Printf("Agent: %s\n", response)
+	fmt.Printf("Agent: %s\n", response.Content)
 }
 
 func buildLLMFromEnv() (llm.LLM, string) {
