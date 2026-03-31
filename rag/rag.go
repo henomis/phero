@@ -175,7 +175,7 @@ func (s *RAG) Ingest(ctx context.Context, splitter textsplitter.Splitter) error 
 
 	for doc, err := range splitter.Split(ctx) {
 		if err != nil {
-			return &IngestError{Op: "embed", BatchStart: start, BatchEnd: end, Cause: err}
+			return err
 		}
 		batch = append(batch, doc)
 		if len(batch) >= batchSize {
