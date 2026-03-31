@@ -29,10 +29,6 @@ import (
 
 func main() {
 	ctx := context.Background()
-
-	os.Setenv("OPENAI_BASE_URL", "http://localhost:11434/v1")
-	os.Setenv("MODEL", "minimax-m2.7:cloud")
-	os.Setenv("OPENAI_API_KEY", "")
 	llmClient, llmInfo := buildLLMFromEnv()
 
 	// sharedMemory is given to every agent so the full conversation context

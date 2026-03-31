@@ -15,15 +15,16 @@
 package jsonfile_test
 
 import (
-"bufio"
-"encoding/json"
-"os"
-"strings"
-"testing"
-"time"
+	"bufio"
+	"encoding/json"
+	"errors"
+	"os"
+	"strings"
+	"testing"
+	"time"
 
-"github.com/henomis/phero/trace"
-"github.com/henomis/phero/trace/jsonfile"
+	"github.com/henomis/phero/trace"
+	"github.com/henomis/phero/trace/jsonfile"
 )
 
 func TestNew_EmptyPath_ReturnsError(t *testing.T) {
@@ -39,9 +40,13 @@ func TestNew_ValidPath_CreatesFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := f.Name()
-	f.Close()
-	os.Remove(path)
-	defer os.Remove(path)
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	removeIfExists(t, path)
+	t.Cleanup(func() {
+		removeIfExists(t, path)
+	})
 
 	tr, err := jsonfile.New(path)
 	if err != nil {
@@ -62,8 +67,12 @@ func TestTracer_Trace_WritesNDJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := f.Name()
-	f.Close()
-	defer os.Remove(path)
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	t.Cleanup(func() {
+		removeIfExists(t, path)
+	})
 
 	tr, err := jsonfile.New(path)
 	if err != nil {
@@ -93,7 +102,11 @@ func TestTracer_Trace_WritesNDJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	}()
 
 	expectedTypes := []string{
 		"AgentStart", "AgentEnd", "AgentIteration",
@@ -133,8 +146,12 @@ func TestTracer_Trace_ErrorEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := f.Name()
-	f.Close()
-	defer os.Remove(path)
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	t.Cleanup(func() {
+		removeIfExists(t, path)
+	})
 
 	tr, err := jsonfile.New(path)
 	if err != nil {
@@ -162,3 +179,11 @@ type testError struct{ msg string }
 func (e testError) Error() string { return e.msg }
 
 var errTest = testError{"tool failed"}
+
+func removeIfExists(t *testing.T, path string) {
+	t.Helper()
+
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Remove(%q): %v", path, err)
+	}
+}

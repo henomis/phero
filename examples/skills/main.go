@@ -108,7 +108,7 @@ Respond only with a summary of the action taken and the quote used. Do not inclu
 	}
 
 	fmt.Printf("LLM used: %s\n", llmInfo)
-	fmt.Printf("Agent response: %s\n", res)
+	fmt.Printf("Agent response: %s\n", res.Content)
 }
 
 func buildLLMFromEnv() (llm.LLM, string) {
