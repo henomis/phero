@@ -25,6 +25,10 @@ var ErrBaseURLRequired = errors.New("a2a: base URL is required")
 // ErrURLRequired is returned when an empty base URL is passed to NewClient.
 var ErrURLRequired = errors.New("a2a: base URL is required")
 
+// ErrInvalidBaseURL is returned when the provided base URL is not a
+// well-formed absolute URL (must have a scheme and host).
+var ErrInvalidBaseURL = errors.New("a2a: base URL must be a well-formed absolute URL with a scheme and host")
+
 // ErrNoTextContent is returned when a remote A2A response contains no text part.
 var ErrNoTextContent = errors.New("a2a: response contains no text content")
 

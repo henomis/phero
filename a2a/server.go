@@ -18,6 +18,7 @@ import (
 	"context"
 	"iter"
 	"net/http"
+	"net/url"
 	"strings"
 
 	sdka2a "github.com/a2aproject/a2a-go/v2/a2a"
@@ -44,6 +45,11 @@ func New(a *agent.Agent, baseURL string) (*Server, error) {
 
 	if baseURL == "" {
 		return nil, ErrBaseURLRequired
+	}
+
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return nil, ErrInvalidBaseURL
 	}
 
 	s := &Server{

@@ -16,6 +16,7 @@ package a2a
 
 import (
 	"context"
+	"net/url"
 
 	sdka2a "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
@@ -54,6 +55,11 @@ type Client struct {
 func NewClient(ctx context.Context, baseURL string, opts ...ClientOption) (*Client, error) {
 	if baseURL == "" {
 		return nil, ErrURLRequired
+	}
+
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return nil, ErrInvalidBaseURL
 	}
 
 	cfg := &clientConfig{
