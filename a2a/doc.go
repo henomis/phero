@@ -22,4 +22,41 @@
 //
 // Client side: use [NewClient] to resolve a remote agent's card and then call
 // [Client.AsTool] to obtain an [llm.Tool] that a phero agent can invoke.
+//
+// # Current limitations
+//
+// This package is a minimal, text-focused A2A bridge and does not implement
+// the full A2A protocol surface. Callers should be aware of the following
+// constraints.
+//
+// Protocol coverage: only a single JSON-RPC interface is advertised. The
+// generated [Server.AgentCard] always declares text/plain as the sole input
+// and output mode and exposes exactly one skill derived from the wrapped agent.
+// Multiple transports, richer capability metadata, and multi-skill cards are
+// not supported.
+//
+// Message handling: the server reads only text parts from an incoming A2A
+// message; non-text parts, file attachments, and richer message metadata are
+// silently ignored. If no text part is present the agent receives an empty
+// input string. Multiple text parts are concatenated without a separator.
+// The client adapter likewise sends a single plain-text user message and
+// returns an error if the remote response contains no text content.
+//
+// Task-based flows: [Client.AsTool] makes one [SendMessage] call and reads
+// the response inline. It succeeds only when the remote server returns the
+// final text immediately, either in the response Message or in the Task status
+// payload. The package does not expose separate task-polling, resumption, or
+// streaming APIs; long-running asynchronous tasks are therefore not supported
+// by this adapter.
+//
+// Cancellation: [Server.Cancel] reports a protocol-level cancelled status to
+// the caller but does not interrupt an in-flight phero agent. Agents always
+// run to completion or until they return an error.
+//
+// Operational responsibilities: the package only returns plain [http.Handler]
+// values. TLS termination, authentication, authorization, rate limiting, and
+// any request-validation middleware are entirely the caller's responsibility.
+// The baseURL passed to [New] is published verbatim as the JSON-RPC interface
+// URL inside the Agent Card, so it must be the externally reachable endpoint
+// at which [Server.JSONRPCHandler] is mounted.
 package a2a
