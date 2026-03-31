@@ -12,78 +12,70 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package main demonstrates calling a remote A2A agent from a phero agent.
+//
+// It connects to the greeter server started by examples/a2a/server, wraps the
+// remote agent as an llm.Tool, and runs a local orchestrator agent that
+// delegates to it.
+//
+// Start the server first, then run this client:
+//
+// OPENAI_API_KEY=... go run main.go
 package main
 
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
-	"os/exec"
 	"strings"
 
-	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
-
+	"github.com/henomis/phero/a2a"
 	"github.com/henomis/phero/agent"
 	"github.com/henomis/phero/llm"
 	"github.com/henomis/phero/llm/openai"
-	"github.com/henomis/phero/mcp"
+	"github.com/henomis/phero/trace/text"
 )
 
-type Options[I, O any] struct {
-	ClientName    string
-	ClientVersion string
-	Command       string
-	Args          []string
-	Toolname      string
-	Input         *I
-	Output        *O
-}
-
 func main() {
+	ctx := context.Background()
+	serverURL := "http://localhost:8080"
+
+	remoteClient, err := a2a.NewClient(ctx, serverURL)
+	if err != nil {
+		log.Fatalf("connect to remote agent: %v", err)
+	}
+
+	greeterTool, err := remoteClient.AsTool()
+	if err != nil {
+		log.Fatalf("build tool: %v", err)
+	}
+
+	// Create a local orchestrator agent and give it access to the remote greeter.
 	llmClient, llmInfo := buildLLMFromEnv()
 
-	ctx := context.Background()
-	client := gomcp.NewClient(&gomcp.Implementation{Name: "myclient", Version: "1.0.0"}, nil)
-	command := "./examples/mcp/server/server" // This command runs an MCP server that exposes a "get_random_quote" tool.
-	cmd := exec.CommandContext(ctx, command)
-	transport := &gomcp.CommandTransport{Command: cmd}
-
-	session, err := client.Connect(ctx, transport, nil)
+	orchestrator, err := agent.New(
+		llmClient,
+		"orchestrator",
+		"You are an orchestrator. When asked to greet someone, use the greeter tool to generate the greeting.",
+	)
 	if err != nil {
-		panic(err)
+		log.Fatalf("create orchestrator: %v", err)
 	}
-	defer func() {
-		closeErr := session.Close()
-		if err == nil && closeErr != nil {
-			err = fmt.Errorf("mcp session close: %w", closeErr)
-		}
-	}()
+	orchestrator.SetTracer(text.New(os.Stderr))
 
-	mcpServer := mcp.New(session)
+	if err := orchestrator.AddTool(greeterTool); err != nil {
+		log.Fatalf("add tool: %v", err)
+	}
 
-	tools, err := mcpServer.AsTools(ctx, nil)
+	fmt.Printf("LLM: %s\n", llmInfo)
+
+	result, err := orchestrator.Run(ctx, "Please greet Alice via the remote greeter agent.")
 	if err != nil {
-		panic(err)
+		log.Fatalf("run: %v", err)
 	}
 
-	a, err := agent.New(llmClient, "MCP Agent", "An agent that uses tools from an MCP server.")
-	if err != nil {
-		panic(err)
-	}
-
-	for _, tool := range tools {
-		if err := a.AddTool(tool); err != nil {
-			panic(err)
-		}
-	}
-
-	res, err := a.Run(ctx, "Give me a random quote.")
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Printf("LLM used: %s\n", llmInfo)
-	fmt.Printf("Agent response: %s\n", res.Content)
+	fmt.Println(result.Content)
 }
 
 func buildLLMFromEnv() (llm.LLM, string) {
@@ -91,7 +83,6 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	baseURL := strings.TrimSpace(os.Getenv("OPENAI_BASE_URL"))
 	model := strings.TrimSpace(os.Getenv("OPENAI_MODEL"))
 
-	// If no key and no base URL are set, assume a local OpenAI-compatible server (e.g. Ollama).
 	if apiKey == "" && baseURL == "" {
 		baseURL = openai.OllamaBaseURL
 	}

@@ -15,10 +15,10 @@
 package memory
 
 import (
-"strings"
-"testing"
+	"strings"
+	"testing"
 
-"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/llm"
 )
 
 func TestClampSummarySize(t *testing.T) {
@@ -80,11 +80,11 @@ func TestClampSummarySize(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-got := ClampSummarySize(tt.threshold, tt.size)
-if got != tt.want {
-t.Fatalf("ClampSummarySize(%d, %d) = %d, want %d", tt.threshold, tt.size, got, tt.want)
-}
-})
+			got := ClampSummarySize(tt.threshold, tt.size)
+			if got != tt.want {
+				t.Fatalf("ClampSummarySize(%d, %d) = %d, want %d", tt.threshold, tt.size, got, tt.want)
+			}
+		})
 	}
 }
 

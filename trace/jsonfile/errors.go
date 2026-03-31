@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package textsplitter defines the shared abstractions for text splitting.
-//
-// Concrete splitter implementations live in subpackages such as
-// textsplitter/recursive and textsplitter/markdown.
-package textsplitter
+package jsonfile
+
+import "errors"
+
+// ErrEmptyFilePath is returned by New when the provided file path is empty.
+var ErrEmptyFilePath = errors.New("empty file path")

@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package textsplitter defines the shared abstractions for text splitting.
+// Package weaviate provides a Weaviate-backed vectorstore.Store implementation
+// using the official Weaviate Go client (v4).
 //
-// Concrete splitter implementations live in subpackages such as
-// textsplitter/recursive and textsplitter/markdown.
-package textsplitter
+// The caller is responsible for creating and configuring the *weaviate.Client;
+// the Store does not own the client lifecycle.
+package weaviate

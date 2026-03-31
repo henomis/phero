@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package textsplitter defines the shared abstractions for text splitting.
+// Package document defines the Document type returned by text splitters.
 //
-// Concrete splitter implementations live in subpackages such as
-// textsplitter/recursive and textsplitter/markdown.
-package textsplitter
+// A Document pairs a text chunk with a Metadata map that carries provenance
+// information such as the source file path and byte offsets within that file.
+package document

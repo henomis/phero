@@ -12,8 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package textsplitter defines the shared abstractions for text splitting.
-//
-// Concrete splitter implementations live in subpackages such as
-// textsplitter/recursive and textsplitter/markdown.
-package textsplitter
+package recursive
+
+import "fmt"
+
+// ErrReadFile is returned when the source file cannot be read.
+type ErrReadFile struct {
+	Source string
+	Err    error
+}
+
+func (e *ErrReadFile) Error() string {
+	return fmt.Sprintf("reading file %q: %v", e.Source, e.Err)
+}
+
+func (e *ErrReadFile) Unwrap() error {
+	return e.Err
+}

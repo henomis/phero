@@ -21,8 +21,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/henomis/phero/document"
 	"github.com/henomis/phero/embedding"
 	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/textsplitter"
 	"github.com/henomis/phero/vectorstore"
 )
 
@@ -105,54 +107,90 @@ func (s *RAG) ensureCollection(ctx context.Context) error {
 	return nil
 }
 
-// Ingest embeds the provided texts and upserts them into the underlying Store.
-//
-// Each text is stored in the point payload under the "text" key.
-func (s *RAG) Ingest(ctx context.Context, texts []string) error {
-	if len(texts) == 0 {
-		return ErrEmptyTexts
+// ingestBatch embeds documents and upserts the resulting points into the store.
+// offset is the 0-based index of the first document within the overall chunk stream,
+// used to populate IngestError fields for diagnostics.
+// Each vectorstore Point payload contains the document's Content under the "text"
+// key plus all entries from the document's Metadata map.
+func (s *RAG) ingestBatch(ctx context.Context, docs []document.Document, offset int) error {
+	texts := make([]string, len(docs))
+	for i, d := range docs {
+		texts[i] = d.Content
 	}
+
+	vectors, err := s.embedder.Embed(ctx, texts)
+	if err != nil {
+		return &IngestError{Op: "embed", BatchStart: offset, BatchEnd: offset + len(docs), Cause: err}
+	}
+	if len(vectors) != len(docs) {
+		return &EmbedderVectorCountMismatchError{Got: len(vectors), Want: len(docs)}
+	}
+
+	points := make([]vectorstore.Point, 0, len(docs))
+	for i, d := range docs {
+		payload := make(map[string]any, len(d.Metadata)+1)
+		for k, v := range d.Metadata {
+			payload[k] = v
+		}
+		payload[contentKey] = d.Content
+		points = append(points, vectorstore.Point{
+			ID:      uuid.New().String(),
+			Vector:  vectors[i],
+			Payload: payload,
+		})
+	}
+
+	if err := s.store.Upsert(ctx, points); err != nil {
+		return &IngestError{Op: "upsert", BatchStart: offset, BatchEnd: offset + len(docs), Cause: err}
+	}
+	return nil
+}
+
+// Ingest splits the source configured in the Splitter and ingests the
+// resulting chunks. The file path is bound to the Splitter at construction
+// time, not passed here.
+//
+// Chunks are embedded and upserted in rolling batches as they arrive from the
+// iterator: at most embedderBatchSize chunks are held in memory at any point.
+//
+// Returns ErrNoSplitter if no Splitter was provided to New.
+// Any error yielded by the splitter iterator is returned immediately, aborting
+// ingestion.
+func (s *RAG) Ingest(ctx context.Context, splitter textsplitter.Splitter) error {
+	if splitter == nil {
+		return ErrNoSplitter
+	}
+
 	if err := s.ensureCollection(ctx); err != nil {
 		return err
 	}
 
-	embedderBatchSize := s.embedderBatchSize
-	if embedderBatchSize <= 0 {
-		embedderBatchSize = len(texts)
+	batchSize := s.embedderBatchSize
+	if batchSize <= 0 {
+		batchSize = defaultEmbedderBatchSize
 	}
 
-	for start := 0; start < len(texts); start += embedderBatchSize {
-		end := start + embedderBatchSize
-		if end > len(texts) {
-			end = len(texts)
-		}
+	batch := make([]document.Document, 0, batchSize)
+	offset := 0
 
-		chunk := texts[start:end]
-		vectors, err := s.embedder.Embed(ctx, chunk)
+	for doc, err := range splitter.Split(ctx) {
 		if err != nil {
 			return &IngestError{Op: "embed", BatchStart: start, BatchEnd: end, Cause: err}
 		}
-		if len(vectors) != len(chunk) {
-			return &EmbedderVectorCountMismatchError{Got: len(vectors), Want: len(chunk)}
-		}
-
-		points := make([]vectorstore.Point, 0, len(chunk))
-		for i := range chunk {
-			id := uuid.New().String()
-			points = append(points, vectorstore.Point{
-				ID:     id,
-				Vector: vectors[i],
-				Payload: map[string]any{
-					contentKey: chunk[i],
-				},
-			})
-		}
-
-		if err := s.store.Upsert(ctx, points); err != nil {
-			return &IngestError{Op: "upsert", BatchStart: start, BatchEnd: end, Cause: err}
+		batch = append(batch, doc)
+		if len(batch) >= batchSize {
+			n := len(batch)
+			if err := s.ingestBatch(ctx, batch, offset); err != nil {
+				return err
+			}
+			offset += n
+			batch = batch[:0]
 		}
 	}
 
+	if len(batch) > 0 {
+		return s.ingestBatch(ctx, batch, offset)
+	}
 	return nil
 }
 

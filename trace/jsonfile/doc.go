@@ -12,8 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package textsplitter defines the shared abstractions for text splitting.
+// Package jsonfile provides a file-backed Tracer that persists trace events as
+// newline-delimited JSON (NDJSON).
 //
-// Concrete splitter implementations live in subpackages such as
-// textsplitter/recursive and textsplitter/markdown.
-package textsplitter
+// Each call to Trace appends one JSON object to the file; the file is opened in
+// append mode so multiple processes or restarts accumulate into the same file
+// without overwriting previous entries.
+//
+// The caller is responsible for closing the Tracer via Close when it is no
+// longer needed.
+package jsonfile

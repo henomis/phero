@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/henomis/phero/document"
 	"github.com/henomis/phero/llm"
 	"github.com/henomis/phero/memory"
 	"github.com/henomis/phero/vectorstore"
@@ -68,7 +69,10 @@ func (m *Memory) Retrieve(ctx context.Context, query string) ([]llm.Message, err
 
 func (s *RAG) save(ctx context.Context, messages []llm.Message) error {
 	content := formatSessionContent(messages)
-	return s.Ingest(ctx, []string{content})
+	if err := s.ensureCollection(ctx); err != nil {
+		return err
+	}
+	return s.ingestBatch(ctx, []document.Document{{Content: content}}, 0)
 }
 
 func (s *RAG) clear(ctx context.Context) error {
