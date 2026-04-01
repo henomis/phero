@@ -21,3 +21,10 @@ var ErrNilInput = errors.New("bash: nil input")
 
 // ErrCommandRequired is returned when the Command field of the input is empty.
 var ErrCommandRequired = errors.New("bash: command is required")
+
+// ErrCommandBlocked is returned when the command matches a blocklist pattern.
+var ErrCommandBlocked = errors.New("bash: command blocked by policy")
+
+// ErrCommandNotAllowed is returned when an allowlist is configured and the
+// command does not match any allowed pattern.
+var ErrCommandNotAllowed = errors.New("bash: command not in allowlist")

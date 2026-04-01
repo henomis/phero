@@ -15,23 +15,23 @@
 package text_test
 
 import (
-"bytes"
-"strings"
-"testing"
-"time"
+	"bytes"
+	"strings"
+	"testing"
+	"time"
 
-"github.com/henomis/phero/trace"
-"github.com/henomis/phero/trace/text"
+	"github.com/henomis/phero/trace"
+	"github.com/henomis/phero/trace/text"
 )
 
 func TestTextTracer_AgentStart(t *testing.T) {
 	var buf bytes.Buffer
 	tr := text.New(&buf)
 	tr.Trace(trace.AgentStartEvent{
-AgentName: "myagent",
-Input:     "hello",
-Timestamp: time.Date(2026, 3, 24, 10, 0, 0, 0, time.UTC),
-})
+		AgentName: "myagent",
+		Input:     "hello",
+		Timestamp: time.Date(2026, 3, 24, 10, 0, 0, 0, time.UTC),
+	})
 	out := buf.String()
 	if !strings.Contains(out, "AgentStart") {
 		t.Errorf("expected 'AgentStart' in output, got: %q", out)
@@ -48,14 +48,14 @@ func TestTextTracer_ToolCallResult(t *testing.T) {
 	var buf bytes.Buffer
 	tr := text.New(&buf)
 	tr.Trace(trace.ToolCallEvent{
-AgentName: "agent1", ToolName: "bash",
-Arguments: `{"cmd":"ls"}`, Iteration: 1,
-Timestamp: time.Now(),
+		AgentName: "agent1", ToolName: "bash",
+		Arguments: `{"cmd":"ls"}`, Iteration: 1,
+		Timestamp: time.Now(),
 	})
 	tr.Trace(trace.ToolResultEvent{
-AgentName: "agent1", ToolName: "bash",
-Result: "file.txt\n", Iteration: 1,
-Timestamp: time.Now(),
+		AgentName: "agent1", ToolName: "bash",
+		Result: "file.txt\n", Iteration: 1,
+		Timestamp: time.Now(),
 	})
 	out := buf.String()
 	if !strings.Contains(out, "ToolCall") {
@@ -73,9 +73,9 @@ func TestTextTracer_ToolResultError(t *testing.T) {
 	var buf bytes.Buffer
 	tr := text.New(&buf)
 	tr.Trace(trace.ToolResultEvent{
-AgentName: "agent1", ToolName: "bash",
-Err: errTest, Iteration: 1,
-Timestamp: time.Now(),
+		AgentName: "agent1", ToolName: "bash",
+		Err: errTest, Iteration: 1,
+		Timestamp: time.Now(),
 	})
 	out := buf.String()
 	if !strings.Contains(out, "✗") {

@@ -37,8 +37,9 @@ type CreateFileOutput struct {
 
 // CreateFileTool is a tool that allows writing content to a file.
 type CreateFileTool struct {
-	tool       *llm.Tool
-	workingDir string
+	tool        *llm.Tool
+	workingDir  string
+	noOverwrite bool
 }
 
 // NewCreateFileTool creates a new instance of CreateFileTool.
@@ -51,7 +52,7 @@ func NewCreateFileTool(opts ...Option) (*CreateFileTool, error) {
 		opt(o)
 	}
 
-	createFileTool := &CreateFileTool{workingDir: o.workingDir}
+	createFileTool := &CreateFileTool{workingDir: o.workingDir, noOverwrite: o.noOverwrite}
 
 	tool, err := llm.NewTool(
 		name,
@@ -85,6 +86,12 @@ func (w *CreateFileTool) write(ctx context.Context, input *CreateFileInput) (*Cr
 	resolvedPath, err := resolveToolPath(w.workingDir, path)
 	if err != nil {
 		return nil, err
+	}
+
+	if w.noOverwrite {
+		if _, statErr := os.Stat(resolvedPath); statErr == nil {
+			return nil, ErrFileExists
+		}
 	}
 
 	err = os.WriteFile(resolvedPath, []byte(input.Content), 0o644)

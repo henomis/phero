@@ -18,6 +18,7 @@ package file
 type toolOptions struct {
 	workingDir  string
 	maxFileSize int64 // 0 means no limit; applies to both text and image reads in ViewTool
+	noOverwrite bool  // if true, CreateFileTool refuses to overwrite existing files
 }
 
 // Option is a configuration function for file tools.
@@ -39,5 +40,13 @@ func WithWorkingDirectory(dir string) Option {
 func WithMaxFileSize(bytes int64) Option {
 	return func(o *toolOptions) {
 		o.maxFileSize = bytes
+	}
+}
+
+// WithNoOverwrite configures CreateFileTool to return ErrFileExists when the
+// target file already exists, instead of silently overwriting it.
+func WithNoOverwrite() Option {
+	return func(o *toolOptions) {
+		o.noOverwrite = true
 	}
 }

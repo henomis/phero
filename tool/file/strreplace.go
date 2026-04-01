@@ -72,6 +72,7 @@ func NewStrReplaceTool(opts ...Option) (*StrReplaceTool, error) {
 	strReplaceTool.tool = tool
 	return strReplaceTool, nil
 }
+
 func (s *StrReplaceTool) Tool() *llm.Tool {
 	return s.tool
 }

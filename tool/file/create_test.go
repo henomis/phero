@@ -136,3 +136,84 @@ func TestCreateFile_PathTraversal_SymlinkEscape(t *testing.T) {
 		t.Fatalf("expected no file to be created outside workingDir, stat err: %v", statErr)
 	}
 }
+
+func TestCreateFile_NoOverwrite_NewFile(t *testing.T) {
+	dir := t.TempDir()
+	tool, err := NewCreateFileTool(WithWorkingDirectory(dir), WithNoOverwrite())
+	if err != nil {
+		t.Fatalf("NewCreateFileTool: %v", err)
+	}
+
+	out, err := tool.write(context.Background(), &CreateFileInput{
+		Path:    "new.txt",
+		Content: "hello",
+	})
+	if err != nil {
+		t.Fatalf("expected success for new file, got: %v", err)
+	}
+	if out.Len != len("hello") {
+		t.Fatalf("unexpected len: %d", out.Len)
+	}
+}
+
+func TestCreateFile_NoOverwrite_ExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "existing.txt")
+	if err := os.WriteFile(path, []byte("original"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	tool, err := NewCreateFileTool(WithWorkingDirectory(dir), WithNoOverwrite())
+	if err != nil {
+		t.Fatalf("NewCreateFileTool: %v", err)
+	}
+
+	_, err = tool.write(context.Background(), &CreateFileInput{
+		Path:    "existing.txt",
+		Content: "overwritten",
+	})
+	if err == nil {
+		t.Fatal("expected ErrFileExists, got nil")
+	}
+	if !errors.Is(err, ErrFileExists) {
+		t.Fatalf("expected ErrFileExists, got: %v", err)
+	}
+
+	// original content must be unchanged
+	got, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatalf("read file: %v", readErr)
+	}
+	if string(got) != "original" {
+		t.Fatalf("file was overwritten: %q", string(got))
+	}
+}
+
+func TestCreateFile_DefaultOverwritesExisting(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	tool, err := NewCreateFileTool(WithWorkingDirectory(dir))
+	if err != nil {
+		t.Fatalf("NewCreateFileTool: %v", err)
+	}
+
+	_, err = tool.write(context.Background(), &CreateFileInput{
+		Path:    "file.txt",
+		Content: "new",
+	})
+	if err != nil {
+		t.Fatalf("expected overwrite to succeed, got: %v", err)
+	}
+
+	got, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatalf("read file: %v", readErr)
+	}
+	if string(got) != "new" {
+		t.Fatalf("unexpected content: %q", string(got))
+	}
+}

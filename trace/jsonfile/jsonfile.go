@@ -48,7 +48,7 @@ func New(filePath string) (*Tracer, error) {
 	if filePath == "" {
 		return nil, ErrEmptyFilePath
 	}
-	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
 	}
