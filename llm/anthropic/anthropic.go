@@ -49,6 +49,7 @@ type Client struct {
 	client anthropicapi.Client
 
 	apiKey    string
+	baseURL   string
 	model     string
 	maxTokens int64
 }
@@ -75,6 +76,9 @@ func New(apiKey string, opts ...Option) *Client {
 	clientOpts := []option.RequestOption{}
 	if c.apiKey != "" {
 		clientOpts = append(clientOpts, option.WithAPIKey(c.apiKey))
+	}
+	if c.baseURL != "" {
+		clientOpts = append(clientOpts, option.WithBaseURL(c.baseURL))
 	}
 
 	c.client = anthropicapi.NewClient(clientOpts...)
@@ -305,6 +309,16 @@ func anthropicToolInputSchema(schema map[string]any) (anthropicapi.ToolInputSche
 		Required:    required,
 		ExtraFields: extra,
 	}, nil
+}
+
+// WithBaseURL overrides the Anthropic API base URL.
+//
+// This is useful for routing requests through a proxy or using a compatible
+// endpoint. In tests it can point to an httptest.Server.
+func WithBaseURL(baseURL string) Option {
+	return func(c *Client) {
+		c.baseURL = strings.TrimSpace(baseURL)
+	}
 }
 
 // WithModel sets the Anthropic model name used for requests (e.g. "claude-...").
