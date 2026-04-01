@@ -82,8 +82,9 @@ func TestTracer_Trace_WritesNDJSON(t *testing.T) {
 	now := time.Now()
 	events := []trace.Event{
 		trace.AgentStartEvent{AgentName: "a", Input: "hello", Timestamp: now},
-		trace.AgentEndEvent{AgentName: "a", Output: "ok", Iterations: 2, Timestamp: now},
 		trace.AgentIterationEvent{AgentName: "a", Iteration: 1, Timestamp: now},
+		trace.AgentRunSummaryEvent{Summary: trace.RunSummary{AgentName: "a"}, Timestamp: now},
+		trace.AgentEndEvent{AgentName: "a", Output: "ok", Iterations: 2, Timestamp: now},
 		trace.LLMRequestEvent{AgentName: "a", MessageCount: 3, ToolNames: []string{"t1"}, Iteration: 1, Timestamp: now},
 		trace.LLMResponseEvent{AgentName: "a", Iteration: 1, Timestamp: now},
 		trace.ToolCallEvent{AgentName: "a", ToolName: "bash", Arguments: "{}", CallID: "c1", Iteration: 1, Timestamp: now},
@@ -109,7 +110,7 @@ func TestTracer_Trace_WritesNDJSON(t *testing.T) {
 	}()
 
 	expectedTypes := []string{
-		"AgentStart", "AgentEnd", "AgentIteration",
+		"AgentStart", "AgentIteration", "AgentRunSummary", "AgentEnd",
 		"LLMRequest", "LLMResponse",
 		"ToolCall", "ToolResult",
 		"MemorySave", "MemoryRetrieve",

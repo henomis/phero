@@ -94,6 +94,10 @@ func toRecord(event trace.Event) record {
 			"agent_name": e.AgentName,
 			"iteration":  e.Iteration,
 		}}
+	case trace.AgentRunSummaryEvent:
+		return record{Type: "AgentRunSummary", Timestamp: e.Timestamp, Data: map[string]any{
+			"summary": e.Summary,
+		}}
 	case trace.LLMRequestEvent:
 		return record{Type: "LLMRequest", Timestamp: e.Timestamp, Data: map[string]any{
 			"agent_name":    e.AgentName,

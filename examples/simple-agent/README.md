@@ -11,6 +11,8 @@ This example demonstrates the core building blocks:
 
 The example uses a simple calculator that performs basic arithmetic (add, subtract, multiply, divide).
 
+It also prints a compact run summary so you can see the aggregated iterations, tool usage, token counts, and total latency returned by `agent.Run()`.
+
 ## What you'll learn
 
 - How to create custom function tools from Go functions
@@ -48,6 +50,7 @@ LLM: model=gpt-4o-mini base_url=
 User: If I have 15 apples and give away 7, then buy 23 more, how many do I have?
 
 Agent: You have 31 apples.
+Run summary: iterations=3 llm_calls=3 tool_calls=2 tokens=812/97 latency=1.24s
 ```
 
 ## How it works
@@ -57,6 +60,7 @@ Agent: You have 31 apples.
    - First: 15 - 7 = 8
    - Then: 8 + 23 = 31
 3. The agent synthesizes the final answer from the tool results
+4. The example prints the run-level observability summary from `response.Summary`
 
 ## Customization
 

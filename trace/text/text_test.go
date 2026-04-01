@@ -83,14 +83,45 @@ func TestTextTracer_ToolResultError(t *testing.T) {
 	}
 }
 
+func TestTextTracer_RunSummary(t *testing.T) {
+	var buf bytes.Buffer
+	tr := text.New(&buf)
+	tr.Trace(trace.AgentRunSummaryEvent{
+		Summary: trace.RunSummary{
+			AgentName:       "agent1",
+			Iterations:      2,
+			LLMCalls:        2,
+			ToolCalls:       1,
+			ToolErrors:      0,
+			MemoryRetrieved: 2,
+			MemorySaved:     4,
+			Usage:           trace.UsageSummary{InputTokens: 12, OutputTokens: 5},
+			Latency:         trace.LatencySummary{},
+			Tools:           []trace.ToolCallSummary{{ToolName: "bash", Calls: 1, Errors: 0}},
+		},
+		Timestamp: time.Now(),
+	})
+	out := buf.String()
+	if !strings.Contains(out, "RunSummary") {
+		t.Errorf("expected 'RunSummary' in output, got: %q", out)
+	}
+	if !strings.Contains(out, "tool_calls=1") {
+		t.Errorf("expected tool call total in output, got: %q", out)
+	}
+	if !strings.Contains(out, "tools=[bash=1/0]") {
+		t.Errorf("expected per-tool summary in output, got: %q", out)
+	}
+}
+
 func TestTextTracer_AllEventTypes_NoPanic(t *testing.T) {
 	var buf bytes.Buffer
 	tr := text.New(&buf)
 	now := time.Now()
 	events := []trace.Event{
 		trace.AgentStartEvent{AgentName: "a", Input: "i", Timestamp: now},
-		trace.AgentEndEvent{AgentName: "a", Output: "o", Iterations: 1, Timestamp: now},
 		trace.AgentIterationEvent{AgentName: "a", Iteration: 1, Timestamp: now},
+		trace.AgentRunSummaryEvent{Summary: trace.RunSummary{AgentName: "a"}, Timestamp: now},
+		trace.AgentEndEvent{AgentName: "a", Output: "o", Iterations: 1, Timestamp: now},
 		trace.LLMRequestEvent{AgentName: "a", MessageCount: 2, ToolNames: []string{"t1"}, Iteration: 1, Timestamp: now},
 		trace.LLMResponseEvent{AgentName: "a", Iteration: 1, Timestamp: now},
 		trace.ToolCallEvent{AgentName: "a", ToolName: "t", Arguments: "{}", Iteration: 1, Timestamp: now},

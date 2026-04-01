@@ -20,6 +20,64 @@ import (
 	"github.com/henomis/phero/llm"
 )
 
+// UsageSummary aggregates token consumption across a full agent run.
+type UsageSummary struct {
+	// InputTokens is the total number of prompt tokens sent to the model.
+	InputTokens int
+	// OutputTokens is the total number of completion tokens produced by the model.
+	OutputTokens int
+}
+
+// LatencySummary aggregates time spent in each major phase of an agent run.
+type LatencySummary struct {
+	// Total is the full wall-clock duration of the run.
+	Total time.Duration
+	// LLM is the time spent waiting on model calls.
+	LLM time.Duration
+	// Tool is the time spent executing tool calls.
+	Tool time.Duration
+	// Memory is the time spent retrieving from and saving to memory.
+	Memory time.Duration
+}
+
+// ToolCallSummary aggregates calls and failures for a single tool during a run.
+type ToolCallSummary struct {
+	// ToolName is the stable tool identifier exposed to the model.
+	ToolName string
+	// Calls is the total number of times the tool was invoked.
+	Calls int
+	// Errors is the number of failed invocations for the tool.
+	Errors int
+}
+
+// RunSummary aggregates high-level observability data for a single agent run.
+type RunSummary struct {
+	// AgentName is the agent that produced this summary.
+	AgentName string
+	// Iterations is the number of agent loop iterations executed.
+	Iterations int
+	// LLMCalls is the number of model requests issued during the run.
+	LLMCalls int
+	// ToolCalls is the total number of tool invocations during the run.
+	ToolCalls int
+	// ToolErrors is the number of tool invocations that returned an error.
+	ToolErrors int
+	// MemoryRetrieved is the total number of messages loaded from memory.
+	MemoryRetrieved int
+	// MemorySaved is the total number of messages persisted to memory.
+	MemorySaved int
+	// Usage contains the aggregated token counts for the run.
+	Usage UsageSummary
+	// Latency contains the aggregated latency breakdown for the run.
+	Latency LatencySummary
+	// Tools contains per-tool call totals for the run.
+	Tools []ToolCallSummary
+	// HandoffAgent is set when the run ended by handing work to another agent.
+	HandoffAgent string
+	// Error is the final run error message, when the run did not complete cleanly.
+	Error string
+}
+
 // Tracer receives trace events from an agent or LLM wrapper.
 //
 // Implementations must be safe to call from multiple goroutines concurrently.
@@ -76,6 +134,16 @@ type AgentIterationEvent struct {
 }
 
 func (AgentIterationEvent) traceEvent() {}
+
+// AgentRunSummaryEvent is emitted once per run with aggregated observability data.
+type AgentRunSummaryEvent struct {
+	// Summary contains the aggregated metrics for the completed run.
+	Summary RunSummary
+	// Timestamp is when the event occurred.
+	Timestamp time.Time
+}
+
+func (AgentRunSummaryEvent) traceEvent() {}
 
 // LLMRequestEvent is emitted just before the LLM is called.
 type LLMRequestEvent struct {

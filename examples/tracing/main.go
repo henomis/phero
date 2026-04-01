@@ -18,10 +18,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/henomis/phero/agent"
 	"github.com/henomis/phero/llm"
 	"github.com/henomis/phero/llm/openai"
+	"github.com/henomis/phero/trace"
 	"github.com/henomis/phero/trace/text"
 )
 
@@ -92,4 +94,21 @@ func main() {
 	}
 
 	fmt.Printf("\nResult: %s\n", result.Content)
+	printRunSummary(result.Summary)
+}
+
+func printRunSummary(summary *trace.RunSummary) {
+	if summary == nil {
+		return
+	}
+
+	fmt.Printf(
+		"Run summary: iterations=%d llm_calls=%d tool_calls=%d tokens=%d/%d latency=%s\n",
+		summary.Iterations,
+		summary.LLMCalls,
+		summary.ToolCalls,
+		summary.Usage.InputTokens,
+		summary.Usage.OutputTokens,
+		summary.Latency.Total.Round(time.Millisecond),
+	)
 }

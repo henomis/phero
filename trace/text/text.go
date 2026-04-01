@@ -103,6 +103,34 @@ func (t *Tracer) format(event trace.Event) string {
 			ansiDim, ts, ansiDim, e.AgentName,
 			e.Iteration, ansiReset)
 
+	case trace.AgentRunSummaryEvent:
+		ts := e.Timestamp.Format("15:04:05.000")
+		summary := e.Summary
+		tools := "none"
+		if len(summary.Tools) > 0 {
+			parts := make([]string, 0, len(summary.Tools))
+			for _, tool := range summary.Tools {
+				parts = append(parts, fmt.Sprintf("%s=%d/%d", tool.ToolName, tool.Calls, tool.Errors))
+			}
+			tools = strings.Join(parts, ", ")
+		}
+		handoff := ""
+		if summary.HandoffAgent != "" {
+			handoff = fmt.Sprintf(" handoff=%s", summary.HandoffAgent)
+		}
+		errText := ""
+		if summary.Error != "" {
+			errText = fmt.Sprintf(" error=%q", truncate(summary.Error, 120))
+		}
+		return fmt.Sprintf("%s%s %s[%s]%s %s≡  RunSummary%s  iterations=%d llm_calls=%d tool_calls=%d tool_errors=%d memory=%d/%d tokens=%d/%d latency(total=%s llm=%s tool=%s memory=%s) tools=[%s]%s%s",
+			ansiBoldWhite, ts, ansiDim, summary.AgentName, ansiReset,
+			ansiBoldWhite, ansiReset,
+			summary.Iterations, summary.LLMCalls, summary.ToolCalls, summary.ToolErrors,
+			summary.MemoryRetrieved, summary.MemorySaved,
+			summary.Usage.InputTokens, summary.Usage.OutputTokens,
+			summary.Latency.Total, summary.Latency.LLM, summary.Latency.Tool, summary.Latency.Memory,
+			tools, handoff, errText)
+
 	case trace.LLMRequestEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
 		agent := agentLabel(e.AgentName)

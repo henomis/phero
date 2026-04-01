@@ -44,6 +44,7 @@ type Agent struct {
 type Result struct {
 	Content      string
 	HandoffAgent *Agent
+	Summary      *trace.RunSummary
 }
 
 // New creates a new Agent.
@@ -164,8 +165,10 @@ func (a *Agent) SetTracer(t trace.Tracer) {
 func (a *Agent) Run(ctx context.Context, input string) (result *Result, err error) {
 	ctx = trace.WithTracer(ctx, a.tracer)
 	ctx = trace.WithAgentName(ctx, a.name)
+	stats := newRunStats(a.name)
+	handoffAgentName := ""
 
-	session, sessionIndex, err := a.prepareSession(ctx, input)
+	session, sessionIndex, err := a.prepareSession(ctx, input, stats)
 	if err != nil {
 		return nil, err
 	}
@@ -178,8 +181,11 @@ func (a *Agent) Run(ctx context.Context, input string) (result *Result, err erro
 
 	iteration := 0
 
-	// Emit AgentEnd before saveSession (LIFO: this defer runs first).
 	defer func() {
+		if saveErr := a.saveSession(ctx, session, sessionIndex, stats); saveErr != nil {
+			err = errors.Join(err, fmt.Errorf("%w: %w", ErrSessionSaveFailed, saveErr))
+		}
+
 		output := ""
 		if result != nil {
 			output = result.Content
@@ -191,14 +197,16 @@ func (a *Agent) Run(ctx context.Context, input string) (result *Result, err erro
 			Iterations: iteration,
 			Timestamp:  time.Now(),
 		})
-	}()
 
-	// Save the session at the end. If the main run succeeded but the save
-	// fails, surface the save error rather than silently dropping it.
-	defer func() {
-		if saveErr := a.saveSession(ctx, session, sessionIndex); saveErr != nil {
-			err = errors.Join(err, fmt.Errorf("%w: %w", ErrSessionSaveFailed, saveErr))
+		summary := stats.summary(iteration, handoffAgentName, err)
+		if result != nil {
+			result.Summary = summary
 		}
+
+		a.tracer.Trace(trace.AgentRunSummaryEvent{
+			Summary:   *summary,
+			Timestamp: time.Now(),
+		})
 	}()
 
 	for {
@@ -215,12 +223,15 @@ func (a *Agent) Run(ctx context.Context, input string) (result *Result, err erro
 
 		iterCtx := trace.WithIteration(ctx, iteration)
 
-		iterationResult, err := a.handleAgentIteration(iterCtx, session, iteration)
+		iterationResult, err := a.handleAgentIteration(iterCtx, session, iteration, stats)
 		if err != nil {
 			return nil, err
 		}
 
 		session = iterationResult.session
+		if iterationResult.handoffAgent != nil {
+			handoffAgentName = iterationResult.handoffAgent.Name()
+		}
 
 		// If finalMessage is nil, it means the agent executed tool calls and needs to call the LLM again.
 		if iterationResult.lastMessage != nil {
@@ -230,18 +241,24 @@ func (a *Agent) Run(ctx context.Context, input string) (result *Result, err erro
 }
 
 // saveSession saves the conversation messages to memory, if memory is configured.
-func (a *Agent) saveSession(ctx context.Context, messages []llm.Message, sessionIndex int) error {
+func (a *Agent) saveSession(ctx context.Context, messages []llm.Message, sessionIndex int, stats *runStats) error {
 	if a.memory == nil {
 		return nil
 	}
 
+	start := time.Now()
+	count := len(messages) - sessionIndex
 	err := a.memory.Save(ctx, messages[sessionIndex:])
+	duration := time.Since(start)
 	if err == nil {
+		stats.recordMemorySave(count, duration)
 		a.tracer.Trace(trace.MemorySaveEvent{
 			AgentName: a.name,
-			Count:     len(messages) - sessionIndex,
+			Count:     count,
 			Timestamp: time.Now(),
 		})
+	} else {
+		stats.recordMemorySave(0, duration)
 	}
 	return err
 }
@@ -255,12 +272,16 @@ type agentIteration struct {
 
 // handleAgentIteration executes one iteration of the agent loop: it calls the LLM with the current messages,
 // adds the response to the messages and memory, and executes any tool calls in the response.
-func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message, iteration int) (agentIteration, error) {
+func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message, iteration int, stats *runStats) (agentIteration, error) {
 	tracedLLM := trace.NewLLM(a.llm, a.tracer)
+	start := time.Now()
 	msg, err := tracedLLM.Execute(ctx, session, a.tools)
+	duration := time.Since(start)
 	if err != nil {
+		stats.recordLLM(duration, nil)
 		return agentIteration{session: session}, err
 	}
+	stats.recordLLM(duration, msg.Usage)
 
 	session = append(session, *msg.Message)
 
@@ -269,7 +290,7 @@ func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message,
 	}
 
 	for _, toolCall := range msg.Message.ToolCalls {
-		resultMessage := a.handleToolCall(ctx, toolCall, iteration)
+		resultMessage := a.handleToolCall(ctx, toolCall, iteration, stats)
 		session = append(session, *resultMessage)
 
 		handoffAgent, isHandoff := a.handoffs[toolCall.Function.Name]
@@ -283,7 +304,7 @@ func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message,
 }
 
 // handleToolCall executes a tool call and returns the result as a message to be added to the conversation.
-func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, iteration int) *llm.Message {
+func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, iteration int, stats *runStats) *llm.Message {
 	a.tracer.Trace(trace.ToolCallEvent{
 		AgentName: a.name,
 		ToolName:  toolCall.Function.Name,
@@ -293,7 +314,9 @@ func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, itera
 		Timestamp: time.Now(),
 	})
 
+	start := time.Now()
 	result, err := a.executeToolCall(ctx, toolCall)
+	stats.recordTool(toolCall.Function.Name, err, time.Since(start))
 
 	a.tracer.Trace(trace.ToolResultEvent{
 		AgentName: a.name,
@@ -317,7 +340,7 @@ func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, itera
 }
 
 // prepareSession prepares the messages for the LLM call, including the system prompt, memory messages, and user input.
-func (a *Agent) prepareSession(ctx context.Context, input string) ([]llm.Message, int, error) {
+func (a *Agent) prepareSession(ctx context.Context, input string, stats *runStats) ([]llm.Message, int, error) {
 	messages := []llm.Message{
 		{
 			Role:    llm.ChatMessageRoleSystem,
@@ -326,10 +349,15 @@ func (a *Agent) prepareSession(ctx context.Context, input string) ([]llm.Message
 	}
 
 	if a.memory != nil {
+		start := time.Now()
 		memoryMessages, err := a.memory.Retrieve(ctx, input)
+		duration := time.Since(start)
 		if err != nil {
+			stats.recordMemoryRetrieve(0, duration)
 			return nil, 0, err
 		}
+
+		stats.recordMemoryRetrieve(len(memoryMessages), duration)
 
 		a.tracer.Trace(trace.MemoryRetrieveEvent{
 			AgentName: a.name,

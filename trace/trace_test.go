@@ -29,8 +29,9 @@ func TestEventTypes_ImplementEvent(t *testing.T) {
 	// Each concrete type must be assignable to trace.Event.
 	events := []trace.Event{
 		trace.AgentStartEvent{Timestamp: now},
-		trace.AgentEndEvent{Timestamp: now},
 		trace.AgentIterationEvent{Timestamp: now},
+		trace.AgentRunSummaryEvent{Timestamp: now},
+		trace.AgentEndEvent{Timestamp: now},
 		trace.LLMRequestEvent{Timestamp: now},
 		trace.LLMResponseEvent{Timestamp: now},
 		trace.ToolCallEvent{Timestamp: now},
@@ -38,8 +39,8 @@ func TestEventTypes_ImplementEvent(t *testing.T) {
 		trace.MemorySaveEvent{Timestamp: now},
 		trace.MemoryRetrieveEvent{Timestamp: now},
 	}
-	if len(events) != 9 {
-		t.Fatalf("expected 9 event types, got %d", len(events))
+	if len(events) != 10 {
+		t.Fatalf("expected 10 event types, got %d", len(events))
 	}
 }
 

@@ -18,11 +18,13 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	openaiapi "github.com/sashabaranov/go-openai"
 
 	"github.com/henomis/phero/agent"
 	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/trace"
 )
 
 // -- mocks -------------------------------------------------------------------
@@ -33,9 +35,13 @@ type stubLLM struct {
 	responses []*llm.Result
 	errs      []error
 	callIdx   int
+	delay     time.Duration
 }
 
 func (s *stubLLM) Execute(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+	if s.delay > 0 {
+		time.Sleep(s.delay)
+	}
 	idx := s.callIdx
 	if idx >= len(s.responses) {
 		idx = len(s.responses) - 1
@@ -92,23 +98,45 @@ func toolCallResult(toolName, callID, arguments string) *llm.Result {
 	}
 }
 
+func toolCallResultWithUsage(toolName, callID, arguments string, usage *llm.Usage) *llm.Result {
+	result := toolCallResult(toolName, callID, arguments)
+	result.Usage = usage
+	return result
+}
+
 // stubMemory records Save calls and returns pre-configured Retrieve results.
 type stubMemory struct {
 	retrieved   []llm.Message
 	retrieveErr error
+	retrieveDur time.Duration
 	saved       []llm.Message
 	saveErr     error
+	saveDur     time.Duration
 }
 
 func (m *stubMemory) Retrieve(_ context.Context, _ string) ([]llm.Message, error) {
+	if m.retrieveDur > 0 {
+		time.Sleep(m.retrieveDur)
+	}
 	return m.retrieved, m.retrieveErr
 }
 
 func (m *stubMemory) Clear(_ context.Context) error { return nil }
 
 func (m *stubMemory) Save(_ context.Context, msgs []llm.Message) error {
+	if m.saveDur > 0 {
+		time.Sleep(m.saveDur)
+	}
 	m.saved = msgs
 	return m.saveErr
+}
+
+type recordingTracer struct {
+	events []trace.Event
+}
+
+func (t *recordingTracer) Trace(event trace.Event) {
+	t.events = append(t.events, event)
 }
 
 // -- helpers -----------------------------------------------------------------
@@ -414,6 +442,97 @@ func TestRun_Handoff(t *testing.T) {
 	}
 	if result.HandoffAgent.Name() != "worker" {
 		t.Fatalf("expected handoff to %q, got %q", "worker", result.HandoffAgent.Name())
+	}
+}
+
+func TestRun_PopulatesRunSummary(t *testing.T) {
+	mem := &stubMemory{
+		retrieved: []llm.Message{
+			{Role: llm.ChatMessageRoleUser, Content: "previous question"},
+			{Role: llm.ChatMessageRoleAssistant, Content: "previous answer"},
+		},
+		retrieveDur: time.Millisecond,
+		saveDur:     time.Millisecond,
+	}
+	stub := &stubLLM{
+		responses: []*llm.Result{
+			toolCallResultWithUsage("echo_tool", "call-1", "{}", &llm.Usage{InputTokens: 7, OutputTokens: 3}),
+			textResult("done"),
+		},
+		errs:  []error{nil, nil},
+		delay: time.Millisecond,
+	}
+	tracer := &recordingTracer{}
+
+	a := mustNew(t, stub, "agent", "desc")
+	a.SetMemory(mem)
+	a.SetTracer(tracer)
+	if err := a.AddTool(mustTool(t, "echo_tool", func(_ context.Context, _ *struct{}) (string, error) {
+		time.Sleep(time.Millisecond)
+		return "echo_result", nil
+	})); err != nil {
+		t.Fatalf("AddTool: %v", err)
+	}
+
+	result, err := a.Run(context.Background(), "do it")
+	if err != nil {
+		t.Fatalf("Run: unexpected error: %v", err)
+	}
+	if result.Summary == nil {
+		t.Fatal("expected run summary on result")
+	}
+
+	summary := result.Summary
+	if summary.AgentName != "agent" {
+		t.Fatalf("summary.AgentName = %q, want %q", summary.AgentName, "agent")
+	}
+	if summary.Iterations != 2 {
+		t.Fatalf("summary.Iterations = %d, want 2", summary.Iterations)
+	}
+	if summary.LLMCalls != 2 {
+		t.Fatalf("summary.LLMCalls = %d, want 2", summary.LLMCalls)
+	}
+	if summary.ToolCalls != 1 {
+		t.Fatalf("summary.ToolCalls = %d, want 1", summary.ToolCalls)
+	}
+	if summary.ToolErrors != 0 {
+		t.Fatalf("summary.ToolErrors = %d, want 0", summary.ToolErrors)
+	}
+	if summary.MemoryRetrieved != 2 {
+		t.Fatalf("summary.MemoryRetrieved = %d, want 2", summary.MemoryRetrieved)
+	}
+	if summary.MemorySaved != 4 {
+		t.Fatalf("summary.MemorySaved = %d, want 4", summary.MemorySaved)
+	}
+	if summary.Usage.InputTokens != 17 {
+		t.Fatalf("summary.Usage.InputTokens = %d, want 17", summary.Usage.InputTokens)
+	}
+	if summary.Usage.OutputTokens != 8 {
+		t.Fatalf("summary.Usage.OutputTokens = %d, want 8", summary.Usage.OutputTokens)
+	}
+	if len(summary.Tools) != 1 {
+		t.Fatalf("len(summary.Tools) = %d, want 1", len(summary.Tools))
+	}
+	if summary.Tools[0].ToolName != "echo_tool" || summary.Tools[0].Calls != 1 || summary.Tools[0].Errors != 0 {
+		t.Fatalf("unexpected tool summary: %+v", summary.Tools[0])
+	}
+	if summary.Latency.Total <= 0 || summary.Latency.LLM <= 0 || summary.Latency.Tool <= 0 || summary.Latency.Memory <= 0 {
+		t.Fatalf("expected positive latency metrics, got %+v", summary.Latency)
+	}
+
+	var eventSummary *trace.RunSummary
+	for _, event := range tracer.events {
+		runSummaryEvent, ok := event.(trace.AgentRunSummaryEvent)
+		if ok {
+			eventSummary = &runSummaryEvent.Summary
+			break
+		}
+	}
+	if eventSummary == nil {
+		t.Fatal("expected AgentRunSummaryEvent to be emitted")
+	}
+	if eventSummary.ToolCalls != summary.ToolCalls {
+		t.Fatalf("event summary tool calls = %d, want %d", eventSummary.ToolCalls, summary.ToolCalls)
 	}
 }
 
