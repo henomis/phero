@@ -7,6 +7,11 @@ on:
     branches:
       - 'main'
   pull_request:
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   # Optional: allow read access to pull request. Use with `only-new-issues` option.
@@ -16,22 +21,29 @@ jobs:
   build:
     name: test
     runs-on: ubuntu-latest
-    container: golang:latest
+    timeout-minutes: 15
     steps:
-    - uses: actions/checkout@1.0.0
-    - name: Get dependencies
-      run: go get -v -t -d ./...
-    - name: Run tests
-      run: go test ./...
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.5'
+          cache: true
+      - name: Verify modules
+        run: |
+          go mod download
+          go mod verify
+      - name: Run tests
+        run: make test
   golangci:
     name: lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/setup-go@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: '1.25.5'
-          cache: false
-      - uses: actions/checkout@v3
+          cache: true
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
