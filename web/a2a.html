@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phero • A2A</title>
+  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css?family=Space+Grotesk:700|Inter:400,500|JetBrains+Mono:400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+  <nav class="navbar">
+    <ul>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="llm.html">LLM</a></li>
+      <li><a href="agent.html">Agent</a></li>
+      <li><a href="trace.html">Trace</a></li>
+      <li><a href="tool.html">Tool</a></li>
+      <li><a href="mcp.html">MCP</a></li>
+      <li><a href="a2a.html">A2A</a></li>
+      <li><a href="embedding.html">Embedding</a></li>
+      <li><a href="textsplitter.html">Textsplitter</a></li>
+      <li><a href="vectorstore.html">Vectorstore</a></li>
+      <li><a href="rag.html">RAG</a></li>
+      <li><a href="memory.html">Memory</a></li>
+      <li><a href="skill.html">Skill</a></li>
+    </ul>
+  </nav>
+
+  <header>
+    <h1>A2A</h1>
+    <p class="subtitle">Connect agents across processes and services with the Agent-to-Agent protocol.</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>What it is</h2>
+      <p>
+        The <code>a2a</code> package implements the <a href="https://github.com/a2aproject/a2a-go">Agent-to-Agent (A2A) protocol</a>,
+        which defines a standard HTTP interface for agents to call each other across process and network boundaries.
+      </p>
+      <p>
+        A Phero agent can be exposed as an A2A server so other agents (or systems) can call it over HTTP.
+        Conversely, any remote A2A server can be consumed from a Phero agent as an ordinary <code>llm.Tool</code>.
+      </p>
+    </section>
+
+    <section>
+      <h2>The two sides</h2>
+      <ul>
+        <li><strong><code>a2a.Server</code></strong>: wraps a Phero <code>agent.Agent</code> and exposes it as an A2A-compliant HTTP handler set (AgentCard + JSON-RPC).</li>
+        <li><strong><code>a2a.Client</code></strong>: resolves a remote AgentCard by URL and exposes the remote agent as an <code>llm.Tool</code> you can attach to a local agent.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Example: exposing an agent as an A2A server</h2>
+      <p>
+        See the full code in <a href="https://github.com/henomis/phero/tree/main/examples/a2a/server">examples/a2a/server</a>.
+      </p>
+
+      <pre><code class="language-go">package main
+
+import (
+    "net/http"
+    "os"
+
+    "github.com/henomis/phero/a2a"
+    "github.com/henomis/phero/agent"
+    "github.com/henomis/phero/llm/openai"
+)
+
+func main() {
+    client := openai.New(os.Getenv("OPENAI_API_KEY"))
+
+    a, err := agent.New(
+        client,
+        "math-assistant",
+        "You are a helpful math assistant. Answer concisely.",
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    srv, err := a2a.New(a, "http://localhost:8080")
+    if err != nil {
+        panic(err)
+    }
+
+    mux := http.NewServeMux()
+    mux.Handle("/.well-known/agent.json", srv.AgentCardHandler())
+    mux.Handle("/", srv.JSONRPCHandler())
+
+    _ = http.ListenAndServe(":8080", mux)
+}</code></pre>
+
+      <p>
+        <code>AgentCardHandler()</code> serves the well-known AgentCard endpoint used for discovery.
+        <code>JSONRPCHandler()</code> handles the A2A JSON-RPC messages that actually drive the agent.
+      </p>
+    </section>
+
+    <section>
+      <h2>Example: calling a remote A2A agent as a tool</h2>
+      <p>
+        See the full code in <a href="https://github.com/henomis/phero/tree/main/examples/a2a/client">examples/a2a/client</a>.
+      </p>
+
+      <pre><code class="language-go">package main
+
+import (
+    "context"
+    "fmt"
+    "os"
+
+    "github.com/henomis/phero/a2a"
+    "github.com/henomis/phero/agent"
+    "github.com/henomis/phero/llm/openai"
+)
+
+func main() {
+    ctx := context.Background()
+
+    // Resolve the remote agent card and create a client
+    remoteClient, err := a2a.NewClient(ctx, "http://localhost:8080")
+    if err != nil {
+        panic(err)
+    }
+
+    // Expose the remote agent as a local llm.Tool
+    mathTool, err := remoteClient.AsTool()
+    if err != nil {
+        panic(err)
+    }
+
+    // Use the tool in a local orchestrator agent
+    llmClient := openai.New(os.Getenv("OPENAI_API_KEY"))
+
+    orchestrator, err := agent.New(
+        llmClient,
+        "orchestrator",
+        "You are an orchestrator. Use the math-assistant tool for any math questions.",
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    if err := orchestrator.AddTool(mathTool); err != nil {
+        panic(err)
+    }
+
+    result, err := orchestrator.Run(ctx, "What is the square root of 144?")
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Println(result.Content)
+}</code></pre>
+
+      <p>
+        <code>NewClient</code> fetches the remote AgentCard from the well-known path and builds a transport client.
+        <code>AsTool()</code> wraps the remote agent as an <code>llm.Tool</code> whose name and description come from
+        the AgentCard itself — no manual wiring needed.
+      </p>
+    </section>
+
+    <section>
+      <h2>API reference</h2>
+
+      <h3>Server</h3>
+      <ul>
+        <li><code>a2a.New(agent, baseURL) (*Server, error)</code> — create a server for the given agent and public base URL</li>
+        <li><code>srv.AgentCard() *AgentCard</code> — derive the AgentCard from the wrapped agent</li>
+        <li><code>srv.AgentCardHandler() http.Handler</code> — handler for the <code>/.well-known/agent.json</code> endpoint</li>
+        <li><code>srv.JSONRPCHandler() http.Handler</code> — handler for the A2A JSON-RPC endpoint</li>
+      </ul>
+
+      <h3>Client</h3>
+      <ul>
+        <li><code>a2a.NewClient(ctx, baseURL, opts...) (*Client, error)</code> — resolve the remote AgentCard and open a client</li>
+        <li><code>client.AsTool() (*llm.Tool, error)</code> — expose the remote agent as an LLM-callable tool</li>
+        <li><code>a2a.WithResolver(r)</code> — option to override the default AgentCard resolver</li>
+      </ul>
+
+      <h3>Errors</h3>
+      <ul>
+        <li><code>ErrAgentRequired</code> — nil agent passed to <code>New</code></li>
+        <li><code>ErrBaseURLRequired</code> — empty base URL passed to <code>New</code></li>
+        <li><code>ErrURLRequired</code> — empty base URL passed to <code>NewClient</code></li>
+        <li><code>ErrInvalidBaseURL</code> — base URL is not a well-formed absolute URL</li>
+        <li><code>ErrNoTextContent</code> — remote response contains no text part</li>
+        <li><code>ErrEmptyResponse</code> — remote response is nil</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Run the examples</h2>
+
+      <pre><code class="language-bash"># Start the A2A server in one terminal
+go run ./examples/a2a/server
+
+# Call it from another terminal
+go run ./examples/a2a/client</code></pre>
+    </section>
+
+    <section>
+      <h2>Related packages</h2>
+      <ul>
+        <li><a href="agent.html">agent</a>: the agent wrapped inside an A2A server, or the orchestrator calling a remote one</li>
+        <li><a href="llm.html">llm</a>: <code>AsTool()</code> returns an <code>*llm.Tool</code></li>
+        <li><a href="tool.html">tool</a>: other ways to give agents external capabilities</li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-go.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
+</body>
+</html>

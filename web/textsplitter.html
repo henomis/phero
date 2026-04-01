@@ -17,6 +17,7 @@
       <li><a href="trace.html">Trace</a></li>
       <li><a href="tool.html">Tool</a></li>
       <li><a href="mcp.html">MCP</a></li>
+      <li><a href="a2a.html">A2A</a></li>
       <li><a href="embedding.html">Embedding</a></li>
       <li><a href="textsplitter.html">Textsplitter</a></li>
       <li><a href="vectorstore.html">Vectorstore</a></li>
@@ -39,16 +40,37 @@
         Instead, you split it into smaller chunks, embed each chunk, and store them for retrieval.
       </p>
       <p>
-        The <code>textsplitter</code> package provides utilities to split text into size-bounded chunks with an optional overlap.
-        Chunk overlap helps preserve context across boundaries.
+        The <code>textsplitter</code> package defines the <code>Splitter</code> interface; concrete implementations
+        live in sub-packages. All splitters read a source file and emit <code>document.Document</code> values
+        via a lazy Go iterator (<code>iter.Seq2</code>).
       </p>
+
+      <pre><code class="language-go">// Splitter is implemented by all strategies:
+type Splitter interface {
+    Split(ctx context.Context) iter.Seq2[document.Document, error]
+}</code></pre>
+    </section>
+
+    <section>
+      <h2>Available splitters</h2>
+      <ul>
+        <li>
+          <strong><code>textsplitter/recursive</code></strong>: recursively splits on an ordered list of separators
+          (<code>\n\n</code>, <code>\n</code>, space, empty string). Good for generic plain-text documents.
+        </li>
+        <li>
+          <strong><code>textsplitter/markdown</code></strong>: same strategy, but the default separator list prioritises
+          Markdown heading levels (<code>## </code>, <code>### </code>, …) before falling back to paragraph and line boundaries.
+        </li>
+      </ul>
     </section>
 
     <section>
       <h2>Key ideas</h2>
       <ul>
-        <li><strong>Chunk size</strong>: the maximum size of each chunk (the examples measure this in bytes)</li>
+        <li><strong>Chunk size</strong>: the maximum size of each chunk (measured by a configurable length function, default is byte length)</li>
         <li><strong>Overlap</strong>: how much content is repeated between adjacent chunks to avoid hard cutoffs</li>
+        <li><strong>Metadata</strong>: each <code>document.Document</code> carries <code>source</code>, <code>chunk_index</code>, <code>start_offset</code>, and <code>end_offset</code> metadata keys automatically</li>
         <li><strong>Downstream usage</strong>: chunks are fed into <a href="embedding.html">embeddings</a> and stored in a <a href="vectorstore.html">vector store</a></li>
       </ul>
     </section>
@@ -56,28 +78,44 @@
     <section>
       <h2>Example: splitting a file into chunks</h2>
       <p>
-        The <a href="https://github.com/henomis/phero/tree/main/examples/rag-chatbot">examples/rag-chatbot</a> program loads a local
-        text file and splits it before ingestion.
+        Splitters read from a file path given at construction time. The iterator yields
+        <code>document.Document</code> values one at a time so large files are not held in memory all at once.
       </p>
 
-      <pre><code class="language-go">// From examples/rag-chatbot (edited for brevity)
+      <pre><code class="language-go">import (
+    "context"
 
-b, err := os.ReadFile(filePath)
-if err != nil {
-    // handle error
-}
+    "github.com/henomis/phero/textsplitter/recursive"
+)
 
-splitter := textsplitter.NewRecursiveCharacterTextSplitter(chunkSize, chunkOverlap)
-chunks := compactStrings(splitter.SplitText(string(b)))
-if len(chunks) == 0 {
-    // handle error
+const (
+    chunkSize    = 1000
+    chunkOverlap = 200
+)
+
+splitter := recursive.New("./my-document.txt", chunkSize, chunkOverlap)
+
+var chunks []string
+for doc, err := range splitter.Split(context.Background()) {
+    if err != nil {
+        // handle error
+    }
+    chunks = append(chunks, doc.Content)
 }
 
 // chunks are then embedded and ingested into a vector store</code></pre>
 
       <p>
-        In that example, <code>chunkSize</code> and <code>chunkOverlap</code> are CLI flags so you can tune them per dataset.
+        For Markdown files, use <code>markdown.New</code> from <code>textsplitter/markdown</code>:
       </p>
+
+      <pre><code class="language-go">import "github.com/henomis/phero/textsplitter/markdown"
+
+splitter := markdown.New("./README.md", chunkSize, chunkOverlap)
+
+for doc, err := range splitter.Split(ctx) {
+    // doc.Metadata["source"], doc.Metadata["chunk_index"], ...
+}</code></pre>
     </section>
 
     <section>

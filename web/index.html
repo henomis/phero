@@ -17,6 +17,7 @@
       <li><a href="trace.html">Trace</a></li>
       <li><a href="tool.html">Tool</a></li>
       <li><a href="mcp.html">MCP</a></li>
+      <li><a href="a2a.html">A2A</a></li>
       <li><a href="embedding.html">Embedding</a></li>
       <li><a href="textsplitter.html">Textsplitter</a></li>
       <li><a href="vectorstore.html">Vectorstore</a></li>
@@ -44,7 +45,7 @@
     <section>
       <h2>Features</h2>
       <ul>
-        <li>🤝 <strong>Agent orchestration</strong>: Multi-agent workflows with role specialization and coordination</li>
+        <li>🤝 <strong>Agent orchestration</strong>: Multi-agent workflows with role specialization, coordination, and handoffs</li>
         <li>🧩 <strong>LLM abstraction</strong>: Work with OpenAI-compatible endpoints (OpenAI, Ollama, etc.) and Anthropic</li>
         <li>🛠️ <strong>Function tools</strong>: Expose Go functions as callable tools with automatic JSON Schema generation</li>
         <li>📚 <strong>RAG (Retrieval-Augmented Generation)</strong>: Built-in vector storage and semantic search</li>
@@ -75,7 +76,7 @@
         </li>
         <li><strong>Observability</strong>
           <ul>
-            <li><code>trace</code>: Typed lifecycle events and a human-readable text tracer for agents and raw LLM calls</li>
+            <li><code>trace</code>: Typed lifecycle events; human-readable text tracer (<code>trace/text</code>) and NDJSON file tracer (<code>trace/jsonfile</code>); also wraps raw LLM calls</li>
           </ul>
         </li>
         <li><strong>Knowledge Layer</strong>
@@ -85,7 +86,9 @@
             <li><code>vectorstore</code>: Vector storage interface for similarity search</li>
             <li><code>vectorstore/qdrant</code>: Qdrant vector database integration</li>
             <li><code>vectorstore/psql</code>: PostgreSQL + pgvector integration</li>
-            <li><code>textsplitter</code>: Document chunking for RAG workflows</li>
+            <li><code>vectorstore/weaviate</code>: Weaviate vector database integration</li>
+            <li><code>textsplitter/recursive</code>: Recursive character-based chunking</li>
+            <li><code>textsplitter/markdown</code>: Markdown-aware chunking (heading-first separators)</li>
             <li><code>rag</code>: Complete RAG pipeline combining embeddings and vector stores</li>
           </ul>
         </li>
@@ -94,8 +97,9 @@
             <li><code>skill</code>: Parse SKILL.md files and expose them as agent capabilities</li>
             <li><code>mcp</code>: Model Context Protocol adapter for external tool integration</li>
             <li><code>tool/file</code>: File viewing and editing helpers (<code>view</code>, <code>create_file</code>, <code>str_replace</code>)</li>
-            <li><code>tool/bash</code>: Bash command execution</li>
+            <li><code>tool/bash</code>: Bash command execution with optional blocklist, allowlist, and timeout guardrails</li>
             <li><code>tool/human</code>: Human-in-the-loop input collection</li>
+            <li><code>a2a</code>: Agent-to-Agent (A2A) protocol server and client for inter-agent networking</li>
           </ul>
         </li>
       </ul>
@@ -110,6 +114,9 @@
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/simple-agent">Simple Agent</a></td><td><strong>Start here!</strong> Minimal example showing one agent with one custom tool perfect for learning the basics</td></tr>
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/conversational-agent">Conversational Agent</a></td><td>REPL-style chatbot with short-term conversational memory and a simple built-in tool</td></tr>
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/long-term-memory">Long-Term Memory</a></td><td>REPL-style chatbot with semantic long-term memory (RAG) backed by Qdrant</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/handoff">Handoff</a></td><td>One agent hands work off to a specialist agent at runtime using the built-in handoff mechanism</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/a2a/server">A2A Server</a></td><td>Expose a Phero agent as an A2A-compliant HTTP server for cross-process agent calls</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/a2a/client">A2A Client</a></td><td>Connect to a remote A2A agent and use it as a local llm.Tool inside an orchestrator</td></tr>
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/debate-committee">Debate Committee</a></td><td>Multi-agent architecture where committee members debate independently and a judge synthesizes the final decision</td></tr>
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/multi-agent-workflow">Multi-Agent Workflow</a></td><td>Classic Plan → Execute → Analyze → Critique pattern with specialized agent roles</td></tr>
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/rag-chatbot">RAG Chatbot</a></td><td>Terminal chatbot with semantic search over local documents using Qdrant</td></tr>
@@ -128,11 +135,12 @@
         LLM requests and responses, tool calls and results, and memory operations.
       </p>
 
-      <pre><code class="language-go">a.SetTracer(trace.New(os.Stderr))</code></pre>
+      <pre><code class="language-go">a.SetTracer(text.New(os.Stderr))</code></pre>
 
       <p>
-        The built-in text tracer writes colorized, human-readable lines to the terminal. See <a href="trace.html">Trace</a>
-        for the full package overview and usage examples.
+        The built-in text tracer writes colorized, human-readable lines to the terminal.
+        An NDJSON file tracer (<code>jsonfile.New</code>) is also available for structured log ingestion.
+        See <a href="trace.html">Trace</a> for the full package overview and usage examples.
       </p>
     </section>
     <section>

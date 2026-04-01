@@ -17,6 +17,7 @@
       <li><a href="trace.html">Trace</a></li>
       <li><a href="tool.html">Tool</a></li>
       <li><a href="mcp.html">MCP</a></li>
+      <li><a href="a2a.html">A2A</a></li>
       <li><a href="embedding.html">Embedding</a></li>
       <li><a href="textsplitter.html">Textsplitter</a></li>
       <li><a href="vectorstore.html">Vectorstore</a></li>
@@ -156,12 +157,14 @@ go run ./examples/long-term-memory</code></pre>
     <section>
       <h2>Other backends</h2>
       <p>
-        Phero also includes a PostgreSQL + pgvector adapter under <code>vectorstore/psql</code>.
-        Use it when you want vectors stored alongside your relational data.
+        Phero includes a PostgreSQL + pgvector adapter under <code>vectorstore/psql</code> and a
+        <strong>Weaviate</strong> adapter under <code>vectorstore/weaviate</code>.
       </p>
 
+      <h3>PostgreSQL (pgvector)</h3>
       <p>
-        The PostgreSQL store is bound to a logical collection name, but (by default) stores all collections in a single table
+        Use it when you want vectors stored alongside your relational data.
+        The store is bound to a logical collection name, but (by default) stores all collections in a single table
         named <code>vector_store</code> with a <code>collection</code> column.
       </p>
 
@@ -187,8 +190,42 @@ if err != nil {
 _ = store.EnsureCollection(ctx)</code></pre>
 
       <p>
-        The PostgreSQL adapter also lets you pick the distance metric with <code>vspql.WithDistance(...)</code>, disable automatic extension setup with <code>vspql.WithEnsureExtension(false)</code>, and override the backing table with <code>vspql.WithTable("...")</code>.
+        The PostgreSQL adapter also lets you pick the distance metric with <code>vspql.WithDistance(...)</code>,
+        disable automatic extension setup with <code>vspql.WithEnsureExtension(false)</code>,
+        and override the backing table with <code>vspql.WithTable("...")</code>.
       </p>
+
+      <h3>Weaviate</h3>
+      <p>
+        Use when you have an existing Weaviate instance. Inject an already-configured
+        <code>*weaviate.Client</code> and pick your distance metric.
+      </p>
+
+      <pre><code class="language-go">import (
+    weaviateclient "github.com/weaviate/weaviate-go-client/v4/weaviate"
+
+    vsweaviate "github.com/henomis/phero/vectorstore/weaviate"
+)
+
+c := weaviateclient.New(weaviateclient.Config{
+    Host:   "localhost:8080",
+    Scheme: "http",
+})
+
+store, err := vsweaviate.New(
+    c,
+    "MyCollection",
+    vsweaviate.WithVectorSize(1536),
+    vsweaviate.WithDistance(vsweaviate.DistanceCosine), // default
+    vsweaviate.WithBatchSize(50),
+)
+if err != nil {
+    // handle error
+}
+
+_ = store.EnsureCollection(ctx)</code></pre>
+
+      <p>Supported distance metrics: <code>DistanceCosine</code> (default), <code>DistanceDot</code>, <code>DistanceL2</code>.</p>
     </section>
 
     <section>
