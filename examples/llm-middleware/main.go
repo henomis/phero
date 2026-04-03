@@ -51,7 +51,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	rateLimitMW, stop, err := middleware.NewRateLimit(2.0, 5)
+	rateLimitMW, stop, err := middleware.NewLimiter(2, 2)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create rate-limit middleware: %v\n", err)
 		os.Exit(1)

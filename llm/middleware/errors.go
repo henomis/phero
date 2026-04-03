@@ -28,6 +28,9 @@ var ErrInvalidBufferSize = errors.New("middleware: buffer size must be non-negat
 // ErrStopped is returned to pending callers when Stop is called on the middleware.
 var ErrStopped = errors.New("middleware: LLM middleware has been stopped")
 
+// ErrInvalidMaxConcurrentRequests is returned when maxConcurrentRequests is not greater than zero.
+var ErrInvalidMaxConcurrentRequests = errors.New("middleware: maxConcurrentRequests must be greater than zero")
+
 // ErrInvalidMaxAttempts is returned when maxAttempts is less than 1.
 var ErrInvalidMaxAttempts = errors.New("middleware: maxAttempts must be at least 1")
 
