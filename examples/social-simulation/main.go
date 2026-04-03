@@ -55,7 +55,7 @@ func main() {
 	defer cancel()
 
 	llmClient, llmInfo := buildLLMFromEnv()
-	rateLimiter, stop, err := middleware.NewRateLimit(2, 500)
+	rateLimiter, stop, err := middleware.NewLimiter(1, 4)
 	if err != nil {
 		panic(fmt.Errorf("rate limiter: %w", err))
 	}
