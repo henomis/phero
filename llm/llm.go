@@ -84,6 +84,25 @@ type ToolHandler func(ctx context.Context, arguments string) (any, error)
 // Middleware order is preserved: if you call tool.Use(m1, m2), m1 runs before m2.
 type ToolMiddleware func(tool *Tool, next ToolHandler) ToolHandler
 
+// LLMMiddleware wraps an LLM, decorating its Execute method with additional behavior.
+//
+// Use Use to compose multiple middlewares around a base LLM.
+// Middleware order is preserved: Use(base, m1, m2) means m1 is the outermost layer and
+// runs first, delegating to m2, which delegates to base.
+type LLMMiddleware func(next LLM) LLM
+
+// Use wraps base with the provided middlewares, returning a new LLM.
+//
+// Middlewares are applied in order: the first middleware listed is the outermost layer.
+// For example, Use(base, logging, ratelimit) produces logging(ratelimit(base)).
+func Use(base LLM, middlewares ...LLMMiddleware) LLM {
+	result := base
+	for i := len(middlewares) - 1; i >= 0; i-- {
+		result = middlewares[i](result)
+	}
+	return result
+}
+
 // Tool is a Tool that wraps a function.
 type Tool struct {
 	// The name of the tool, as shown to the LLM. Generally the name of the function.
