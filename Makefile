@@ -1,4 +1,4 @@
-.PHONY: all test lint fmt vet clean coverage help license
+.PHONY: all test lint fmt vet clean coverage help license tidy fix doc check
 
 # Variables
 GO := go
@@ -16,7 +16,9 @@ help:
 	@echo "  make test       - Run all tests"
 	@echo "  make lint       - Run golangci-lint"
 	@echo "  make fmt        - Format all Go files"
+	@echo "  make fix        - Run go fix on all packages"
 	@echo "  make vet        - Run go vet"
+	@echo "  make tidy       - Tidy and verify go modules"
 	@echo "  make coverage   - Generate test coverage report"
 	@echo "  make clean      - Clean build artifacts and cache"
 	@echo "  make license    - Add license headers to all Go files"
@@ -45,6 +47,11 @@ fmt:
 	$(GO) fmt ./...
 	gofumpt -l -w .
 	gci write --skip-generated -s standard -s default -s "prefix($(MODULE))" .
+
+## fix: Run go fix on all packages
+fix:
+	@echo "Running go fix..."
+	$(GO) fix ./...
 
 ## vet: Run go vet
 vet:

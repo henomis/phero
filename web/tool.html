@@ -17,6 +17,7 @@
       <li><a href="trace.html">Trace</a></li>
       <li><a href="tool.html">Tool</a></li>
       <li><a href="mcp.html">MCP</a></li>
+      <li><a href="a2a.html">A2A</a></li>
       <li><a href="embedding.html">Embedding</a></li>
       <li><a href="textsplitter.html">Textsplitter</a></li>
       <li><a href="vectorstore.html">Vectorstore</a></li>
@@ -53,7 +54,7 @@
 
       <ul>
         <li><strong>File tools</strong> (<code>tool/file</code>): <code>view</code>, <code>create_file</code>, <code>str_replace</code></li>
-        <li><strong>Bash tool</strong> (<code>tool/bash</code>): run bash commands in an optional working directory</li>
+        <li><strong>Bash tool</strong> (<code>tool/bash</code>): run bash commands with optional guardrails (blocklist, allowlist, timeout, safe mode)</li>
         <li><strong>Human tool</strong> (<code>tool/human</code>): ask the user for input/approval mid-run</li>
       </ul>
 
@@ -63,7 +64,57 @@
     </section>
 
     <section>
-      <h2>Example: middleware for approval</h2>
+      <h2>Bash tool guardrails</h2>
+      <p>
+        The bash tool ships with several security options to restrict what the agent can run.
+      </p>
+
+      <pre><code class="language-go">import (
+    "time"
+
+    "github.com/henomis/phero/tool/bash"
+)
+
+// Safe mode: applies a built-in blocklist of dangerous patterns
+// and sets a 30-second timeout.
+bashTool, err := bash.New(bash.WithSafeMode())
+
+// Fine-grained control:
+bashTool, err := bash.New(
+    bash.WithWorkingDirectory("/tmp/sandbox"),
+    bash.WithTimeout(10*time.Second),
+    bash.WithBlocklist("curl", "wget"),       // blocked substrings
+    bash.WithAllowlist("ls", "cat", "echo"),  // only these are allowed
+)</code></pre>
+
+      <ul>
+        <li><code>WithSafeMode()</code>: enables a built-in blocklist (<code>rm -rf /</code>, <code>dd if=</code>, fork bombs, …) and a 30 s timeout</li>
+        <li><code>WithTimeout(d)</code>: maximum execution time per command; context deadline takes precedence when shorter</li>
+        <li><code>WithBlocklist(patterns...)</code>: any command containing a pattern (case-insensitive) returns <code>ErrCommandBlocked</code></li>
+        <li><code>WithAllowlist(patterns...)</code>: when set, the command must match at least one pattern or <code>ErrCommandNotAllowed</code> is returned</li>
+        <li><code>WithWorkingDirectory(dir)</code>: directory in which commands run</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>File tool: prevent overwriting</h2>
+      <p>
+        By default <code>CreateFileTool</code> silently overwrites existing files.
+        Pass <code>WithNoOverwrite()</code> to return <code>ErrFileExists</code> instead.
+      </p>
+
+      <pre><code class="language-go">import "github.com/henomis/phero/tool/file"
+
+createTool, err := file.NewCreateFileTool(
+    file.WithWorkingDirectory("/workspace"),
+    file.WithNoOverwrite(),
+)
+if err != nil {
+    panic(err)
+}</code></pre>
+    </section>
+
+    <section>
       <p>
         The <a href="https://github.com/henomis/phero/tree/main/examples/skills">examples/skills</a> program combines skills with a
         file-writing tool that asks the user to approve writes before the underlying tool handler runs.

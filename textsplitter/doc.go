@@ -12,16 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package textsplitter provides utilities to split text into size-bounded,
-// optionally-overlapping chunks.
+// Package textsplitter defines the shared abstractions for text splitting.
 //
-// This package currently includes a recursive character-based splitter that
-// chooses a separator from an ordered list (by default: "\n\n", "\n", " ", "")
-// and recursively splits long segments using progressively smaller separators.
-// Adjacent segments are then merged into chunks according to the configured
-// chunk size and overlap.
-//
-// Chunk size and overlap are measured using a configurable length function.
-// By default, length is measured in bytes; callers can supply a rune-counting
-// implementation when working with Unicode text.
+// Concrete splitter implementations live in subpackages such as
+// textsplitter/recursive and textsplitter/markdown.
 package textsplitter

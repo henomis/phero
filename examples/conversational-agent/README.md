@@ -8,6 +8,7 @@ This example shows:
 - **Memory management** - Conversation history persists across turns
 - **Context awareness** - Agent remembers previous messages
 - **Memory commands** - View history, clear memory, show stats
+- **Run summaries** - Each turn prints aggregated iterations, memory activity, token counts, and latency
 
 ## What you'll learn
 
@@ -55,6 +56,8 @@ Got it! I'll remember that your favorite color is blue.
 > What's my favorite color?
 
 Your favorite color is blue!
+
+📈 Run summary: iterations=1 llm_calls=1 tool_calls=0 memory=4/2 tokens=154/21 latency=420ms
 ```
 
 The agent maintains context from previous messages in the conversation.
@@ -125,6 +128,8 @@ When you call `a.Run(ctx, userInput)`:
 5. Returns the response to you
 
 Memory is **automatic** - you don't need to manually manage the message history.
+
+After each turn, the example also prints the `response.Summary` returned by the agent so you can inspect the cost and behavior of that single run.
 
 ### Memory inspection
 

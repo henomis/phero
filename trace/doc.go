@@ -18,10 +18,14 @@
 // agent start/end, per-iteration boundaries, LLM request/response, tool
 // call/result, and memory save/retrieve.
 //
-// Two implementations are provided:
+// The package ships one built-in implementation:
 //
 //   - NoopTracer discards all events (zero cost, the default).
-//   - TextTracer writes human-readable, colour-coded lines to an io.Writer.
+//
+// Concrete backends live in sub-packages and can be composed freely:
+//
+//   - trace/text   — human-readable, colour-coded lines written to an io.Writer.
+//   - trace/jsonfile — newline-delimited JSON (NDJSON) appended to a file.
 //
 // The tracer is propagated through the context using WithTracer and FromContext,
 // so tool handlers can emit their own events without coupling to the agent struct.

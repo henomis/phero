@@ -12,7 +12,7 @@ Phero is a modern Go framework for building multi-agent AI systems. Like ants in
 
 ## Why Phero?
 
-- **🎯 Purpose-built for agents** Not an LLM wrapper; a framework for orchestrating cooperative agent systems
+- **🤝 Agent orchestration** Multi-agent workflows with role specialization, coordination, and agent handoffs
 - **🧩 Composable primitives** Small, focused packages that solve specific problems
 - **🔧 Tool-first design** Built-in support for function tools, skills, RAG, and MCP
 - **🎨 Developer-friendly** Clean APIs, opt-in tracing, OpenAI-compatible + Anthropic support
@@ -24,17 +24,20 @@ Phero is a modern Go framework for building multi-agent AI systems. Like ants in
 
 ### Core Capabilities
 
-- **🤝 Agent orchestration** Multi-agent workflows with role specialization and coordination
+- **🤝 Agent orchestration** Multi-agent workflows with role specialization, coordination, and runtime handoffs
+- **🔀 Agent handoffs** Transfer control between agents at runtime; `Result.HandoffAgent` tells you where to route next
+- **🌐 A2A protocol** Expose any agent as an HTTP A2A server, or call remote A2A agents as local tools
 - **🧩 LLM abstraction** Work with OpenAI-compatible endpoints (OpenAI, Ollama, etc.) and Anthropic
 - **🛠️ Function tools** Expose Go functions as callable tools with automatic JSON Schema generation
 - **📚 RAG (Retrieval-Augmented Generation)** Built-in vector storage and semantic search
 - **🧠 Skills system** Define reusable agent capabilities in `SKILL.md` files
 - **🔌 MCP support** Integrate Model Context Protocol servers as agent tools
 - **🧾 Memory management** Conversational context storage for agents
-- **🔍 Tracing** Observe agent, LLM, tool, and memory lifecycle events with colorized terminal output
-- **✂️ Text splitting** Document chunking for RAG workflows
+- **🔍 Tracing** Typed lifecycle events with a colorized text tracer (`trace/text`) and an NDJSON file tracer (`trace/jsonfile`); per-run summary with token usage and latency breakdowns
+- **🛡️ Tool guardrails** Bash tool blocklist, allowlist, timeout, and safe-mode options
+- **✂️ Text splitting** Recursive and Markdown-aware chunkers under `textsplitter/recursive` and `textsplitter/markdown`
 - **🧬 Embeddings** Semantic search capabilities via OpenAI embeddings
-- **🗄️ Vector stores** Vector database integration
+- **🗄️ Vector stores** Qdrant, PostgreSQL/pgvector, and Weaviate backends
 
 
 
@@ -69,7 +72,7 @@ Phero is organized into focused packages, each solving a specific problem:
 
 ### 🤖 Agent Layer
 
-- **`agent`** Core orchestration for LLM-based agents with tool execution and chat loops
+- **`agent`** Core orchestration for LLM-based agents with tool execution, chat loops, and runtime handoffs
 - **`memory`** Conversational context management for multi-turn interactions (in-process, file-backed, RAG-backed, or PostgreSQL-backed)
 
 ### 💬 LLM Layer
@@ -85,16 +88,20 @@ Phero is organized into focused packages, each solving a specific problem:
 - **`vectorstore`** Vector storage interface for similarity search
 - **`vectorstore/qdrant`** Qdrant vector database integration
 - **`vectorstore/psql`** PostgreSQL + pgvector integration
-- **`textsplitter`** Document chunking for RAG workflows
+- **`vectorstore/weaviate`** Weaviate vector database integration
+- **`textsplitter`** Text splitting interface and shared types
+- **`textsplitter/recursive`** Recursive character-based chunker
+- **`textsplitter/markdown`** Markdown-aware chunker (heading-first separators)
 - **`rag`** Complete RAG pipeline combining embeddings and vector stores
 
 ### 🔧 Tools & Integration
 
 - **`skill`** Parse SKILL.md files and expose them as agent capabilities
 - **`mcp`** Model Context Protocol adapter for external tool integration
-- **`trace`** Typed observability hooks plus a human-readable text tracer for agent and LLM activity
-- **`tool/file`** File viewing and editing helpers (`view`, `create_file`, `str_replace`)
-- **`tool/bash`** Bash command execution
+- **`a2a`** Agent-to-Agent (A2A) protocol — expose agents as HTTP servers or call remote agents as tools
+- **`trace`** Typed observability events; `trace/text` for human-readable colorized output; `trace/jsonfile` for NDJSON file logging; `trace.NewLLM` for raw LLM call wrapping
+- **`tool/file`** File viewing and editing helpers (`view`, `create_file` with optional no-overwrite, `str_replace`)
+- **`tool/bash`** Bash command execution with blocklist, allowlist, timeout, and safe-mode guardrails
 - **`tool/human`** Human-in-the-loop input collection
 
 
@@ -108,6 +115,9 @@ Comprehensive examples are included in the [`examples/`](examples/) directory:
 | [Simple Agent](examples/simple-agent/) | **Start here!** Minimal example showing one agent with one custom tool perfect for learning the basics |
 | [Conversational Agent](examples/conversational-agent/) | REPL-style chatbot with short-term conversational memory and a simple built-in tool |
 | [Long-Term Memory](examples/long-term-memory/) | REPL-style chatbot with semantic long-term memory (RAG) backed by Qdrant |
+| [Handoff](examples/handoff/) | One agent hands work off to a specialist agent at runtime using the built-in handoff mechanism |
+| [A2A Server](examples/a2a/server/) | Expose a Phero agent as an A2A-compliant HTTP server for cross-process agent calls |
+| [A2A Client](examples/a2a/client/) | Connect to a remote A2A agent and use it as a local tool inside an orchestrator |
 | [Debate Committee](examples/debate-committee/) | Multi-agent architecture where committee members debate independently and a judge synthesizes the final decision |
 | [Multi-Agent Workflow](examples/multi-agent-workflow/) | Classic Plan → Execute → Analyze → Critique pattern with specialized agent roles |
 | [RAG Chatbot](examples/rag-chatbot/) | Terminal chatbot with semantic search over local documents using Qdrant |

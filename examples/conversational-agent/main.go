@@ -27,6 +27,7 @@ import (
 	"github.com/henomis/phero/llm"
 	"github.com/henomis/phero/llm/openai"
 	memory "github.com/henomis/phero/memory/simple"
+	"github.com/henomis/phero/trace"
 )
 
 type TimeInput struct{}
@@ -130,6 +131,7 @@ func main() {
 			fmt.Printf("\n❌ Error: %v\n", err)
 		} else {
 			fmt.Printf("\n%s\n", strings.TrimSpace(response.Content))
+			printRunSummary(response.Summary)
 		}
 
 		fmt.Print("\n> ")
@@ -240,6 +242,24 @@ func getCurrentTime(_ context.Context, _ *TimeInput) (*TimeOutput, error) {
 	return &TimeOutput{
 		CurrentTime: time.Now().Format(time.RFC3339),
 	}, nil
+}
+
+func printRunSummary(summary *trace.RunSummary) {
+	if summary == nil {
+		return
+	}
+
+	fmt.Printf(
+		"\n📈 Run summary: iterations=%d llm_calls=%d tool_calls=%d memory=%d/%d tokens=%d/%d latency=%s\n",
+		summary.Iterations,
+		summary.LLMCalls,
+		summary.ToolCalls,
+		summary.MemoryRetrieved,
+		summary.MemorySaved,
+		summary.Usage.InputTokens,
+		summary.Usage.OutputTokens,
+		summary.Latency.Total.Round(time.Millisecond),
+	)
 }
 
 func buildLLMFromEnv() (llm.LLM, string) {

@@ -17,6 +17,7 @@
       <li><a href="trace.html">Trace</a></li>
       <li><a href="tool.html">Tool</a></li>
       <li><a href="mcp.html">MCP</a></li>
+      <li><a href="a2a.html">A2A</a></li>
       <li><a href="embedding.html">Embedding</a></li>
       <li><a href="textsplitter.html">Textsplitter</a></li>
       <li><a href="vectorstore.html">Vectorstore</a></li>
@@ -44,10 +45,11 @@
     <section>
       <h2>Built-in tracers</h2>
       <ul>
-        <li><code>trace.Noop</code>: default zero-cost tracer that discards all events</li>
-        <li><code>trace.New(w)</code>: returns a <code>TextTracer</code> that writes human-readable, colorized trace lines</li>
-        <li><code>trace.NewDefault()</code>: writes the same text output to <code>os.Stderr</code></li>
+        <li><code>trace.Noop</code>: default zero-cost tracer that discards all events (top-level <code>trace</code> package)</li>
+        <li><code>text.New(w)</code> / <code>text.NewDefault()</code>: writes human-readable, colorized trace lines to any <code>io.Writer</code>; <code>NewDefault()</code> targets <code>os.Stderr</code></li>
+        <li><code>jsonfile.New(filePath)</code>: appends one JSON record per line (NDJSON) to a file; call <code>Close()</code> when done</li>
       </ul>
+      <p>Import paths: <code>github.com/henomis/phero/trace/text</code> and <code>github.com/henomis/phero/trace/jsonfile</code>.</p>
     </section>
 
     <section>
@@ -64,7 +66,7 @@
     "github.com/henomis/phero/agent"
     "github.com/henomis/phero/llm"
     "github.com/henomis/phero/llm/openai"
-    "github.com/henomis/phero/trace"
+    "github.com/henomis/phero/trace/text"
 )
 
 func main() {
@@ -79,7 +81,7 @@ func main() {
         panic(err)
     }
 
-    a.SetTracer(trace.New(os.Stderr))
+    a.SetTracer(text.New(os.Stderr))
 
     result, err := a.Run(context.Background(), "What is 12 * 9?")
     if err != nil {
@@ -96,7 +98,7 @@ func main() {
         If you want observability around direct <code>llm.LLM.Execute</code> calls, wrap any backend with <code>trace.NewLLM</code>.
       </p>
 
-      <pre><code class="language-go">tracedClient := trace.NewLLM(client, trace.New(os.Stderr))
+      <pre><code class="language-go">tracedClient := trace.NewLLM(client, text.New(os.Stderr))
 
 result, err := tracedClient.Execute(ctx, messages, tools)</code></pre>
 
@@ -107,10 +109,60 @@ result, err := tracedClient.Execute(ctx, messages, tools)</code></pre>
     </section>
 
     <section>
+      <h2>JSON file tracer</h2>
+      <p>
+        For machine-readable output, use <code>jsonfile.New</code> to write NDJSON to a file.
+        Each line is a self-contained JSON record with a <code>type</code>, <code>timestamp</code>, and <code>data</code> field.
+      </p>
+
+      <pre><code class="language-go">import "github.com/henomis/phero/trace/jsonfile"
+
+t, err := jsonfile.New("trace.ndjson")
+if err != nil {
+    panic(err)
+}
+defer t.Close()
+
+a.SetTracer(t)</code></pre>
+
+      <p>
+        The tracer is goroutine-safe and appends to the file if it already exists.
+      </p>
+    </section>
+
+    <section>
+      <h2>Run summary</h2>
+      <p>
+        After every agent run, a <code>AgentRunSummaryEvent</code> is emitted with a <code>RunSummary</code>
+        containing aggregated metrics. The same summary is also available on the <code>Result</code> returned by <code>Run()</code>.
+      </p>
+      <ul>
+        <li><code>RunSummary.Usage</code> &mdash; <code>UsageSummary{InputTokens, OutputTokens}</code></li>
+        <li><code>RunSummary.Latency</code> &mdash; <code>LatencySummary{Total, LLM, Tool, Memory}</code></li>
+        <li><code>RunSummary.Tools</code> &mdash; <code>[]ToolCallSummary{ToolName, Calls, Errors}</code></li>
+        <li><code>RunSummary.Iterations</code>, <code>LLMCalls</code>, <code>ToolCalls</code>, <code>ToolErrors</code></li>
+        <li><code>RunSummary.HandoffAgent</code> &mdash; non-empty when the run ended via a handoff</li>
+      </ul>
+
+      <pre><code class="language-go">result, err := a.Run(ctx, input)
+if err != nil {
+    panic(err)
+}
+if s := result.Summary; s != nil {
+    fmt.Printf("iterations=%d llmCalls=%d tokens=%d+%d\n",
+        s.Iterations, s.LLMCalls,
+        s.Usage.InputTokens, s.Usage.OutputTokens)
+    fmt.Printf("total=%s  llm=%s  tool=%s\n",
+        s.Latency.Total, s.Latency.LLM, s.Latency.Tool)
+}</code></pre>
+    </section>
+
+    <section>
       <h2>Event types</h2>
       <ul>
         <li><code>AgentStartEvent</code> and <code>AgentEndEvent</code></li>
         <li><code>AgentIterationEvent</code></li>
+        <li><code>AgentRunSummaryEvent</code> &mdash; emitted once per run with a full <code>RunSummary</code></li>
         <li><code>LLMRequestEvent</code> and <code>LLMResponseEvent</code></li>
         <li><code>ToolCallEvent</code> and <code>ToolResultEvent</code></li>
         <li><code>MemoryRetrieveEvent</code> and <code>MemorySaveEvent</code></li>

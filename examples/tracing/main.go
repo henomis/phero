@@ -18,11 +18,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/henomis/phero/agent"
 	"github.com/henomis/phero/llm"
 	"github.com/henomis/phero/llm/openai"
 	"github.com/henomis/phero/trace"
+	"github.com/henomis/phero/trace/text"
 )
 
 // CalculatorInput defines the parameters for the calculator tool.
@@ -77,8 +79,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Attach a TextTracer to see all lifecycle events in the terminal.
-	a.SetTracer(trace.New(os.Stderr))
+	// Attach a text Tracer to see all lifecycle events in the terminal.
+	a.SetTracer(text.New(os.Stderr))
 
 	if err := a.AddTool(calculatorTool); err != nil {
 		fmt.Fprintf(os.Stderr, "AddTool: %v\n", err)
@@ -92,4 +94,21 @@ func main() {
 	}
 
 	fmt.Printf("\nResult: %s\n", result.Content)
+	printRunSummary(result.Summary)
+}
+
+func printRunSummary(summary *trace.RunSummary) {
+	if summary == nil {
+		return
+	}
+
+	fmt.Printf(
+		"Run summary: iterations=%d llm_calls=%d tool_calls=%d tokens=%d/%d latency=%s\n",
+		summary.Iterations,
+		summary.LLMCalls,
+		summary.ToolCalls,
+		summary.Usage.InputTokens,
+		summary.Usage.OutputTokens,
+		summary.Latency.Total.Round(time.Millisecond),
+	)
 }

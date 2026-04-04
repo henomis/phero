@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package trace
+package text
 
 import (
 	"fmt"
@@ -20,6 +20,8 @@ import (
 	"os"
 	"strings"
 	"sync"
+
+	"github.com/henomis/phero/trace"
 )
 
 // ANSI colour/style escape codes.
@@ -38,32 +40,32 @@ const (
 	ansiBoldRed   = "\033[1;31m"
 )
 
-// TextTracer writes human-readable, colour-coded trace lines to an io.Writer.
+// Tracer writes human-readable, colour-coded trace lines to an io.Writer.
 //
 // Each line has the format:
 //
 //	HH:MM:SS.mmm [agent] ICON  detail
 //
-// TextTracer is safe for concurrent use.
-type TextTracer struct {
+// Tracer is safe for concurrent use.
+type Tracer struct {
 	mu sync.Mutex
 	w  io.Writer
 }
 
-// New returns a TextTracer that writes to w.
+// New returns a Tracer that writes to w.
 //
 // Pass os.Stderr (or os.Stdout) for terminal output.
-func New(w io.Writer) *TextTracer {
-	return &TextTracer{w: w}
+func New(w io.Writer) *Tracer {
+	return &Tracer{w: w}
 }
 
-// NewDefault returns a TextTracer that writes to os.Stderr.
-func NewDefault() *TextTracer {
+// NewDefault returns a Tracer that writes to os.Stderr.
+func NewDefault() *Tracer {
 	return New(os.Stderr)
 }
 
 // Trace handles a single event and writes a formatted line to the writer.
-func (t *TextTracer) Trace(event Event) {
+func (t *Tracer) Trace(event trace.Event) {
 	line := t.format(event)
 	if line == "" {
 		return
@@ -73,16 +75,16 @@ func (t *TextTracer) Trace(event Event) {
 	t.mu.Unlock()
 }
 
-func (t *TextTracer) format(event Event) string {
+func (t *Tracer) format(event trace.Event) string {
 	switch e := event.(type) {
-	case AgentStartEvent:
+	case trace.AgentStartEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
 		return fmt.Sprintf("%s%s %s[%s]%s %s▶  AgentStart%s  input=%q",
 			ansiBoldWhite, ts, ansiDim, e.AgentName, ansiReset,
 			ansiBoldWhite, ansiReset,
 			truncate(e.Input, 120))
 
-	case AgentEndEvent:
+	case trace.AgentEndEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
 		if e.Err != nil {
 			return fmt.Sprintf("%s%s %s[%s]%s %s■  AgentEnd%s  iterations=%d error=%v",
@@ -95,13 +97,41 @@ func (t *TextTracer) format(event Event) string {
 			ansiBoldWhite, ansiReset,
 			e.Iterations, truncate(e.Output, 120))
 
-	case AgentIterationEvent:
+	case trace.AgentIterationEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
 		return fmt.Sprintf("%s%s %s[%s] ↻  iteration=%d%s",
 			ansiDim, ts, ansiDim, e.AgentName,
 			e.Iteration, ansiReset)
 
-	case LLMRequestEvent:
+	case trace.AgentRunSummaryEvent:
+		ts := e.Timestamp.Format("15:04:05.000")
+		summary := e.Summary
+		tools := "none"
+		if len(summary.Tools) > 0 {
+			parts := make([]string, 0, len(summary.Tools))
+			for _, tool := range summary.Tools {
+				parts = append(parts, fmt.Sprintf("%s=%d/%d", tool.ToolName, tool.Calls, tool.Errors))
+			}
+			tools = strings.Join(parts, ", ")
+		}
+		handoff := ""
+		if summary.HandoffAgent != "" {
+			handoff = fmt.Sprintf(" handoff=%s", summary.HandoffAgent)
+		}
+		errText := ""
+		if summary.Error != "" {
+			errText = fmt.Sprintf(" error=%q", truncate(summary.Error, 120))
+		}
+		return fmt.Sprintf("%s%s %s[%s]%s %s≡  RunSummary%s  iterations=%d llm_calls=%d tool_calls=%d tool_errors=%d memory=%d/%d tokens=%d/%d latency(total=%s llm=%s tool=%s memory=%s) tools=[%s]%s%s",
+			ansiBoldWhite, ts, ansiDim, summary.AgentName, ansiReset,
+			ansiBoldWhite, ansiReset,
+			summary.Iterations, summary.LLMCalls, summary.ToolCalls, summary.ToolErrors,
+			summary.MemoryRetrieved, summary.MemorySaved,
+			summary.Usage.InputTokens, summary.Usage.OutputTokens,
+			summary.Latency.Total, summary.Latency.LLM, summary.Latency.Tool, summary.Latency.Memory,
+			tools, handoff, errText)
+
+	case trace.LLMRequestEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
 		agent := agentLabel(e.AgentName)
 		iter := iterLabel(e.Iteration)
@@ -114,7 +144,7 @@ func (t *TextTracer) format(event Event) string {
 			ansiBold, ansiReset, iter,
 			e.MessageCount, tools)
 
-	case LLMResponseEvent:
+	case trace.LLMResponseEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
 		agent := agentLabel(e.AgentName)
 		iter := iterLabel(e.Iteration)
@@ -133,14 +163,14 @@ func (t *TextTracer) format(event Event) string {
 			ansiBold, ansiReset, iter, tokens,
 			toolCalls, content)
 
-	case ToolCallEvent:
+	case trace.ToolCallEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
 		return fmt.Sprintf("%s%s %s[%s]%s %s⚙  ToolCall%s  iter=%d tool=%s args=%s",
 			ansiYellow, ts, ansiDim, e.AgentName, ansiReset,
 			ansiYellow, ansiReset,
 			e.Iteration, e.ToolName, truncate(e.Arguments, 200))
 
-	case ToolResultEvent:
+	case trace.ToolResultEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
 		if e.Err != nil {
 			return fmt.Sprintf("%s%s %s[%s]%s %s✗  ToolResult%s  iter=%d tool=%s error=%v",
@@ -153,14 +183,14 @@ func (t *TextTracer) format(event Event) string {
 			ansiGreen, ansiReset,
 			e.Iteration, e.ToolName, truncate(e.Result, 200))
 
-	case MemorySaveEvent:
+	case trace.MemorySaveEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
 		return fmt.Sprintf("%s%s %s[%s]%s %s⟣  MemorySave%s  count=%d",
 			ansiMagenta, ts, ansiDim, e.AgentName, ansiReset,
 			ansiMagenta, ansiReset,
 			e.Count)
 
-	case MemoryRetrieveEvent:
+	case trace.MemoryRetrieveEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
 		return fmt.Sprintf("%s%s %s[%s]%s %s⟤  MemoryRetrieve%s  count=%d",
 			ansiMagenta, ts, ansiDim, e.AgentName, ansiReset,
@@ -196,3 +226,6 @@ func truncate(s string, n int) string {
 	}
 	return string(runes[:n]) + "…"
 }
+
+// Ensure Tracer implements trace.Tracer at compile time.
+var _ trace.Tracer = (*Tracer)(nil)

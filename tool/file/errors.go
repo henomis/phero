@@ -31,6 +31,10 @@ var ErrImageTooLarge = errors.New("image too large")
 // resolve outside the configured working directory.
 var ErrPathOutsideWorkingDirectory = errors.New("path is outside the working directory")
 
+// ErrFileExists is returned by CreateFileTool when the target file already
+// exists and the tool was configured with WithNoOverwrite.
+var ErrFileExists = errors.New("file already exists")
+
 // FileTooLargeError carries the file path, actual size, and configured limit.
 type FileTooLargeError struct {
 	Path  string

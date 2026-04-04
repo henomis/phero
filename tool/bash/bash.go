@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/henomis/phero/llm"
 )
@@ -39,10 +40,31 @@ type Output struct {
 	Output string `json:"output"`
 }
 
+// SafeModeTimeout is the default command execution timeout applied by WithSafeMode.
+const SafeModeTimeout = 30 * time.Second
+
+// safeModeBlocklist contains substring patterns that are blocked when safe mode is enabled.
+var safeModeBlocklist = []string{
+	"rm -rf /",
+	"rm -fr /",
+	"dd if=",
+	"mkfs",
+	":(){ :|:",
+	"> /dev/sd",
+	"> /dev/hd",
+	"> /dev/nvme",
+	"chmod 777 /",
+	"| bash",
+	"| sh",
+}
+
 // Tool is a tool that runs bash commands.
 type Tool struct {
 	tool       *llm.Tool
 	workingDir string
+	timeout    time.Duration
+	blocklist  []string
+	allowlist  []string
 }
 
 // Option represents a configuration option for the bash_tool.
@@ -77,9 +99,55 @@ func (t *Tool) Tool() *llm.Tool {
 	return t.tool
 }
 
+// WithWorkingDirectory sets the directory in which bash commands are executed.
 func WithWorkingDirectory(dir string) Option {
 	return func(t *Tool) {
 		t.workingDir = dir
+	}
+}
+
+// WithTimeout sets a maximum execution duration for each command.
+// When the context deadline is shorter than the configured timeout, the
+// context deadline takes precedence. A value of 0 (the default) means no
+// additional timeout beyond the context.
+func WithTimeout(d time.Duration) Option {
+	return func(t *Tool) {
+		t.timeout = d
+	}
+}
+
+// WithBlocklist adds patterns to a blocklist checked case-insensitively
+// against the raw command string before execution. If any pattern matches,
+// run returns ErrCommandBlocked.
+func WithBlocklist(patterns ...string) Option {
+	return func(t *Tool) {
+		for _, p := range patterns {
+			t.blocklist = append(t.blocklist, strings.ToLower(p))
+		}
+	}
+}
+
+// WithAllowlist sets patterns that the command must match at least one of
+// (case-insensitive substring match) to be allowed to run. If the allowlist
+// is non-empty and the command does not match any pattern, run returns
+// ErrCommandNotAllowed.
+func WithAllowlist(patterns ...string) Option {
+	return func(t *Tool) {
+		for _, p := range patterns {
+			t.allowlist = append(t.allowlist, strings.ToLower(p))
+		}
+	}
+}
+
+// WithSafeMode enables a safe execution profile suitable for local assistants
+// and examples. It applies a default blocklist of dangerous command patterns
+// and sets a 30-second execution timeout.
+func WithSafeMode() Option {
+	return func(t *Tool) {
+		t.blocklist = append(t.blocklist, safeModeBlocklist...)
+		if t.timeout == 0 {
+			t.timeout = SafeModeTimeout
+		}
 	}
 }
 
@@ -91,7 +159,33 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 		return nil, ErrCommandRequired
 	}
 
-	cmd := exec.CommandContext(ctx, "bash", "-c", input.Command)
+	lower := strings.ToLower(input.Command)
+	for _, pat := range t.blocklist {
+		if strings.Contains(lower, pat) {
+			return nil, ErrCommandBlocked
+		}
+	}
+	if len(t.allowlist) > 0 {
+		allowed := false
+		for _, pat := range t.allowlist {
+			if strings.Contains(lower, pat) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return nil, ErrCommandNotAllowed
+		}
+	}
+
+	runCtx := ctx
+	if t.timeout > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, t.timeout)
+		defer cancel()
+	}
+
+	cmd := exec.CommandContext(runCtx, "bash", "-c", input.Command)
 	if t.workingDir != "" {
 		cmd.Dir = t.workingDir
 	}
@@ -101,6 +195,12 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 
 	if err == nil {
 		return &Output{Output: out}, nil
+	}
+
+	// If the context expired (timeout or cancellation), surface that error
+	// rather than the process exit error so callers can distinguish policy failures.
+	if runCtx.Err() != nil {
+		return nil, runCtx.Err()
 	}
 
 	// If the command executed but failed (non-zero exit), return output with an inline marker

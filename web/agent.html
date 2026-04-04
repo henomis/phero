@@ -17,6 +17,7 @@
       <li><a href="trace.html">Trace</a></li>
       <li><a href="tool.html">Tool</a></li>
       <li><a href="mcp.html">MCP</a></li>
+      <li><a href="a2a.html">A2A</a></li>
       <li><a href="embedding.html">Embedding</a></li>
       <li><a href="textsplitter.html">Textsplitter</a></li>
       <li><a href="vectorstore.html">Vectorstore</a></li>
@@ -123,12 +124,77 @@ func main() {
         panic(err)
     }
 
-    answer, err := a.Run(ctx, "If I have 15 apples and give away 7, then buy 23 more, how many do I have?")
+    result, err := a.Run(ctx, "If I have 15 apples and give away 7, then buy 23 more, how many do I have?")
     if err != nil {
         panic(err)
     }
 
-    fmt.Println(answer)
+    fmt.Println(result.Content)
+}</code></pre>
+    </section>
+
+    <section>
+      <h2>Agent handoffs</h2>
+      <p>
+        An agent can hand work to another agent at runtime. When the model decides a handoff is needed,
+        Run returns with <code>Result.HandoffAgent</code> set to the target agent — the caller can then
+        invoke it with the same or a derived input.
+      </p>
+      <p>
+        Register handoff targets with <code>AddHandoff</code>. Phero automatically creates a synthetic tool
+        named <code>handoff_to_&lt;agent&gt;</code> whose description is the target agent's system prompt,
+        so the model knows when and why to route work there.
+      </p>
+
+      <pre><code class="language-go">// Two specialist agents
+researcher, _ := agent.New(llmClient, "researcher", "You retrieve and summarize facts.")
+writer, _     := agent.New(llmClient, "writer",     "You write polished prose from notes.")
+
+orchestrator, _ := agent.New(llmClient, "orchestrator", "Decide whether to research or write.")
+_ = orchestrator.AddHandoff(researcher)
+_ = orchestrator.AddHandoff(writer)
+
+result, err := orchestrator.Run(ctx, "Write a short bio of Marie Curie.")
+if err != nil {
+    panic(err)
+}
+
+if result.HandoffAgent != nil {
+    // The orchestrator decided to hand off; continue with the target agent
+    result, err = result.HandoffAgent.Run(ctx, result.Content)
+    if err != nil {
+        panic(err)
+    }
+}
+fmt.Println(result.Content)</code></pre>
+
+      <p>
+        See <a href="https://github.com/henomis/phero/tree/main/examples/handoff">examples/handoff</a> for a full working example.
+      </p>
+    </section>
+
+    <section>
+      <h2>Run result</h2>
+      <p>
+        <code>Agent.Run</code> returns a <code>*Result</code> with three fields:
+      </p>
+      <ul>
+        <li><code>Content string</code>: the model's final text response</li>
+        <li><code>HandoffAgent *Agent</code>: set when the model triggered a handoff to another agent; nil otherwise</li>
+        <li><code>Summary *trace.RunSummary</code>: aggregated observability data for the run (token usage, latency, tool call counts, etc.)</li>
+      </ul>
+
+      <pre><code class="language-go">result, err := a.Run(ctx, input)
+if err != nil {
+    panic(err)
+}
+
+fmt.Println(result.Content)
+if result.Summary != nil {
+    fmt.Printf("tokens used: in=%d out=%d\n",
+        result.Summary.Usage.InputTokens,
+        result.Summary.Usage.OutputTokens)
+    fmt.Printf("llm latency: %s\n", result.Summary.Latency.LLM)
 }</code></pre>
     </section>
 
@@ -142,10 +208,10 @@ func main() {
       <pre><code class="language-go">import (
     "os"
 
-    "github.com/henomis/phero/trace"
+    "github.com/henomis/phero/trace/text"
 )
 
-a.SetTracer(trace.New(os.Stderr))</code></pre>
+a.SetTracer(text.New(os.Stderr))</code></pre>
 
       <p>
         The built-in text tracer is intended for local development and debugging. For raw LLM tracing outside the agent loop,
@@ -192,7 +258,7 @@ a.SetMaxIterations(10)</code></pre>
         <li><code>ErrUndefinedLLM</code>: creating an agent with a nil LLM client</li>
         <li><code>ErrNameRequired</code>: empty agent name</li>
         <li><code>ErrDescriptionRequired</code>: empty system prompt / description</li>
-        <li><code>ToolAlreadyExistsError</code>: tool name collision on <code>AddTool</code></li>
+        <li><code>ToolAlreadyExistsError</code>: tool name collision on <code>AddTool</code> or <code>AddHandoff</code></li>
         <li><code>ToolUnknownError</code>: model requested a tool that is not registered</li>
         <li><code>ErrMaxIterationsReached</code>: iteration cap hit (often due to repeated tool calls)</li>
       </ul>
@@ -207,7 +273,10 @@ a.SetMaxIterations(10)</code></pre>
       <pre><code class="language-bash"># from repo root
 go run ./examples/simple-agent
 
-go run ./examples/conversational-agent</code></pre>
+go run ./examples/conversational-agent
+
+# Agent handoff pattern
+go run ./examples/handoff</code></pre>
     </section>
 
     <section>
@@ -217,6 +286,7 @@ go run ./examples/conversational-agent</code></pre>
         <li><a href="trace.html">trace</a>: tracing hooks for agent and LLM execution</li>
         <li><a href="memory.html">memory</a>: memory implementations used by agents</li>
         <li><a href="tool.html">tool</a>: prebuilt tools you can attach to an agent</li>
+        <li><a href="a2a.html">a2a</a>: expose an agent as an A2A server or call remote agents as tools</li>
       </ul>
     </section>
   </main>

@@ -83,7 +83,7 @@ func main() {
 	}
 
 	fmt.Printf("LLM used: %s\n", llmInfo)
-	fmt.Printf("Agent response: %s\n", res)
+	fmt.Printf("Agent response: %s\n", res.Content)
 }
 
 func buildLLMFromEnv() (llm.LLM, string) {

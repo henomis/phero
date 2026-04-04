@@ -19,10 +19,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/henomis/phero/agent"
 	"github.com/henomis/phero/llm"
 	"github.com/henomis/phero/llm/openai"
+	"github.com/henomis/phero/trace"
 )
 
 // CalculatorInput defines the parameters for the calculator tool.
@@ -103,7 +105,24 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Printf("Agent: %s\n", response)
+	fmt.Printf("Agent: %s\n", response.Content)
+	printRunSummary(response.Summary)
+}
+
+func printRunSummary(summary *trace.RunSummary) {
+	if summary == nil {
+		return
+	}
+
+	fmt.Printf(
+		"Run summary: iterations=%d llm_calls=%d tool_calls=%d tokens=%d/%d latency=%s\n",
+		summary.Iterations,
+		summary.LLMCalls,
+		summary.ToolCalls,
+		summary.Usage.InputTokens,
+		summary.Usage.OutputTokens,
+		summary.Latency.Total.Round(time.Millisecond),
+	)
 }
 
 func buildLLMFromEnv() (llm.LLM, string) {

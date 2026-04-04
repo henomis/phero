@@ -46,6 +46,9 @@ var ErrEmptyTexts = errors.New("empty texts")
 // ErrEmptyQueryText is returned when a query-by-text operation receives an empty query string.
 var ErrEmptyQueryText = errors.New("empty query text")
 
+// ErrNoSplitter is returned by IngestFile when no Splitter has been configured.
+var ErrNoSplitter = errors.New("no splitter configured")
+
 // EnsureCollectionError is returned when the backing store fails to initialize its collection.
 type EnsureCollectionError struct {
 	Cause error

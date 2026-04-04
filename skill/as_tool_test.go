@@ -20,8 +20,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/henomis/phero/llm"
 	openai "github.com/sashabaranov/go-openai"
+
+	"github.com/henomis/phero/llm"
 )
 
 type stubLLM struct {
