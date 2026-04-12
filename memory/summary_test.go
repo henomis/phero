@@ -90,36 +90,36 @@ func TestClampSummarySize(t *testing.T) {
 
 func TestFormatSummaryPrompt(t *testing.T) {
 	msgs := []llm.Message{
-		{Role: llm.ChatMessageRoleUser, Content: "hello"},
-		{Role: llm.ChatMessageRoleAssistant, Content: "world"},
+		llm.UserMessage(llm.Text("hello")),
+		llm.AssistantMessage([]llm.ContentPart{llm.Text("world")}),
 	}
 
 	result := FormatSummaryPrompt(msgs)
 
-	if result.Role != llm.ChatMessageRoleUser {
-		t.Fatalf("FormatSummaryPrompt role = %q, want %q", result.Role, llm.ChatMessageRoleUser)
+	if result.Role != llm.RoleUser {
+		t.Fatalf("FormatSummaryPrompt role = %q, want %q", result.Role, llm.RoleUser)
 	}
-	if !strings.Contains(result.Content, "hello") {
-		t.Fatalf("FormatSummaryPrompt content missing input text %q: %s", "hello", result.Content)
+	if !strings.Contains(result.TextContent(), "hello") {
+		t.Fatalf("FormatSummaryPrompt content missing input text %q: %s", "hello", result.TextContent())
 	}
-	if !strings.Contains(result.Content, "world") {
-		t.Fatalf("FormatSummaryPrompt content missing input text %q: %s", "world", result.Content)
+	if !strings.Contains(result.TextContent(), "world") {
+		t.Fatalf("FormatSummaryPrompt content missing input text %q: %s", "world", result.TextContent())
 	}
-	if !strings.Contains(result.Content, llm.ChatMessageRoleUser) {
-		t.Fatalf("FormatSummaryPrompt content missing role label %q: %s", llm.ChatMessageRoleUser, result.Content)
+	if !strings.Contains(result.TextContent(), llm.RoleUser) {
+		t.Fatalf("FormatSummaryPrompt content missing role label %q: %s", llm.RoleUser, result.TextContent())
 	}
-	if !strings.Contains(result.Content, llm.ChatMessageRoleAssistant) {
-		t.Fatalf("FormatSummaryPrompt content missing role label %q: %s", llm.ChatMessageRoleAssistant, result.Content)
+	if !strings.Contains(result.TextContent(), llm.RoleAssistant) {
+		t.Fatalf("FormatSummaryPrompt content missing role label %q: %s", llm.RoleAssistant, result.TextContent())
 	}
 }
 
 func TestFormatSummaryPrompt_EmptyConversation(t *testing.T) {
 	result := FormatSummaryPrompt(nil)
 
-	if result.Role != llm.ChatMessageRoleUser {
-		t.Fatalf("FormatSummaryPrompt(nil) role = %q, want %q", result.Role, llm.ChatMessageRoleUser)
+	if result.Role != llm.RoleUser {
+		t.Fatalf("FormatSummaryPrompt(nil) role = %q, want %q", result.Role, llm.RoleUser)
 	}
-	if result.Content == "" {
+	if result.TextContent() == "" {
 		t.Fatal("FormatSummaryPrompt(nil) returned empty content")
 	}
 }

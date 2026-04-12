@@ -124,13 +124,13 @@ func main() {
 
 		// Run the agent
 		turnCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		response, err := a.Run(turnCtx, line)
+		response, err := a.Run(turnCtx, llm.Text(line))
 		cancel()
 
 		if err != nil {
 			fmt.Printf("\n❌ Error: %v\n", err)
 		} else {
-			fmt.Printf("\n%s\n", strings.TrimSpace(response.Content))
+			fmt.Printf("\n%s\n", strings.TrimSpace(response.TextContent()))
 			printRunSummary(response.Summary)
 		}
 
@@ -166,7 +166,7 @@ func handleCommand(ctx context.Context, cmd string, mem *memory.Memory) {
 
 		for i, msg := range messages {
 			role := msg.Role
-			content := strings.TrimSpace(msg.Content)
+			content := strings.TrimSpace(msg.TextContent())
 
 			// Limit content display length
 			if len(content) > 200 {
@@ -175,13 +175,13 @@ func handleCommand(ctx context.Context, cmd string, mem *memory.Memory) {
 
 			symbol := ""
 			switch role {
-			case llm.ChatMessageRoleUser:
+			case llm.RoleUser:
 				symbol = "👤"
-			case llm.ChatMessageRoleAssistant:
+			case llm.RoleAssistant:
 				symbol = "🤖"
-			case llm.ChatMessageRoleSystem:
+			case llm.RoleSystem:
 				symbol = "⚙️"
-			case llm.ChatMessageRoleTool:
+			case llm.RoleTool:
 				symbol = "🔧"
 			}
 

@@ -31,7 +31,7 @@ type mockSummaryLLM struct {
 
 func (m *mockSummaryLLM) Execute(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
 	m.called++
-	return &llm.Result{Message: &llm.Message{Role: llm.ChatMessageRoleSystem, Content: "summary"}}, nil
+	return &llm.Result{Message: &llm.Message{Role: llm.RoleSystem, Parts: []llm.ContentPart{llm.Text("summary")}}}, nil
 }
 
 func TestMemory_SaveAndRetrieve(t *testing.T) {
@@ -43,8 +43,8 @@ func TestMemory_SaveAndRetrieve(t *testing.T) {
 
 	ctx := context.Background()
 	msgs := []llm.Message{
-		{Role: llm.ChatMessageRoleUser, Content: "hello"},
-		{Role: llm.ChatMessageRoleAssistant, Content: "world"},
+		llm.UserMessage(llm.Text("hello")),
+		llm.AssistantMessage([]llm.ContentPart{llm.Text("world")}),
 	}
 	if err := mem.Save(ctx, msgs); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -58,8 +58,8 @@ func TestMemory_SaveAndRetrieve(t *testing.T) {
 		t.Fatalf("Retrieve() len = %d, want %d", len(got), len(msgs))
 	}
 	for i, m := range msgs {
-		if got[i].Role != m.Role || got[i].Content != m.Content {
-			t.Fatalf("message[%d] = {%s %q}, want {%s %q}", i, got[i].Role, got[i].Content, m.Role, m.Content)
+		if got[i].Role != m.Role || got[i].TextContent() != m.TextContent() {
+			t.Fatalf("message[%d] = {%s %q}, want {%s %q}", i, got[i].Role, got[i].TextContent(), m.Role, m.TextContent())
 		}
 	}
 }
@@ -73,7 +73,7 @@ func TestMemory_PersistsAcrossReopen(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 	msgs := []llm.Message{
-		{Role: llm.ChatMessageRoleUser, Content: "persisted"},
+		llm.UserMessage(llm.Text("persisted")),
 	}
 	if err := mem1.Save(ctx, msgs); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -88,7 +88,7 @@ func TestMemory_PersistsAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Retrieve() error = %v", err)
 	}
-	if len(got) != 1 || got[0].Content != "persisted" {
+	if len(got) != 1 || got[0].TextContent() != "persisted" {
 		t.Fatalf("Retrieve() after reopen = %v, want [{persisted}]", got)
 	}
 }
@@ -101,7 +101,7 @@ func TestMemory_Clear(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	if err := mem.Save(ctx, []llm.Message{{Role: llm.ChatMessageRoleUser, Content: "x"}}); err != nil {
+	if err := mem.Save(ctx, []llm.Message{llm.UserMessage(llm.Text("x"))}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	if err := mem.Clear(ctx); err != nil {
@@ -145,7 +145,7 @@ func TestMemory_ConcurrentSave(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- mem.Save(ctx, []llm.Message{{Role: llm.ChatMessageRoleUser, Content: "concurrent"}})
+			errs <- mem.Save(ctx, []llm.Message{llm.UserMessage(llm.Text("concurrent"))})
 		}()
 	}
 	wg.Wait()
@@ -177,12 +177,12 @@ func TestMemory_SummarizationReplacesHistory(t *testing.T) {
 	}
 
 	msgs := []llm.Message{
-		{Role: llm.ChatMessageRoleUser, Content: "hello1"},
-		{Role: llm.ChatMessageRoleAssistant, Content: "hello2"},
-		{Role: llm.ChatMessageRoleUser, Content: "hello3"},
-		{Role: llm.ChatMessageRoleAssistant, Content: "hello4"},
-		{Role: llm.ChatMessageRoleUser, Content: "hello5"},
-		{Role: llm.ChatMessageRoleAssistant, Content: "hello6"},
+		llm.UserMessage(llm.Text("hello1")),
+		llm.AssistantMessage([]llm.ContentPart{llm.Text("hello2")}),
+		llm.UserMessage(llm.Text("hello3")),
+		llm.AssistantMessage([]llm.ContentPart{llm.Text("hello4")}),
+		llm.UserMessage(llm.Text("hello5")),
+		llm.AssistantMessage([]llm.ContentPart{llm.Text("hello6")}),
 	}
 	if err := mem.Save(ctx, msgs); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -203,8 +203,8 @@ func TestMemory_SummarizationReplacesHistory(t *testing.T) {
 		t.Fatalf("Retrieve() len = %d, want %d", len(got), len(wantContents))
 	}
 	for i, want := range wantContents {
-		if got[i].Content != want {
-			t.Fatalf("message[%d].Content = %q, want %q", i, got[i].Content, want)
+		if got[i].TextContent() != want {
+			t.Fatalf("message[%d].TextContent() = %q, want %q", i, got[i].TextContent(), want)
 		}
 	}
 }
@@ -220,10 +220,10 @@ func TestMemory_SummarizationPersistedToDisk(t *testing.T) {
 	}
 
 	msgs := []llm.Message{
-		{Role: llm.ChatMessageRoleUser, Content: "a"},
-		{Role: llm.ChatMessageRoleAssistant, Content: "b"},
-		{Role: llm.ChatMessageRoleUser, Content: "c"},
-		{Role: llm.ChatMessageRoleAssistant, Content: "d"},
+		llm.UserMessage(llm.Text("a")),
+		llm.AssistantMessage([]llm.ContentPart{llm.Text("b")}),
+		llm.UserMessage(llm.Text("c")),
+		llm.AssistantMessage([]llm.ContentPart{llm.Text("d")}),
 	}
 	if err := mem.Save(ctx, msgs); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -241,7 +241,7 @@ func TestMemory_SummarizationPersistedToDisk(t *testing.T) {
 	if len(got) == 0 {
 		t.Fatal("Retrieve() after reopen returned empty slice")
 	}
-	if !strings.HasPrefix(got[0].Content, memory.SummarySystemMessagePrefix) {
-		t.Fatalf("first message after reopen = %q, want summary prefix %q", got[0].Content, memory.SummarySystemMessagePrefix)
+	if !strings.HasPrefix(got[0].TextContent(), memory.SummarySystemMessagePrefix) {
+		t.Fatalf("first message after reopen = %q, want summary prefix %q", got[0].TextContent(), memory.SummarySystemMessagePrefix)
 	}
 }

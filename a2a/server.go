@@ -25,6 +25,7 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 
 	"github.com/henomis/phero/agent"
+	"github.com/henomis/phero/llm"
 )
 
 // Server wraps a phero [agent.Agent] and exposes it as an A2A-compliant HTTP
@@ -124,7 +125,7 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 		input := extractText(execCtx.Message)
 
 		// Run the phero agent.
-		result, err := e.agent.Run(ctx, input)
+		result, err := e.agent.Run(ctx, llm.Text(input))
 		if err != nil {
 			errMsg := sdka2a.NewMessageForTask(sdka2a.MessageRoleAgent, execCtx, sdka2a.NewTextPart(err.Error()))
 			yield(sdka2a.NewStatusUpdateEvent(execCtx, sdka2a.TaskStateFailed, errMsg), nil)
@@ -132,7 +133,7 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 		}
 
 		// Emit the completed event with the agent's response.
-		responseMsg := sdka2a.NewMessageForTask(sdka2a.MessageRoleAgent, execCtx, sdka2a.NewTextPart(result.Content))
+		responseMsg := sdka2a.NewMessageForTask(sdka2a.MessageRoleAgent, execCtx, sdka2a.NewTextPart(result.TextContent()))
 		yield(sdka2a.NewStatusUpdateEvent(execCtx, sdka2a.TaskStateCompleted, responseMsg), nil)
 	}
 }

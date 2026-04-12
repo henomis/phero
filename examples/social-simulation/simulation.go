@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/henomis/phero/agent"
+	"github.com/henomis/phero/llm"
 )
 
 // FeedEntry is a single post written by a persona agent during a simulation round.
@@ -131,7 +132,7 @@ func (s *Simulation) RunRound(ctx context.Context, round, totalRounds int, onPos
 
 			prompt := buildRoundPrompt(round, totalRounds, snapshot)
 
-			out, err := pa.agent.Run(ctx, prompt)
+			out, err := pa.agent.Run(ctx, llm.Text(prompt))
 			if err != nil {
 				results[idx] = roundResult{err: fmt.Errorf("agent %q: %w", pa.name, err)}
 				return
@@ -141,7 +142,7 @@ func (s *Simulation) RunRound(ctx context.Context, round, totalRounds int, onPos
 				entry: FeedEntry{
 					Round:  round,
 					Author: pa.name,
-					Post:   strings.TrimSpace(out.Content),
+					Post:   strings.TrimSpace(out.TextContent()),
 				},
 			}
 		}(i, pa)

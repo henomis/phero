@@ -142,14 +142,14 @@ func main() {
 		worldFacts, transcript,
 	)
 
-	reportResult, err := reportAgent.Run(ctx, reportPrompt)
+	reportResult, err := reportAgent.Run(ctx, llm.Text(reportPrompt))
 	if err != nil {
 		panic(fmt.Errorf("report agent: %w", err))
 	}
 
 	fmt.Println()
 	fmt.Println("=== simulation report ===")
-	fmt.Println(strings.TrimSpace(reportResult.Content))
+	fmt.Println(strings.TrimSpace(reportResult.TextContent()))
 
 	// Optional phase 5: interactive Q&A with the report agent.
 	if interact {
@@ -179,12 +179,12 @@ Be factual and neutral. Do not take a stance.`),
 		return "", err
 	}
 
-	result, err := knowledgeAgent.Run(ctx, "Extract world facts from this seed material:\n\n"+seedText)
+	result, err := knowledgeAgent.Run(ctx, llm.Text("Extract world facts from this seed material:\n\n"+seedText))
 	if err != nil {
 		return "", err
 	}
 
-	return strings.TrimSpace(result.Content), nil
+	return strings.TrimSpace(result.TextContent()), nil
 }
 
 // buildReportAgent creates the analyst agent used to synthesize the simulation transcript
@@ -243,13 +243,13 @@ func interactiveREPL(ctx context.Context, reportAgent *agent.Agent) {
 		}
 
 		turnCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		result, err := reportAgent.Run(turnCtx, line)
+		result, err := reportAgent.Run(turnCtx, llm.Text(line))
 		cancel()
 
 		if err != nil {
 			fmt.Printf("error: %v\n", err)
 		} else {
-			fmt.Printf("\n%s\n", strings.TrimSpace(result.Content))
+			fmt.Printf("\n%s\n", strings.TrimSpace(result.TextContent()))
 		}
 
 		fmt.Print("\n> ")

@@ -45,8 +45,8 @@ func TestNewRetry_SuccessOnFirstAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result.Message.Content != "ok" {
-		t.Fatalf("got %q, want %q", result.Message.Content, "ok")
+	if result.Message.TextContent() != "ok" {
+		t.Fatalf("got %q, want %q", result.Message.TextContent(), "ok")
 	}
 }
 
@@ -61,7 +61,7 @@ func TestNewRetry_RetriesAndSucceeds(t *testing.T) {
 		if callCount < 3 {
 			return nil, transient
 		}
-		return &llm.Result{Message: &llm.Message{Content: "success"}}, nil
+		return &llm.Result{Message: &llm.Message{Parts: []llm.ContentPart{llm.Text("success")}}}, nil
 	}}
 
 	mw, err := NewRetry(5, WithInitialBackoff(0))
@@ -77,8 +77,8 @@ func TestNewRetry_RetriesAndSucceeds(t *testing.T) {
 	if callCount != 3 {
 		t.Fatalf("callCount=%d, want 3", callCount)
 	}
-	if result.Message.Content != "success" {
-		t.Fatalf("got %q, want %q", result.Message.Content, "success")
+	if result.Message.TextContent() != "success" {
+		t.Fatalf("got %q, want %q", result.Message.TextContent(), "success")
 	}
 }
 

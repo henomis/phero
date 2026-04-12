@@ -35,7 +35,7 @@ func (s *stubLLM) Execute(ctx context.Context, messages []llm.Message, tools []*
 
 func okLLM(content string) *stubLLM {
 	return &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
-		return &llm.Result{Message: &llm.Message{Content: content}}, nil
+		return &llm.Result{Message: &llm.Message{Parts: []llm.ContentPart{llm.Text(content)}}}, nil
 	}}
 }
 
@@ -84,8 +84,8 @@ func TestNewLimiter_ForwardsResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result.Message.Content != "hello" {
-		t.Fatalf("got %q, want %q", result.Message.Content, "hello")
+	if result.Message.TextContent() != "hello" {
+		t.Fatalf("got %q, want %q", result.Message.TextContent(), "hello")
 	}
 }
 

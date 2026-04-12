@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package llm provides small, composable building blocks for driving chat-based LLMs.
+// Package llm provides small, composable building blocks for driving LLM-backed
+// applications.
 //
-// It defines a minimal LLM interface, a generic FunctionTool helper for exposing
-// Go functions as callable tools, and utilities for producing strict JSON Schema
-// maps that match the OpenAI "strict" schema expectations.
+// It defines a minimal chat-model interface, generic tool helpers for exposing
+// Go functions to models, multimodal content types, and provider-neutral audio
+// transcription and speech-synthesis interfaces.
 //
-// For convenience, this package also re-exports a handful of types and constants
-// from github.com/sashabaranov/go-openai (e.g. Message, Tool, ToolCall and chat
-// role constants) so higher-level packages can depend on a single import.
+// Provider packages such as llm/openai and llm/anthropic translate these types
+// to and from their respective wire formats so higher-level packages can depend
+// on a single, stable API.
 package llm

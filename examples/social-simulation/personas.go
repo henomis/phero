@@ -68,12 +68,12 @@ Return ONLY valid JSON with no markdown fencing, matching this exact structure:
 		worldFacts, n,
 	)
 
-	result, err := orchestrator.Run(ctx, prompt)
+	result, err := orchestrator.Run(ctx, llm.Text(prompt))
 	if err != nil {
 		return nil, fmt.Errorf("persona generation: %w", err)
 	}
 
-	raw := extractJSONObject(result.Content)
+	raw := extractJSONObject(result.TextContent())
 
 	var resp personaResponse
 	if err := json.Unmarshal([]byte(raw), &resp); err != nil {

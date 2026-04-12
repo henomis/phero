@@ -45,8 +45,8 @@ func TestGuardrails_NoGuards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result.Message.Content != "hello" {
-		t.Fatalf("got %q, want %q", result.Message.Content, "hello")
+	if result.Message.TextContent() != "hello" {
+		t.Fatalf("got %q, want %q", result.Message.TextContent(), "hello")
 	}
 }
 
@@ -100,8 +100,8 @@ func TestGuardrails_ResultGuard_Pass(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if result.Message.Content != "ok" {
-		t.Fatalf("got %q, want %q", result.Message.Content, "ok")
+	if result.Message.TextContent() != "ok" {
+		t.Fatalf("got %q, want %q", result.Message.TextContent(), "ok")
 	}
 }
 

@@ -61,14 +61,14 @@ func main() {
 	guardrailsMW := middleware.NewGuardrails(
 		middleware.WithMessageGuard("forbid-passwords", func(_ context.Context, messages []llm.Message) error {
 			for _, message := range messages {
-				if strings.Contains(strings.ToLower(message.Content), "password") {
+				if strings.Contains(strings.ToLower(message.TextContent()), "password") {
 					return errors.New("prompt asks for password-related content")
 				}
 			}
 			return nil
 		}),
 		middleware.WithResultGuard("require-content", func(_ context.Context, result *llm.Result) error {
-			if result == nil || result.Message == nil || strings.TrimSpace(result.Message.Content) == "" {
+			if result == nil || result.Message == nil || strings.TrimSpace(result.Message.TextContent()) == "" {
 				return errors.New("empty model response")
 			}
 			return nil
@@ -90,14 +90,14 @@ func main() {
 		go func(i int, prompt string) {
 			defer wg.Done()
 
-			messages := []llm.Message{{Role: llm.ChatMessageRoleUser, Content: prompt}}
+			messages := []llm.Message{llm.UserMessage(llm.Text(prompt))}
 			result, err := client.Execute(context.Background(), messages, nil)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "[%d] error: %v\n", i, err)
 				return
 			}
 
-			fmt.Printf("[%d] Q: %s\n    A: %s\n", i, prompt, result.Message.Content)
+			fmt.Printf("[%d] Q: %s\n    A: %s\n", i, prompt, result.Message.TextContent())
 		}(i, prompt)
 	}
 

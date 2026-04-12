@@ -184,13 +184,13 @@ Document: %s`, filepath.Base(filePath)))
 		}
 
 		turnCtx, turnCancel := context.WithTimeout(context.Background(), timeout)
-		out, err := a.Run(turnCtx, fmt.Sprintf("Question: %s", line))
+		out, err := a.Run(turnCtx, llm.Text(fmt.Sprintf("Question: %s", line)))
 		turnCancel()
 
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 		} else {
-			fmt.Println(strings.TrimSpace(out.Content))
+			fmt.Println(strings.TrimSpace(out.TextContent()))
 		}
 		fmt.Println()
 		fmt.Print("> ")

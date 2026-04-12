@@ -162,7 +162,7 @@ func main() {
 				break
 			}
 
-			result, err := routingAgent.Run(ctx, currentInput)
+			result, err := routingAgent.Run(ctx, llm.Text(currentInput))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "agent.Run (%s): %v\n", routingAgent.Name(), err)
 				break
@@ -177,7 +177,7 @@ func main() {
 			}
 
 			currentAgent = routingAgent
-			fmt.Printf("\n%s: %s\n", currentAgent.Name(), strings.TrimSpace(result.Content))
+			fmt.Printf("\n%s: %s\n", currentAgent.Name(), strings.TrimSpace(result.TextContent()))
 			break
 		}
 

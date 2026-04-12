@@ -95,20 +95,20 @@ func main() {
 
 	a.SetMemory(history)
 
-	res, err := a.Run(ctx, `Your task:
+	res, err := a.Run(ctx, llm.Text(`Your task:
 1. Check if the file "/tmp/quote.html" exists.
 2. If the file does not exist, create a valid HTML file at "/tmp/quote.html" with a <div id="quote"></div> element, and insert a random quote inside this div.
 3. If the file already exists, update only the content inside the <div id="quote"></div> tags with a new random quote. Do not modify any other part of the file.
 4. Ensure the quote is properly escaped for HTML.
 
 Respond only with a summary of the action taken and the quote used. Do not include any code or file content in your response.
-`)
+`))
 	if err != nil {
 		panic(err)
 	}
 
 	fmt.Printf("LLM used: %s\n", llmInfo)
-	fmt.Printf("Agent response: %s\n", res.Content)
+	fmt.Printf("Agent response: %s\n", res.TextContent())
 }
 
 func buildLLMFromEnv() (llm.LLM, string) {

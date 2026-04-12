@@ -52,13 +52,13 @@ func main() {
 	fmt.Println("- goal:", goal)
 	fmt.Println()
 
-	out, err := orchestrator.Run(ctx, goal)
+	out, err := orchestrator.Run(ctx, llm.Text(goal))
 	if err != nil {
 		panic(err)
 	}
 
 	fmt.Println("=== final report ===")
-	fmt.Println(strings.TrimSpace(out.Content))
+	fmt.Println(strings.TrimSpace(out.TextContent()))
 }
 
 func buildLLMFromEnv() (llm.LLM, string) {

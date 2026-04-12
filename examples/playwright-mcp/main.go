@@ -75,13 +75,13 @@ title=<...>
 h1=<...>
 `)
 
-	res, err := a.Run(ctx, prompt)
+	res, err := a.Run(ctx, llm.Text(prompt))
 	if err != nil {
 		panic(err)
 	}
 
 	fmt.Printf("LLM used: %s\n", llmInfo)
-	fmt.Printf("Agent response: %s\n", res.Content)
+	fmt.Printf("Agent response: %s\n", res.TextContent())
 }
 
 func buildLLMFromEnv() (llm.LLM, string) {

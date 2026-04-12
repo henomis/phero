@@ -100,12 +100,12 @@ func main() {
 	fmt.Printf("LLM: %s\n", llmInfo)
 	fmt.Printf("User: %s\n\n", userRequest)
 
-	response, err := a.Run(ctx, userRequest)
+	response, err := a.Run(ctx, llm.Text(userRequest))
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("Agent: %s\n", response.Content)
+	fmt.Printf("Agent: %s\n", response.TextContent())
 	printRunSummary(response.Summary)
 }
 
