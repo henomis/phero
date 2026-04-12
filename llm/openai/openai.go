@@ -71,7 +71,7 @@ func New(apiKey string, opts ...Option) *Client {
 func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
 	request := openai.ChatCompletionRequest{
 		Model:       c.model,
-		Messages:    toOpenAIMessages(messages),
+		Messages:    messagesToOpenAI(messages),
 		Temperature: c.temperature,
 	}
 
@@ -88,7 +88,7 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*l
 		return nil, ErrEmptyResponse
 	}
 
-	msg := fromOpenAIMessage(response.Choices[0].Message)
+	msg := messageFromOpenAI(response.Choices[0].Message)
 	return &llm.Result{
 		Message: &msg,
 		Usage: &llm.Usage{
@@ -98,17 +98,17 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*l
 	}, nil
 }
 
-// toOpenAIMessages converts Phero messages to go-openai wire types.
-func toOpenAIMessages(messages []llm.Message) []openai.ChatCompletionMessage {
+// messagesToOpenAI converts Phero messages to go-openai wire types.
+func messagesToOpenAI(messages []llm.Message) []openai.ChatCompletionMessage {
 	out := make([]openai.ChatCompletionMessage, 0, len(messages))
 	for _, m := range messages {
-		out = append(out, toOpenAIMessage(m))
+		out = append(out, messageToOpenAI(m))
 	}
 	return out
 }
 
-// toOpenAIMessage converts a single Phero Message to a go-openai ChatCompletionMessage.
-func toOpenAIMessage(m llm.Message) openai.ChatCompletionMessage {
+// messageToOpenAI converts a single Phero Message to a go-openai ChatCompletionMessage.
+func messageToOpenAI(m llm.Message) openai.ChatCompletionMessage {
 	msg := openai.ChatCompletionMessage{
 		Role:       m.Role,
 		Name:       m.Name,
@@ -174,8 +174,8 @@ func toOpenAIMessage(m llm.Message) openai.ChatCompletionMessage {
 	return msg
 }
 
-// fromOpenAIMessage converts a go-openai assistant message back to a Phero Message.
-func fromOpenAIMessage(m openai.ChatCompletionMessage) llm.Message {
+// messageFromOpenAI converts a go-openai assistant message to a Phero Message.
+func messageFromOpenAI(m openai.ChatCompletionMessage) llm.Message {
 	msg := llm.Message{
 		Role:       m.Role,
 		Name:       m.Name,
