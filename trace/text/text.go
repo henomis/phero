@@ -151,7 +151,7 @@ func (t *Tracer) format(event trace.Event) string {
 		content := ""
 		toolCalls := 0
 		if e.Message != nil {
-			content = truncate(e.Message.Content, 120)
+			content = truncate(e.Message.TextContent(), 120)
 			toolCalls = len(e.Message.ToolCalls)
 		}
 		tokens := ""

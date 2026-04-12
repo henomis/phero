@@ -27,7 +27,7 @@ type mockSummaryLLM struct {
 
 func (m *mockSummaryLLM) Execute(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
 	m.called++
-	return &llm.Result{Message: &llm.Message{Role: llm.ChatMessageRoleSystem, Content: "summary"}}, nil
+	return &llm.Result{Message: &llm.Message{Role: llm.RoleSystem, Parts: []llm.ContentPart{llm.Text("summary")}}}, nil
 }
 
 func TestMemorySave_SummarizationReplacesHistory(t *testing.T) {
@@ -37,12 +37,12 @@ func TestMemorySave_SummarizationReplacesHistory(t *testing.T) {
 	mem := New(10, WithSummarization(mockLLM, 6, 4))
 
 	msgs := []llm.Message{
-		{Role: llm.ChatMessageRoleUser, Content: "hello1"},
-		{Role: llm.ChatMessageRoleAssistant, Content: "hello2"},
-		{Role: llm.ChatMessageRoleTool, Content: "hello3"},
-		{Role: llm.ChatMessageRoleAssistant, Content: "hello4"},
-		{Role: llm.ChatMessageRoleUser, Content: "hello5"},
-		{Role: llm.ChatMessageRoleAssistant, Content: "hello6"},
+		{Role: llm.RoleUser, Parts: []llm.ContentPart{llm.Text("hello1")}},
+		{Role: llm.RoleAssistant, Parts: []llm.ContentPart{llm.Text("hello2")}},
+		{Role: llm.RoleTool, Parts: []llm.ContentPart{llm.Text("hello3")}},
+		{Role: llm.RoleAssistant, Parts: []llm.ContentPart{llm.Text("hello4")}},
+		{Role: llm.RoleUser, Parts: []llm.ContentPart{llm.Text("hello5")}},
+		{Role: llm.RoleAssistant, Parts: []llm.ContentPart{llm.Text("hello6")}},
 	}
 
 	if err := mem.Save(ctx, msgs); err != nil {
@@ -64,8 +64,8 @@ func TestMemorySave_SummarizationReplacesHistory(t *testing.T) {
 	}
 
 	for i := range wantContents {
-		if got[i].Content != wantContents[i] {
-			t.Fatalf("buffer[%d].Content: expected %q, got %q", i, wantContents[i], got[i].Content)
+		if got[i].TextContent() != wantContents[i] {
+			t.Fatalf("buffer[%d].TextContent(): expected %q, got %q", i, wantContents[i], got[i].TextContent())
 		}
 	}
 }

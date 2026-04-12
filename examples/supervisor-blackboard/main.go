@@ -62,7 +62,7 @@ func main() {
 	fmt.Println("- goal:", goal)
 	fmt.Println()
 
-	out, err := supervisor.Run(ctx, goal)
+	out, err := supervisor.Run(ctx, llm.Text(goal))
 	if err != nil {
 		panic(err)
 	}

@@ -68,11 +68,11 @@ func main() {
 		fmt.Printf("--- iteration %d / %d ---\n", attempt, maxAttempts)
 
 		// Step 1: generate a draft.
-		genOut, err := generator.Run(ctx, prompt)
+		genOut, err := generator.Run(ctx, llm.Text(prompt))
 		if err != nil {
 			panic(fmt.Errorf("generator failed: %w", err))
 		}
-		lastDraft = strings.TrimSpace(genOut.Content)
+		lastDraft = strings.TrimSpace(genOut.TextContent())
 
 		fmt.Printf("draft (%d chars):\n%s\n\n", len(lastDraft), lastDraft)
 
@@ -81,14 +81,14 @@ func main() {
 			"Evaluate the following text on the topic %q.\n\nText:\n%s",
 			topic, lastDraft,
 		)
-		evalOut, err := evaluator.Run(ctx, evalPrompt)
+		evalOut, err := evaluator.Run(ctx, llm.Text(evalPrompt))
 		if err != nil {
 			panic(fmt.Errorf("evaluator failed: %w", err))
 		}
 
-		result, err := parseEvalResult(evalOut.Content)
+		result, err := parseEvalResult(evalOut.TextContent())
 		if err != nil {
-			panic(fmt.Errorf("could not parse evaluator output: %w\nraw: %s", err, evalOut.Content))
+			panic(fmt.Errorf("could not parse evaluator output: %w\nraw: %s", err, evalOut.TextContent()))
 		}
 
 		fmt.Printf("score: %d / 10\n", result.Score)

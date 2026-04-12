@@ -65,12 +65,12 @@ func main() {
 	// Step 1: Outliner produces a structured JSON outline.
 	fmt.Println("step 1: generating outline...")
 
-	outlineOut, err := outliner.Run(ctx, fmt.Sprintf("Create a document outline for the topic: %q", topic))
+	outlineOut, err := outliner.Run(ctx, llm.Text(fmt.Sprintf("Create a document outline for the topic: %q", topic)))
 	if err != nil {
 		panic(fmt.Errorf("outliner failed: %w", err))
 	}
 
-	outline, err := parseOutline(outlineOut.Content)
+	outline, err := parseOutline(outlineOut.TextContent())
 	if err != nil {
 		panic(fmt.Errorf("outline gate failed: %w", err))
 	}
@@ -87,12 +87,12 @@ func main() {
 
 	expansionPrompt := buildExpansionPrompt(topic, outline)
 
-	expandOut, err := expander.Run(ctx, expansionPrompt)
+	expandOut, err := expander.Run(ctx, llm.Text(expansionPrompt))
 	if err != nil {
 		panic(fmt.Errorf("expander failed: %w", err))
 	}
 
-	expanded := strings.TrimSpace(expandOut.Content)
+	expanded := strings.TrimSpace(expandOut.TextContent())
 
 	fmt.Printf("expanded content (%d chars)\n\n", len(expanded))
 
@@ -104,13 +104,13 @@ func main() {
 		topic, expanded,
 	)
 
-	formatOut, err := formatter.Run(ctx, formatPrompt)
+	formatOut, err := formatter.Run(ctx, llm.Text(formatPrompt))
 	if err != nil {
 		panic(fmt.Errorf("formatter failed: %w", err))
 	}
 
 	fmt.Println("=== final document ===")
-	fmt.Println(strings.TrimSpace(formatOut.Content))
+	fmt.Println(strings.TrimSpace(formatOut.TextContent()))
 }
 
 func buildLLMFromEnv() (llm.LLM, string) {

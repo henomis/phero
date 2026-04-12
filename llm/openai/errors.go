@@ -21,3 +21,11 @@ import "errors"
 // This can happen due to content filtering, quota exhaustion, or certain stop
 // sequences being triggered before any content is generated.
 var ErrEmptyResponse = errors.New("openai: response contained no choices")
+
+// ErrTranscriptionInputRequired is returned when a transcription request does not
+// provide either a file path or a reader.
+var ErrTranscriptionInputRequired = errors.New("openai: transcription input is required")
+
+// ErrSpeechInputRequired is returned when a speech synthesis request does not
+// provide any input text.
+var ErrSpeechInputRequired = errors.New("openai: speech input text is required")

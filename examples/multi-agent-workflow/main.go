@@ -220,12 +220,12 @@ Be direct and practical.`))
 }
 
 func makePlan(ctx context.Context, planner *agent.Agent, goal string) (Plan, error) {
-	response, err := planner.Run(ctx, goal)
+	response, err := planner.Run(ctx, llm.Text(goal))
 	if err != nil {
 		return Plan{}, err
 	}
 
-	out := extractJSONObject(response.Content)
+	out := extractJSONObject(response.TextContent())
 	var plan Plan
 	if err := json.Unmarshal([]byte(out), &plan); err != nil {
 		return Plan{}, fmt.Errorf("failed to parse planner JSON: %w\nraw=%s", err, out)
@@ -272,12 +272,12 @@ func executePlan(ctx context.Context, runner *agent.Agent, plan Plan) ([]StepRes
 	results := make([]StepResult, 0, len(plan.Steps))
 	for _, step := range plan.Steps {
 		prompt := fmt.Sprintf("Execute this step now. step_name=%q go_args=%s", step.Name, mustJSON(step.GoArgs))
-		response, err := runner.Run(ctx, prompt)
+		response, err := runner.Run(ctx, llm.Text(prompt))
 		if err != nil {
 			return nil, err
 		}
 
-		out := extractJSONObject(response.Content)
+		out := extractJSONObject(response.TextContent())
 		var r GoRunResult
 		if err := json.Unmarshal([]byte(out), &r); err != nil {
 			return nil, fmt.Errorf("failed to parse runner JSON: %w\nraw=%s", err, out)
@@ -293,11 +293,11 @@ func executePlan(ctx context.Context, runner *agent.Agent, plan Plan) ([]StepRes
 
 func synthesize(ctx context.Context, analyst *agent.Agent, goal string, plan Plan, stepResults []StepResult) (string, error) {
 	in := RunSummaryInput{Goal: goal, Plan: plan, StepResults: stepResults}
-	response, err := analyst.Run(ctx, mustJSON(in))
+	response, err := analyst.Run(ctx, llm.Text(mustJSON(in)))
 	if err != nil {
 		return "", err
 	}
-	return response.Content, nil
+	return response.TextContent(), nil
 }
 
 func reviewReport(ctx context.Context, critic *agent.Agent, goal string, plan Plan, stepResults []StepResult, report string) (string, error) {
@@ -313,11 +313,11 @@ func reviewReport(ctx context.Context, critic *agent.Agent, goal string, plan Pl
 		Report:      report,
 	}
 
-	response, err := critic.Run(ctx, mustJSON(in))
+	response, err := critic.Run(ctx, llm.Text(mustJSON(in)))
 	if err != nil {
 		return "", err
 	}
-	return response.Content, nil
+	return response.TextContent(), nil
 }
 
 func mustJSON(v any) string {

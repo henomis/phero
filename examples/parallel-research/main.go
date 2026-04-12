@@ -68,13 +68,13 @@ func main() {
 			defer wg.Done()
 
 			prompt := fmt.Sprintf("Research the topic %q from the %s angle.", topic, angle)
-			out, err := a.Run(ctx, prompt)
+			out, err := a.Run(ctx, llm.Text(prompt))
 			if err != nil {
 				results[idx] = workerResult{angle: angle, err: err}
 				return
 			}
 
-			results[idx] = workerResult{angle: angle, output: strings.TrimSpace(out.Content)}
+			results[idx] = workerResult{angle: angle, output: strings.TrimSpace(out.TextContent())}
 		}(i, entry.angle, entry.agent)
 	}
 
@@ -95,13 +95,13 @@ func main() {
 	fmt.Println("synthesizing results...")
 	fmt.Println()
 
-	finalOut, err := synthesizer.Run(ctx, synthesisPrompt)
+	finalOut, err := synthesizer.Run(ctx, llm.Text(synthesisPrompt))
 	if err != nil {
 		panic(fmt.Errorf("synthesizer failed: %w", err))
 	}
 
 	fmt.Println("=== synthesis ===")
-	fmt.Println(strings.TrimSpace(finalOut.Content))
+	fmt.Println(strings.TrimSpace(finalOut.TextContent()))
 }
 
 type worker struct {

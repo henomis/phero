@@ -158,10 +158,7 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 		}
 
 		m.messages = []llm.Message{
-			{
-				Role:    llm.ChatMessageRoleSystem,
-				Content: memory.SummarySystemMessagePrefix + summaryMsg.Message.Content,
-			},
+			llm.SystemMessage(memory.SummarySystemMessagePrefix + summaryMsg.Message.TextContent()),
 		}
 		m.messages = append(m.messages, toAppend...)
 	}

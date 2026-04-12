@@ -66,14 +66,14 @@ func main() {
 	fmt.Println("Type your response when prompted (accept / skip / modify / stop).")
 	fmt.Println()
 
-	out, err := a.Run(ctx, goal)
+	out, err := a.Run(ctx, llm.Text(goal))
 	if err != nil {
 		panic(err)
 	}
 
 	fmt.Println()
 	fmt.Println("=== agent summary ===")
-	fmt.Println(strings.TrimSpace(out.Content))
+	fmt.Println(strings.TrimSpace(out.TextContent()))
 }
 
 func buildLLMFromEnv() (llm.LLM, string) {
