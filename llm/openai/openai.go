@@ -36,9 +36,10 @@ const (
 type Client struct {
 	client *openai.Client
 
-	model  string
-	apiKey string
-	config openai.ClientConfig
+	model       string
+	apiKey      string
+	temperature float32
+	config      openai.ClientConfig
 }
 
 // Option configures a Client created by New.
@@ -68,8 +69,9 @@ func New(apiKey string, opts ...Option) *Client {
 // model's next message.
 func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
 	request := openai.ChatCompletionRequest{
-		Model:    c.model,
-		Messages: messages,
+		Model:       c.model,
+		Messages:    messages,
+		Temperature: c.temperature,
 	}
 
 	if len(tools) > 0 {
@@ -132,4 +134,11 @@ func WithModel(model string) Option {
 // WithOllamaBaseURL configures the client to use the default local Ollama base URL.
 func WithOllamaBaseURL() Option {
 	return WithBaseURL(OllamaBaseURL)
+}
+
+// WithTemperature sets the sampling temperature used for chat completions.
+func WithTemperature(temp float32) Option {
+	return func(c *Client) {
+		c.temperature = temp
+	}
 }
