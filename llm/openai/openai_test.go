@@ -148,6 +148,53 @@ func TestExecute_TextResponse(t *testing.T) {
 	}
 }
 
+func TestExecute_WithTemperature(t *testing.T) {
+	var gotTemperature float64
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		value, ok := payload["temperature"].(float64)
+		if !ok {
+			t.Fatalf("expected numeric temperature in request payload, got %T", payload["temperature"])
+		}
+		gotTemperature = value
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(chatCompletionResponse{
+			Object: "chat.completion",
+			ID:     "chatcmpl-temp",
+			Model:  openai.DefaultModel,
+			Choices: []choice{
+				{Message: message{Role: "assistant", Content: "ok"}, Reason: "stop"},
+			},
+			Usage: usage{PromptTokens: 7, CompletionTokens: 2},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"), openai.WithTemperature(0.7))
+	msgs := []llm.Message{{Role: llm.ChatMessageRoleUser, Content: "hi"}}
+
+	result, err := c.Execute(context.Background(), msgs, nil)
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	if result.Message.Content != "ok" {
+		t.Fatalf("expected %q, got %q", "ok", result.Message.Content)
+	}
+	if gotTemperature != 0.7 {
+		t.Fatalf("expected temperature 0.7, got %v", gotTemperature)
+	}
+}
+
 func TestExecute_EmptyChoices_ReturnsError(t *testing.T) {
 	srv := newTestServer(t, chatCompletionResponse{
 		Object:  "chat.completion",

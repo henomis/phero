@@ -21,6 +21,7 @@ import (
 
 	anthropicapi "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/google/uuid"
 	openaiapi "github.com/sashabaranov/go-openai"
 
@@ -48,10 +49,11 @@ const (
 type Client struct {
 	client anthropicapi.Client
 
-	apiKey    string
-	baseURL   string
-	model     string
-	maxTokens int64
+	apiKey      string
+	baseURL     string
+	model       string
+	temperature float32
+	maxTokens   int64
 }
 
 // Option configures a Client created by New.
@@ -95,10 +97,11 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*l
 	}
 
 	params := anthropicapi.MessageNewParams{
-		Model:     anthropicapi.Model(strings.TrimSpace(c.model)),
-		MaxTokens: c.maxTokens,
-		Messages:  anthropicMessages,
-		System:    system,
+		Model:       anthropicapi.Model(strings.TrimSpace(c.model)),
+		MaxTokens:   c.maxTokens,
+		Messages:    anthropicMessages,
+		System:      system,
+		Temperature: param.NewOpt(float64(c.temperature)),
 	}
 
 	if len(tools) > 0 {
@@ -334,5 +337,11 @@ func WithMaxTokens(maxTokens int64) Option {
 		if maxTokens > 0 {
 			c.maxTokens = maxTokens
 		}
+	}
+}
+
+func WithTemperature(temp float32) Option {
+	return func(c *Client) {
+		c.temperature = temp
 	}
 }
