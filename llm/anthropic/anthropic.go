@@ -112,7 +112,7 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*l
 		return nil, err
 	}
 
-	msg, err := anthropicMessageToPhero(res)
+	msg, err := messageFromAnthropic(res)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +142,7 @@ func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam,
 			}
 
 		case llm.RoleUser:
-			blocks, err := contentPartsToAnthropic(m.Parts)
+			blocks, err := contentBlocksToAnthropic(m.Parts)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -182,7 +182,7 @@ func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam,
 				return nil, nil, ErrToolMessageMissingToolCallID
 			}
 			// Build tool result content blocks from parts.
-			content := buildToolResultContent(m.Parts)
+			content := toolResultContentToAnthropic(m.Parts)
 			toolBlock := anthropicapi.ToolResultBlockParam{
 				ToolUseID: toolUseID,
 				Content:   content,
@@ -205,8 +205,8 @@ func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam,
 	return system, out, nil
 }
 
-// contentPartsToAnthropic converts Phero ContentParts to Anthropic content block params.
-func contentPartsToAnthropic(parts []llm.ContentPart) ([]anthropicapi.ContentBlockParamUnion, error) {
+// contentBlocksToAnthropic converts Phero ContentParts to Anthropic content block params.
+func contentBlocksToAnthropic(parts []llm.ContentPart) ([]anthropicapi.ContentBlockParamUnion, error) {
 	blocks := make([]anthropicapi.ContentBlockParamUnion, 0, len(parts))
 	for _, p := range parts {
 		switch p.Type {
@@ -230,11 +230,11 @@ func contentPartsToAnthropic(parts []llm.ContentPart) ([]anthropicapi.ContentBlo
 	return blocks, nil
 }
 
-// buildToolResultContent converts Phero ContentParts to Anthropic ToolResultBlockParamContentUnion entries.
+// toolResultContentToAnthropic converts Phero ContentParts to Anthropic ToolResultBlockParamContentUnion entries.
 //
 // Text parts become text blocks; image-URL parts become image blocks.
 // This allows tools to return images as part of their result.
-func buildToolResultContent(parts []llm.ContentPart) []anthropicapi.ToolResultBlockParamContentUnion {
+func toolResultContentToAnthropic(parts []llm.ContentPart) []anthropicapi.ToolResultBlockParamContentUnion {
 	content := make([]anthropicapi.ToolResultBlockParamContentUnion, 0, len(parts))
 	for _, p := range parts {
 		switch p.Type {
@@ -269,8 +269,8 @@ func buildToolResultContent(parts []llm.ContentPart) []anthropicapi.ToolResultBl
 	return content
 }
 
-// anthropicMessageToPhero converts an Anthropic API response to a Phero Message.
-func anthropicMessageToPhero(m *anthropicapi.Message) (*llm.Message, error) {
+// messageFromAnthropic converts an Anthropic API response to a Phero Message.
+func messageFromAnthropic(m *anthropicapi.Message) (*llm.Message, error) {
 	if m == nil {
 		return nil, &NilResponseError{}
 	}
