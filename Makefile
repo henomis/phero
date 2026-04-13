@@ -1,4 +1,4 @@
-.PHONY: all test lint fmt vet clean coverage help license tidy fix doc check
+.PHONY: all test lint fmt vet clean coverage help license tidy fix doc check e2e e2e-compile e2e-up e2e-down
 
 # Variables
 GO := go
@@ -6,6 +6,14 @@ GOFLAGS := -v
 MODULE := $(shell $(GO) list -m)
 PKGS := $(shell $(GO) list ./... | grep -v /examples/)
 GOLANGCI_LINT := golangci-lint
+DOCKER_COMPOSE := docker compose
+E2E_OPENAI_BASE_URL ?= http://localhost:11434/v1
+E2E_OPENAI_API_KEY ?= ollama
+E2E_OPENAI_MODEL ?= minimax-m2.7:cloud
+E2E_ANTHROPIC_BASE_URL ?= http://localhost:11434
+E2E_ANTHROPIC_AUTH_TOKEN ?= ollama
+E2E_ANTHROPIC_MODEL ?= minimax-m2.7:cloud
+E2E_EMBEDDING_MODEL ?= nomic-embed-text
 
 # Default target
 all: test lint
@@ -13,16 +21,20 @@ all: test lint
 ## help: Display this help message
 help:
 	@echo "Available targets:"
-	@echo "  make test       - Run all tests"
-	@echo "  make lint       - Run golangci-lint"
-	@echo "  make fmt        - Format all Go files"
-	@echo "  make fix        - Run go fix on all packages"
-	@echo "  make vet        - Run go vet"
-	@echo "  make tidy       - Tidy and verify go modules"
-	@echo "  make coverage   - Generate test coverage report"
-	@echo "  make clean      - Clean build artifacts and cache"
-	@echo "  make license    - Add license headers to all Go files"
-	@echo "  make help       - Display this help message"
+	@echo "  make test        - Run all tests"
+	@echo "  make lint        - Run golangci-lint"
+	@echo "  make fmt         - Format all Go files"
+	@echo "  make fix         - Run go fix on all packages"
+	@echo "  make vet         - Run go vet"
+	@echo "  make tidy        - Tidy and verify go modules"
+	@echo "  make coverage    - Generate test coverage report"
+	@echo "  make e2e-compile - Compile the e2e test suite"
+	@echo "  make e2e-up      - Start Docker services needed by e2e tests"
+	@echo "  make e2e-down    - Stop Docker services used by e2e tests"
+	@echo "  make e2e         - Run the e2e test suite"
+	@echo "  make clean       - Clean build artifacts and cache"
+	@echo "  make license     - Add license headers to all Go files"
+	@echo "  make help        - Display this help message"
 
 ## test: Run all tests (excluding examples)
 test:
@@ -35,6 +47,33 @@ coverage:
 	$(GO) test -race -timeout 5m -coverprofile=coverage.out -covermode=atomic $(PKGS)
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
+
+## e2e-compile: Compile the e2e suite without running it
+e2e-compile:
+	@echo "Compiling e2e test suite..."
+	$(GO) test -tags=e2e ./e2e -run TestDoesNotExist
+
+## e2e-up: Start Docker services required by e2e tests
+e2e-up:
+	@echo "Starting e2e services..."
+	$(DOCKER_COMPOSE) -f e2e/docker-compose.yml up -d
+
+## e2e-down: Stop Docker services required by e2e tests
+e2e-down:
+	@echo "Stopping e2e services..."
+	$(DOCKER_COMPOSE) -f e2e/docker-compose.yml down -v
+
+## e2e: Run the e2e test suite
+e2e:
+	@echo "Running e2e tests..."
+	OPENAI_BASE_URL=$(E2E_OPENAI_BASE_URL) \
+	OPENAI_API_KEY=$(E2E_OPENAI_API_KEY) \
+	OPENAI_MODEL=$(E2E_OPENAI_MODEL) \
+	ANTHROPIC_BASE_URL=$(E2E_ANTHROPIC_BASE_URL) \
+	ANTHROPIC_AUTH_TOKEN=$(E2E_ANTHROPIC_AUTH_TOKEN) \
+	ANTHROPIC_MODEL=$(E2E_ANTHROPIC_MODEL) \
+	EMBEDDING_MODEL=$(E2E_EMBEDDING_MODEL) \
+	$(GO) test $(GOFLAGS) -tags=e2e -timeout 20m ./e2e
 
 ## lint: Run golangci-lint
 lint:

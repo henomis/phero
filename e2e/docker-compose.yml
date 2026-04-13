@@ -1,0 +1,32 @@
+# Docker Compose file for phero e2e tests.
+# Starts Qdrant and PostgreSQL (with pgvector) for tests that require external services.
+#
+# Usage:
+#   docker compose -f e2e/docker-compose.yml up -d
+#   docker compose -f e2e/docker-compose.yml down -v
+
+services:
+  qdrant:
+    image: qdrant/qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:6333/healthz || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: phero
+      POSTGRES_PASSWORD: phero
+      POSTGRES_DB: phero
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U phero"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
