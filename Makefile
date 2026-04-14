@@ -1,10 +1,11 @@
 .PHONY: all test lint fmt vet clean coverage help license tidy fix doc check e2e e2e-compile e2e-up e2e-down
 
+
 # Variables
 GO := go
 GOFLAGS := -v
 MODULE := $(shell $(GO) list -m)
-PKGS := $(shell $(GO) list ./... | grep -v /examples/)
+PKGS := $(shell $(GO) list ./... | grep -v /examples/ | grep -v /tests/)
 GOLANGCI_LINT := golangci-lint
 DOCKER_COMPOSE := docker compose
 E2E_OPENAI_BASE_URL ?= http://localhost:11434/v1
@@ -51,17 +52,17 @@ coverage:
 ## e2e-compile: Compile the e2e suite without running it
 e2e-compile:
 	@echo "Compiling e2e test suite..."
-	$(GO) test -tags=e2e ./e2e -run TestDoesNotExist
+	$(GO) test -tags=e2e ./tests/e2e -run TestDoesNotExist
 
 ## e2e-up: Start Docker services required by e2e tests
 e2e-up:
 	@echo "Starting e2e services..."
-	$(DOCKER_COMPOSE) -f e2e/docker-compose.yml up -d
+	$(DOCKER_COMPOSE) -f tests/e2e/docker-compose.yml up -d
 
 ## e2e-down: Stop Docker services required by e2e tests
 e2e-down:
 	@echo "Stopping e2e services..."
-	$(DOCKER_COMPOSE) -f e2e/docker-compose.yml down -v
+	$(DOCKER_COMPOSE) -f tests/e2e/docker-compose.yml down -v
 
 ## e2e: Run the e2e test suite
 e2e:
@@ -73,7 +74,7 @@ e2e:
 	ANTHROPIC_AUTH_TOKEN=$(E2E_ANTHROPIC_AUTH_TOKEN) \
 	ANTHROPIC_MODEL=$(E2E_ANTHROPIC_MODEL) \
 	EMBEDDING_MODEL=$(E2E_EMBEDDING_MODEL) \
-	$(GO) test $(GOFLAGS) -tags=e2e -timeout 20m ./e2e
+	$(GO) test $(GOFLAGS) -tags=e2e -timeout 20m ./tests/e2e
 
 ## lint: Run golangci-lint
 lint:
