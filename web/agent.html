@@ -124,12 +124,12 @@ func main() {
         panic(err)
     }
 
-    result, err := a.Run(ctx, "If I have 15 apples and give away 7, then buy 23 more, how many do I have?")
+    result, err := a.Run(ctx, llm.Text("If I have 15 apples and give away 7, then buy 23 more, how many do I have?"))
     if err != nil {
         panic(err)
     }
 
-    fmt.Println(result.Content)
+    fmt.Println(result.TextContent())
 }</code></pre>
     </section>
 
@@ -154,19 +154,19 @@ orchestrator, _ := agent.New(llmClient, "orchestrator", "Decide whether to resea
 _ = orchestrator.AddHandoff(researcher)
 _ = orchestrator.AddHandoff(writer)
 
-result, err := orchestrator.Run(ctx, "Write a short bio of Marie Curie.")
+result, err := orchestrator.Run(ctx, llm.Text("Write a short bio of Marie Curie."))
 if err != nil {
     panic(err)
 }
 
 if result.HandoffAgent != nil {
     // The orchestrator decided to hand off; continue with the target agent
-    result, err = result.HandoffAgent.Run(ctx, result.Content)
+    result, err = result.HandoffAgent.Run(ctx, llm.Text(result.TextContent()))
     if err != nil {
         panic(err)
     }
 }
-fmt.Println(result.Content)</code></pre>
+fmt.Println(result.TextContent())</code></pre>
 
       <p>
         See <a href="https://github.com/henomis/phero/tree/main/examples/handoff">examples/handoff</a> for a full working example.
@@ -179,17 +179,17 @@ fmt.Println(result.Content)</code></pre>
         <code>Agent.Run</code> returns a <code>*Result</code> with three fields:
       </p>
       <ul>
-        <li><code>Content string</code>: the model's final text response</li>
+        <li><code>Parts []llm.ContentPart</code>: the model's final response; call <code>result.TextContent()</code> to get the plain text</li>
         <li><code>HandoffAgent *Agent</code>: set when the model triggered a handoff to another agent; nil otherwise</li>
         <li><code>Summary *trace.RunSummary</code>: aggregated observability data for the run (token usage, latency, tool call counts, etc.)</li>
       </ul>
 
-      <pre><code class="language-go">result, err := a.Run(ctx, input)
+      <pre><code class="language-go">result, err := a.Run(ctx, llm.Text(input))
 if err != nil {
     panic(err)
 }
 
-fmt.Println(result.Content)
+fmt.Println(result.TextContent())
 if result.Summary != nil {
     fmt.Printf("tokens used: in=%d out=%d\n",
         result.Summary.Usage.InputTokens,

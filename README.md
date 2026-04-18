@@ -28,6 +28,9 @@ Phero is a modern Go framework for building multi-agent AI systems. Like ants in
 - **🔀 Agent handoffs** Transfer control between agents at runtime; `Result.HandoffAgent` tells you where to route next
 - **🌐 A2A protocol** Expose any agent as an HTTP A2A server, or call remote A2A agents as local tools
 - **🧩 LLM abstraction** Work with OpenAI-compatible endpoints (OpenAI, Ollama, etc.) and Anthropic
+- **🖼️ Multimodal input** Mix text and images with typed content parts (`llm.Text`, `llm.ImageURL`, `llm.ImageFile`)
+- **🔊 Audio I/O** OpenAI backend supports speech-to-text and text-to-speech via `llm.Transcriber` and `llm.SpeechSynthesizer`
+- **🧱 LLM middleware** Compose reusable cross-cutting behaviors around any backend with `llm.Use(...)`
 - **🛠️ Function tools** Expose Go functions as callable tools with automatic JSON Schema generation
 - **📚 RAG (Retrieval-Augmented Generation)** Built-in vector storage and semantic search
 - **🧠 Skills system** Define reusable agent capabilities in `SKILL.md` files
@@ -58,6 +61,7 @@ Then try:
 
 Then explore the **[examples/](examples/)** directory for more advanced patterns:
 - Multi-agent workflows
+- Multimodal and audio pipelines
 - RAG chatbots
 - Skills integration
 - MCP server connections
@@ -77,7 +81,7 @@ Phero is organized into focused packages, each solving a specific problem:
 
 ### 💬 LLM Layer
 
-- **`llm`** Clean LLM interface with function tool support and JSON Schema utilities
+- **`llm`** Provider-agnostic chat interface with typed messages/content parts, function tools, JSON Schema utilities, audio interfaces, and LLM middleware composition
 - **`llm/openai`** OpenAI-compatible client (works with OpenAI, Ollama, and compatible endpoints)
 - **`llm/anthropic`** Anthropic API client
 
@@ -113,16 +117,26 @@ Comprehensive examples are included in the [`examples/`](examples/) directory:
 | Example | Description |
 |---|---|
 | [Simple Agent](examples/simple-agent/) | **Start here!** Minimal example showing one agent with one custom tool perfect for learning the basics |
+| [Multimodal](examples/multimodal/) | Send text + image inputs to a vision-capable model using typed content parts |
+| [Audio](examples/audio/) | End-to-end speech-to-text and text-to-speech using the OpenAI backend |
+| [LLM Middleware](examples/llm-middleware/) | Wrap an LLM with composable middleware for logging and other cross-cutting concerns |
 | [Conversational Agent](examples/conversational-agent/) | REPL-style chatbot with short-term conversational memory and a simple built-in tool |
 | [Long-Term Memory](examples/long-term-memory/) | REPL-style chatbot with semantic long-term memory (RAG) backed by Qdrant |
 | [Handoff](examples/handoff/) | One agent hands work off to a specialist agent at runtime using the built-in handoff mechanism |
 | [A2A Server](examples/a2a/server/) | Expose a Phero agent as an A2A-compliant HTTP server for cross-process agent calls |
 | [A2A Client](examples/a2a/client/) | Connect to a remote A2A agent and use it as a local tool inside an orchestrator |
 | [Debate Committee](examples/debate-committee/) | Multi-agent architecture where committee members debate independently and a judge synthesizes the final decision |
+| [Evaluator-Optimizer](examples/evaluator-optimizer/) | Iterative generation loop where an optimizer proposes drafts and an evaluator critiques them until quality criteria are met |
+| [Human-in-the-Loop](examples/human-in-the-loop/) | Multi-agent flow that pauses for explicit human approval/input before continuing |
 | [Multi-Agent Workflow](examples/multi-agent-workflow/) | Classic Plan → Execute → Analyze → Critique pattern with specialized agent roles |
+| [Orchestrator-Workers](examples/orchestrator-workers/) | Dynamic task decomposition where an orchestrator delegates sub-tasks to worker agents |
+| [Parallel Research](examples/parallel-research/) | Fan-out/fan-in workflow that runs multiple specialist researchers in parallel and merges their findings |
+| [Prompt Chaining](examples/prompt-chaining/) | Sequential multi-step prompting with a programmatic gate between stages |
 | [RAG Chatbot](examples/rag-chatbot/) | Terminal chatbot with semantic search over local documents using Qdrant |
 | [Skill](examples/skills/) | Discover SKILL.md files and expose them as callable agent tools |
+| [Social Simulation](examples/social-simulation/) | Multi-agent social simulation with persona-driven actors and emergent interactions |
 | [MCP Integration](examples/mcp/) | Run an MCP server as a subprocess and expose its tools to agents |
+| [Playwright MCP](examples/playwright-mcp/) | Connect browser automation tools through MCP and orchestrate them from an agent |
 | [Supervisor Blackboard](examples/supervisor-blackboard/) | Supervisor-worker pattern with a shared blackboard for coordination |
 | [Tracing](examples/tracing/) | Attach a colorized tracer to an agent and inspect LLM requests, tool calls, and memory events in real time |
 
