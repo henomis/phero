@@ -106,7 +106,9 @@ func (c *Client) SynthesizeSpeech(ctx context.Context, req llm.SpeechRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	defer raw.Close()
+	defer func() {
+		_ = raw.Close()
+	}()
 
 	data, err := io.ReadAll(raw)
 	if err != nil {

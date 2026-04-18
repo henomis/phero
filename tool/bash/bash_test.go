@@ -43,6 +43,7 @@ func TestBashTool_SuccessStdout(t *testing.T) {
 	}
 	if out == nil {
 		t.Fatalf("expected output")
+		return
 	}
 	if strings.TrimSpace(out.Output) != "hello" {
 		t.Fatalf("unexpected output: %q", out.Output)
@@ -63,6 +64,7 @@ func TestBashTool_StderrIncluded(t *testing.T) {
 	}
 	if out == nil {
 		t.Fatalf("expected output")
+		return
 	}
 	if strings.TrimSpace(out.Output) != "err" {
 		t.Fatalf("unexpected output: %q", out.Output)
@@ -83,6 +85,7 @@ func TestBashTool_FailureAddsExitCodeMarker(t *testing.T) {
 	}
 	if out == nil {
 		t.Fatalf("expected output")
+		return
 	}
 	if !strings.Contains(out.Output, "exit code: 7") {
 		t.Fatalf("expected exit code marker, got: %q", out.Output)

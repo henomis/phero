@@ -528,6 +528,7 @@ func TestRun_PopulatesRunSummary(t *testing.T) {
 	}
 	if eventSummary == nil {
 		t.Fatal("expected AgentRunSummaryEvent to be emitted")
+		return
 	}
 	if eventSummary.ToolCalls != summary.ToolCalls {
 		t.Fatalf("event summary tool calls = %d, want %d", eventSummary.ToolCalls, summary.ToolCalls)

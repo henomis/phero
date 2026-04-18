@@ -136,7 +136,9 @@ func main() {
 	}
 
 	transcript := sim.Transcript()
-	os.WriteFile("transcript.txt", []byte(transcript), 0o666)
+	if err := os.WriteFile("transcript.txt", []byte(transcript), 0o666); err != nil {
+		panic(fmt.Errorf("write transcript: %w", err))
+	}
 	reportPrompt := fmt.Sprintf(
 		"World facts:\n%s\n\nSimulation transcript:\n%s\n\nAnalyze this simulation and produce the report.",
 		worldFacts, transcript,
