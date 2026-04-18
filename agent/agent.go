@@ -42,9 +42,18 @@ type Agent struct {
 
 // Result represents the final output of an agent after processing user input and executing any tool calls.
 type Result struct {
-	Content      string
+	// Parts holds the multimodal content of the final assistant message.
+	Parts        []llm.ContentPart
 	HandoffAgent *Agent
 	Summary      *trace.RunSummary
+}
+
+// TextContent returns the concatenation of all text parts in the result.
+func (r *Result) TextContent() string {
+	if r == nil {
+		return ""
+	}
+	return llm.TextContent(r.Parts...)
 }
 
 // New creates a new Agent.
@@ -155,27 +164,31 @@ func (a *Agent) SetTracer(t trace.Tracer) {
 	a.tracer = t
 }
 
-// Run executes the agent loop for the given user input.
+// Run executes the agent loop for the given user input parts.
+//
+// Call with llm.Text("hello") for a plain-text message, or mix llm.Text and
+// llm.ImageURL parts for multimodal input.
 //
 // The agent calls the LLM, executes any requested tool calls, and repeats until
 // the model returns a message without tool calls.
 //
 // If the run succeeds but saving the session to memory fails, the result is
 // still returned together with the save error joined via errors.Join.
-func (a *Agent) Run(ctx context.Context, input string) (result *Result, err error) {
+func (a *Agent) Run(ctx context.Context, parts ...llm.ContentPart) (result *Result, err error) {
 	ctx = trace.WithTracer(ctx, a.tracer)
 	ctx = trace.WithAgentName(ctx, a.name)
 	stats := newRunStats(a.name)
 	handoffAgentName := ""
 
-	session, sessionIndex, err := a.prepareSession(ctx, input, stats)
+	session, sessionIndex, err := a.prepareSession(ctx, parts, stats)
 	if err != nil {
 		return nil, err
 	}
 
+	inputText := llm.TextContent(parts...)
 	a.tracer.Trace(trace.AgentStartEvent{
 		AgentName: a.name,
-		Input:     input,
+		Input:     inputText,
 		Timestamp: time.Now(),
 	})
 
@@ -188,7 +201,7 @@ func (a *Agent) Run(ctx context.Context, input string) (result *Result, err erro
 
 		output := ""
 		if result != nil {
-			output = result.Content
+			output = result.TextContent()
 		}
 		a.tracer.Trace(trace.AgentEndEvent{
 			AgentName:  a.name,
@@ -235,7 +248,7 @@ func (a *Agent) Run(ctx context.Context, input string) (result *Result, err erro
 
 		// If finalMessage is nil, it means the agent executed tool calls and needs to call the LLM again.
 		if iterationResult.lastMessage != nil {
-			return &Result{Content: iterationResult.lastMessage.Content, HandoffAgent: iterationResult.handoffAgent}, nil
+			return &Result{Parts: iterationResult.lastMessage.Parts, HandoffAgent: iterationResult.handoffAgent}, nil
 		}
 	}
 }
@@ -315,13 +328,18 @@ func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, itera
 	})
 
 	start := time.Now()
-	result, err := a.executeToolCall(ctx, toolCall)
+	resultParts, err := a.executeToolCall(ctx, toolCall)
 	stats.recordTool(toolCall.Function.Name, err, time.Since(start))
 
+	// Trace with text representation.
+	traceResult := llm.TextContent(resultParts...)
+	if err != nil {
+		traceResult = err.Error()
+	}
 	a.tracer.Trace(trace.ToolResultEvent{
 		AgentName: a.name,
 		ToolName:  toolCall.Function.Name,
-		Result:    result,
+		Result:    traceResult,
 		Err:       err,
 		CallID:    toolCall.ID,
 		Iteration: iteration,
@@ -329,28 +347,26 @@ func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, itera
 	})
 
 	if err != nil {
-		result = fmt.Sprintf("Error executing tool '%s': %v", toolCall.Function.Name, err)
+		resultParts = []llm.ContentPart{llm.Text(fmt.Sprintf("Error executing tool '%s': %v", toolCall.Function.Name, err))}
 	}
 
 	return &llm.Message{
-		Role:       llm.ChatMessageRoleTool,
-		Content:    result,
+		Role:       llm.RoleTool,
+		Parts:      resultParts,
 		ToolCallID: toolCall.ID,
 	}
 }
 
 // prepareSession prepares the messages for the LLM call, including the system prompt, memory messages, and user input.
-func (a *Agent) prepareSession(ctx context.Context, input string, stats *runStats) ([]llm.Message, int, error) {
-	messages := []llm.Message{
-		{
-			Role:    llm.ChatMessageRoleSystem,
-			Content: a.description,
-		},
-	}
+func (a *Agent) prepareSession(ctx context.Context, parts []llm.ContentPart, stats *runStats) ([]llm.Message, int, error) {
+	messages := []llm.Message{llm.SystemMessage(a.description)}
+
+	// Use the text representation of the input parts for the memory query.
+	inputText := llm.TextContent(parts...)
 
 	if a.memory != nil {
 		start := time.Now()
-		memoryMessages, err := a.memory.Retrieve(ctx, input)
+		memoryMessages, err := a.memory.Retrieve(ctx, inputText)
 		duration := time.Since(start)
 		if err != nil {
 			stats.recordMemoryRetrieve(0, duration)
@@ -370,40 +386,48 @@ func (a *Agent) prepareSession(ctx context.Context, input string, stats *runStat
 
 	sessionIndex := len(messages)
 
-	if input != "" {
-		userMessage := llm.Message{
-			Role:    llm.ChatMessageRoleUser,
-			Content: input,
-		}
-		messages = append(messages, userMessage)
+	if len(parts) > 0 {
+		messages = append(messages, llm.UserMessage(parts...))
 	}
 
 	return messages, sessionIndex, nil
 }
 
-// executeToolCall executes a tool call and returns the result as a string.
-func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall) (string, error) {
+// executeToolCall executes a tool call and returns the result as content parts.
+func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall) ([]llm.ContentPart, error) {
 	tool, found := a.getTool(tc.Function.Name)
 	if !found {
-		return "", &ToolUnknownError{Name: tc.Function.Name}
+		return nil, &ToolUnknownError{Name: tc.Function.Name}
 	}
 
 	result, err := tool.Handle(ctx, tc.Function.Arguments)
 	if err != nil {
-		return "", &ToolExecutionError{Name: tc.Function.Name, Err: err}
+		return nil, &ToolExecutionError{Name: tc.Function.Name, Err: err}
 	}
 
-	resultAsString, isString := result.(string)
-	if !isString {
-		resultAsBytes, convertErr := json.Marshal(result)
-		if convertErr != nil {
-			resultAsString = fmt.Sprintf("failed to marshal tool result: %v", convertErr)
-		} else {
-			resultAsString = string(resultAsBytes)
-		}
-	}
+	return anyToContentParts(result), nil
+}
 
-	return resultAsString, nil
+// anyToContentParts converts any tool result value to a slice of ContentParts.
+//
+// If the value is already []llm.ContentPart it is returned directly.
+// A plain string becomes a single text part.
+// All other types are JSON-marshalled into a text part.
+func anyToContentParts(v any) []llm.ContentPart {
+	if v == nil {
+		return nil
+	}
+	if parts, ok := v.([]llm.ContentPart); ok {
+		return parts
+	}
+	if s, ok := v.(string); ok {
+		return []llm.ContentPart{llm.Text(s)}
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return []llm.ContentPart{llm.Text(fmt.Sprintf("failed to marshal tool result: %v", err))}
+	}
+	return []llm.ContentPart{llm.Text(string(b))}
 }
 
 // AsTool exports this agent as an OpenAI function tool.
@@ -424,11 +448,11 @@ func (a *Agent) AsTool(toolName, toolDescription string) (*llm.Tool, error) {
 	}
 
 	handler := func(ctx context.Context, input *ToolInput) (*ToolOutput, error) {
-		response, err := a.Run(ctx, input.Input)
+		response, err := a.Run(ctx, llm.Text(input.Input))
 		if err != nil {
 			return nil, err
 		}
-		return &ToolOutput{Output: response.Content}, nil
+		return &ToolOutput{Output: response.TextContent()}, nil
 	}
 
 	return llm.NewTool(

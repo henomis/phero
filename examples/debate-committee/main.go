@@ -68,11 +68,11 @@ func main() {
 
 	debate := make([]DebateResult, 0, len(committee))
 	for _, member := range committee {
-		out, err := member.Agent.Run(ctx, question)
+		out, err := member.Agent.Run(ctx, llm.Text(question))
 		if err != nil {
 			panic(err)
 		}
-		debate = append(debate, DebateResult{Member: member.Name, Output: strings.TrimSpace(out.Content)})
+		debate = append(debate, DebateResult{Member: member.Name, Output: strings.TrimSpace(out.TextContent())})
 	}
 
 	for _, r := range debate {
@@ -82,13 +82,13 @@ func main() {
 	}
 
 	judgeInput := renderJudgeInput(goal, question, debate)
-	final, err := judge.Run(ctx, judgeInput)
+	final, err := judge.Run(ctx, llm.Text(judgeInput))
 	if err != nil {
 		panic(err)
 	}
 
 	fmt.Println("=== judge (final) ===")
-	fmt.Println(strings.TrimSpace(final.Content))
+	fmt.Println(strings.TrimSpace(final.TextContent()))
 }
 
 func renderJudgeInput(goal, question string, debate []DebateResult) string {

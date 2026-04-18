@@ -92,30 +92,29 @@ func (s *RAG) retrieve(ctx context.Context, query string) ([]llm.Message, error)
 // containing the concatenated text from the points' payloads.
 // Points whose payload does not contain a non-empty "text" string are skipped.
 func pointToContext(points []vectorstore.ScoredPoint) llm.Message {
-	message := llm.Message{
-		Role:    llm.ChatMessageRoleSystem,
-		Content: contextSystemMessagePrefix,
-	}
+	var sb strings.Builder
+	sb.WriteString(contextSystemMessagePrefix)
 
 	for _, p := range points {
 		text, ok := p.Payload[contentKey].(string)
 		if !ok || strings.TrimSpace(text) == "" {
 			continue
 		}
-		message.Content += text + "\n"
+		sb.WriteString(text)
+		sb.WriteByte('\n')
 	}
 
-	return message
+	return llm.SystemMessage(sb.String())
 }
 
 // formatSessionContent converts a slice of llm.Message into a single string, concatenating the role and content of each message in a readable format.
 func formatSessionContent(messages []llm.Message) string {
 	var b strings.Builder
 	for _, message := range messages {
-		if message.Role != llm.ChatMessageRoleAssistant && message.Role != llm.ChatMessageRoleUser {
+		if message.Role != llm.RoleAssistant && message.Role != llm.RoleUser {
 			continue
 		}
-		msg := strings.TrimSpace(message.Content)
+		msg := strings.TrimSpace(message.TextContent())
 		if msg == "" {
 			continue
 		}

@@ -77,13 +77,13 @@ func main() {
 		}
 	}
 
-	res, err := a.Run(ctx, "Give me a random quote.")
+	res, err := a.Run(ctx, llm.Text("Give me a random quote."))
 	if err != nil {
 		panic(err)
 	}
 
 	fmt.Printf("LLM used: %s\n", llmInfo)
-	fmt.Printf("Agent response: %s\n", res.Content)
+	fmt.Printf("Agent response: %s\n", res.TextContent())
 }
 
 func buildLLMFromEnv() (llm.LLM, string) {

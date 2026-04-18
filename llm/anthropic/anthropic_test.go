@@ -107,7 +107,7 @@ func TestExecute_TextResponse(t *testing.T) {
 	defer srv.Close()
 
 	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
-	msgs := []llm.Message{{Role: llm.ChatMessageRoleUser, Content: "hi"}}
+	msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
 
 	result, err := c.Execute(context.Background(), msgs, nil)
 	if err != nil {
@@ -116,8 +116,8 @@ func TestExecute_TextResponse(t *testing.T) {
 	if result.Message == nil {
 		t.Fatal("expected non-nil message")
 	}
-	if result.Message.Content != "Hello from Anthropic!" {
-		t.Fatalf("expected %q, got %q", "Hello from Anthropic!", result.Message.Content)
+	if result.Message.TextContent() != "Hello from Anthropic!" {
+		t.Fatalf("expected %q, got %q", "Hello from Anthropic!", result.Message.TextContent())
 	}
 	if result.Usage == nil {
 		t.Fatal("expected non-nil usage")
@@ -157,7 +157,7 @@ func TestExecute_WithToolUse(t *testing.T) {
 	}
 
 	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
-	msgs := []llm.Message{{Role: llm.ChatMessageRoleUser, Content: "weather in Paris?"}}
+	msgs := []llm.Message{llm.UserMessage(llm.Text("weather in Paris?"))}
 
 	result, err := c.Execute(context.Background(), msgs, []*llm.Tool{tool})
 	if err != nil {
@@ -188,16 +188,16 @@ func TestExecute_SystemMessage_Converted(t *testing.T) {
 
 	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
 	msgs := []llm.Message{
-		{Role: llm.ChatMessageRoleSystem, Content: "You are a helpful assistant."},
-		{Role: llm.ChatMessageRoleUser, Content: "hello"},
+		llm.SystemMessage("You are a helpful assistant."),
+		llm.UserMessage(llm.Text("hello")),
 	}
 
 	result, err := c.Execute(context.Background(), msgs, nil)
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
-	if result.Message.Content != "ok" {
-		t.Fatalf("expected %q, got %q", "ok", result.Message.Content)
+	if result.Message.TextContent() != "ok" {
+		t.Fatalf("expected %q, got %q", "ok", result.Message.TextContent())
 	}
 }
 
@@ -211,7 +211,7 @@ func TestExecute_UnsupportedRole_ReturnsError(t *testing.T) {
 
 	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
 	msgs := []llm.Message{
-		{Role: "banana", Content: "bad role"},
+		{Role: "banana", Parts: []llm.ContentPart{llm.Text("bad role")}},
 	}
 
 	_, err := c.Execute(context.Background(), msgs, nil)
@@ -232,12 +232,8 @@ func TestExecute_ToolMessage_MissingToolCallID_ReturnsError(t *testing.T) {
 
 	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
 	msgs := []llm.Message{
-		{Role: llm.ChatMessageRoleUser, Content: "do it"},
-		{
-			Role:       llm.ChatMessageRoleTool,
-			Content:    "result",
-			ToolCallID: "", // missing — must error
-		},
+		llm.UserMessage(llm.Text("do it")),
+		llm.ToolResultMessage("", llm.Text("result")), // missing ToolCallID — must error
 	}
 
 	_, err := c.Execute(context.Background(), msgs, nil)
@@ -255,7 +251,7 @@ func TestExecute_APIError_ReturnsError(t *testing.T) {
 	defer srv.Close()
 
 	c := anthropic.New("bad-key", anthropic.WithBaseURL(srv.URL))
-	msgs := []llm.Message{{Role: llm.ChatMessageRoleUser, Content: "hi"}}
+	msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
 
 	_, err := c.Execute(context.Background(), msgs, nil)
 	if err == nil {

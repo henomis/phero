@@ -83,12 +83,12 @@ func main() {
 
     a.SetTracer(text.New(os.Stderr))
 
-    result, err := a.Run(context.Background(), "What is 12 * 9?")
+    result, err := a.Run(context.Background(), llm.Text("What is 12 * 9?"))
     if err != nil {
         panic(err)
     }
 
-    fmt.Println(result.Content)
+    fmt.Println(result.TextContent())
 }</code></pre>
     </section>
 
@@ -144,7 +144,7 @@ a.SetTracer(t)</code></pre>
         <li><code>RunSummary.HandoffAgent</code> &mdash; non-empty when the run ended via a handoff</li>
       </ul>
 
-      <pre><code class="language-go">result, err := a.Run(ctx, input)
+      <pre><code class="language-go">result, err := a.Run(ctx, llm.Text(input))
 if err != nil {
     panic(err)
 }

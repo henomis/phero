@@ -40,8 +40,7 @@
         Higher-level packages (like <code>agent</code>) build on this to orchestrate multi-turn loops and tool execution.
       </p>
       <p>
-        For convenience, Phero re-exports a few OpenAI chat types (messages, tool calls, and role constants), so most of the
-        framework can depend on a single import.
+          All message and content types are defined in this package — no dependency on any specific provider SDK is required.
       </p>
     </section>
 
@@ -63,8 +62,8 @@
       <h2>Anthropic backend</h2>
       <p>
         <code>llm/anthropic</code> implements <code>llm.LLM</code> using Anthropic's Messages API.
-        It keeps the same OpenAI-shaped message/tool types at the boundary, so the rest of the framework (agents, tools, memory)
-        doesn't need to change.
+          The same Phero message/tool types are used at the boundary, so the rest of the framework (agents, tools, memory)
+          doesn't need to change.
       </p>
 
       <pre><code class="language-go">import (
@@ -81,6 +80,164 @@ llmClient := anthropic.New(
 
       <p>
         If you pass an empty API key, the underlying Anthropic SDK will fall back to its environment variable configuration.
+      </p>
+      <p>Available options:</p>
+      <ul>
+        <li><code>WithModel(m)</code>: Anthropic model name (e.g. <code>"claude-sonnet-4-6"</code>)</li>
+        <li><code>WithMaxTokens(n)</code>: maximum completion tokens</li>
+        <li><code>WithTemperature(t)</code>: sampling temperature (0&ndash;1)</li>
+        <li><code>WithBaseURL(url)</code>: override the API endpoint (useful for proxies or tests)</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>OpenAI backend</h2>
+      <p>
+        <code>llm/openai</code> implements <code>llm.LLM</code> using the OpenAI Chat Completions API.
+        It also implements <code>llm.Transcriber</code> and <code>llm.SpeechSynthesizer</code> for audio (see below).
+      </p>
+
+      <pre><code class="language-go">import (
+    "os"
+    "github.com/henomis/phero/llm/openai"
+)
+
+llmClient := openai.New(
+    os.Getenv("OPENAI_API_KEY"),
+    openai.WithModel("gpt-4o"),
+    openai.WithTemperature(0.7),
+)</code></pre>
+
+      <p>Available options:</p>
+      <ul>
+        <li><code>WithModel(m)</code>: model name (e.g. <code>"gpt-4o"</code>, <code>"gpt-4o-mini"</code>)</li>
+        <li><code>WithTemperature(t)</code>: sampling temperature</li>
+        <li><code>WithBaseURL(url)</code>: override the API base URL (e.g. point at a local proxy)</li>
+        <li><code>WithOllamaBaseURL()</code>: shortcut to point at a local Ollama server</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Messages and content parts</h2>
+      <p>
+        Every message is an <code>llm.Message</code> containing a <code>Role</code> and a slice of
+        <code>llm.ContentPart</code> values. A content part is either text or an image (URL or base64-encoded bytes).
+      </p>
+
+      <pre><code class="language-go">// Plain text
+llm.Text("Hello, world!")
+
+// Image by URL
+llm.ImageURL("https://example.com/photo.png")
+
+// Image from a local file (MIME type is detected automatically)
+part, err := llm.ImageFile("/path/to/photo.jpg")
+
+// Image as raw base64 bytes
+llm.ImageBase64("image/png", base64EncodedData)</code></pre>
+
+      <p>Role constants and message constructors:</p>
+
+      <pre><code class="language-go">// Role constants
+llm.RoleSystem    // "system"
+llm.RoleUser      // "user"
+llm.RoleAssistant // "assistant"
+llm.RoleTool      // "tool"
+
+// Constructors
+llm.SystemMessage("You are a helpful assistant.")
+llm.UserMessage(llm.Text("Hello!"))
+llm.UserMessage(llm.Text("Describe this image:"), llm.ImageURL("https://..."))
+llm.AssistantMessage([]llm.ContentPart{llm.Text("Hi!")})
+llm.ToolResultMessage(toolCallID, llm.Text("42"))</code></pre>
+
+      <p>
+        To extract the plain text from a message or from loose parts, use <code>TextContent</code>:
+      </p>
+
+      <pre><code class="language-go">// From a message
+text := msg.TextContent()
+
+// From loose content parts
+text := llm.TextContent(parts...)</code></pre>
+    </section>
+
+    <section>
+      <h2>Multimodal input</h2>
+      <p>
+        Pass image parts alongside text to send multimodal messages to vision-capable models.
+        The agent's <code>Run</code> method accepts variadic <code>ContentPart</code> values:
+      </p>
+
+      <pre><code class="language-go">imagePart, err := llm.ImageFile("screenshot.png")
+if err != nil {
+    panic(err)
+}
+
+result, err := a.Run(ctx,
+    llm.Text("What does this image show?"),
+    imagePart,
+)
+if err != nil {
+    panic(err)
+}
+fmt.Println(result.TextContent())</code></pre>
+
+      <p>
+        See <a href="https://github.com/henomis/phero/tree/main/examples/multimodal">examples/multimodal</a> for a complete working example.
+      </p>
+    </section>
+
+    <section>
+      <h2>LLM middleware</h2>
+      <p>
+        Just as tools support middleware, the <code>llm</code> package provides an <code>LLMMiddleware</code> type and a
+        <code>llm.Use</code> function to compose decorators around any <code>llm.LLM</code>.
+        This is the right place to add caching, rate limiting, logging, or automatic retries without modifying individual backends.
+      </p>
+
+      <pre><code class="language-go">// A simple logging middleware
+func loggingMiddleware(next llm.LLM) llm.LLM {
+    return llm.LLMFunc(func(ctx context.Context, msgs []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
+        fmt.Printf("calling LLM with %d messages\n", len(msgs))
+        result, err := next.Execute(ctx, msgs, tools)
+        fmt.Printf("LLM responded; err=%v\n", err)
+        return result, err
+    })
+}
+
+// Wrap a base client with one or more middlewares
+base := openai.New(os.Getenv("OPENAI_API_KEY"))
+wrapped := llm.Use(base, loggingMiddleware)</code></pre>
+
+      <p>
+        Middlewares are applied in declaration order: <code>llm.Use(base, m1, m2)</code> means <code>m1</code> is outermost and runs first.
+        See <a href="https://github.com/henomis/phero/tree/main/examples/llm-middleware">examples/llm-middleware</a> for a full example.
+      </p>
+    </section>
+
+    <section>
+      <h2>Audio: transcription and speech</h2>
+      <p>
+        The <code>llm/openai</code> client also implements <code>llm.Transcriber</code> and <code>llm.SpeechSynthesizer</code>,
+        so the same client used for chat can also transcribe audio and synthesize speech.
+      </p>
+
+      <pre><code class="language-go">// Speech-to-text (Transcriber)
+result, err := llmClient.Transcribe(ctx, llm.TranscriptionRequest{
+    Input: llm.AudioFile("recording.mp3"),
+})
+fmt.Println(result.Text)
+
+// Text-to-speech (SpeechSynthesizer)
+speech, err := llmClient.SynthesizeSpeech(ctx, llm.SpeechRequest{
+    Input:  "Hello from Phero!",
+    Format: llm.SpeechResponseFormatMP3,
+})
+// speech.Data holds the raw MP3 bytes; speech.MIMEType is "audio/mpeg"</code></pre>
+
+      <p>
+        See <a href="https://github.com/henomis/phero/tree/main/examples/audio">examples/audio</a> for a runnable example.
       </p>
     </section>
 
@@ -186,6 +343,7 @@ go run ./examples/conversational-agent</code></pre>
         <li><a href="trace.html">trace</a>: observability wrapper for agents and standalone LLM calls</li>
         <li><a href="tool.html">tool</a>: prebuilt tools you can attach to agents/models</li>
         <li><a href="embedding.html">embedding</a>: vector embeddings for RAG and memory</li>
+        <li><a href="a2a.html">a2a</a>: expose agents as A2A servers or call remote agents as tools</li>
       </ul>
     </section>
   </main>

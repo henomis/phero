@@ -102,14 +102,14 @@ func TestWithModel_ChangesModel(t *testing.T) {
 	defer srv.Close()
 
 	c := openai.New("key", openai.WithModel("gpt-4o"), openai.WithBaseURL(srv.URL+"/v1"))
-	msgs := []llm.Message{{Role: llm.ChatMessageRoleUser, Content: "hello"}}
+	msgs := []llm.Message{llm.UserMessage(llm.Text("hello"))}
 
 	result, err := c.Execute(context.Background(), msgs, nil)
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
-	if result.Message.Content != "hi" {
-		t.Fatalf("expected %q, got %q", "hi", result.Message.Content)
+	if result.Message.TextContent() != "hi" {
+		t.Fatalf("expected %q, got %q", "hi", result.Message.TextContent())
 	}
 }
 
@@ -128,7 +128,7 @@ func TestExecute_TextResponse(t *testing.T) {
 	defer srv.Close()
 
 	c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"))
-	msgs := []llm.Message{{Role: llm.ChatMessageRoleUser, Content: "hi"}}
+	msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
 
 	result, err := c.Execute(context.Background(), msgs, nil)
 	if err != nil {
@@ -137,14 +137,63 @@ func TestExecute_TextResponse(t *testing.T) {
 	if result.Message == nil {
 		t.Fatal("expected non-nil message")
 	}
-	if result.Message.Content != "Hello there!" {
-		t.Fatalf("expected %q, got %q", "Hello there!", result.Message.Content)
+	if result.Message.TextContent() != "Hello there!" {
+		t.Fatalf("expected %q, got %q", "Hello there!", result.Message.TextContent())
 	}
 	if result.Usage == nil {
 		t.Fatal("expected non-nil usage")
 	}
 	if result.Usage.InputTokens != 10 || result.Usage.OutputTokens != 4 {
 		t.Fatalf("usage mismatch: got input=%d output=%d", result.Usage.InputTokens, result.Usage.OutputTokens)
+	}
+}
+
+func TestExecute_WithTemperature(t *testing.T) {
+	var gotTemperature float64
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			_ = r.Body.Close()
+		}()
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		value, ok := payload["temperature"].(float64)
+		if !ok {
+			t.Fatalf("expected numeric temperature in request payload, got %T", payload["temperature"])
+		}
+		gotTemperature = value
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(chatCompletionResponse{
+			Object: "chat.completion",
+			ID:     "chatcmpl-temp",
+			Model:  openai.DefaultModel,
+			Choices: []choice{
+				{Message: message{Role: "assistant", Content: "ok"}, Reason: "stop"},
+			},
+			Usage: usage{PromptTokens: 7, CompletionTokens: 2},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"), openai.WithTemperature(0.7))
+	msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
+
+	result, err := c.Execute(context.Background(), msgs, nil)
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+	if result.Message.TextContent() != "ok" {
+		t.Fatalf("expected %q, got %q", "ok", result.Message.TextContent())
+	}
+	if gotTemperature != 0.7 {
+		t.Fatalf("expected temperature 0.7, got %v", gotTemperature)
 	}
 }
 
@@ -158,7 +207,7 @@ func TestExecute_EmptyChoices_ReturnsError(t *testing.T) {
 	defer srv.Close()
 
 	c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"))
-	msgs := []llm.Message{{Role: llm.ChatMessageRoleUser, Content: "hi"}}
+	msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
 
 	_, err := c.Execute(context.Background(), msgs, nil)
 	if !errors.Is(err, openai.ErrEmptyResponse) {
@@ -205,7 +254,7 @@ func TestExecute_WithToolCalls(t *testing.T) {
 	}
 
 	c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"))
-	msgs := []llm.Message{{Role: llm.ChatMessageRoleUser, Content: "weather?"}}
+	msgs := []llm.Message{llm.UserMessage(llm.Text("weather?"))}
 
 	result, err := c.Execute(context.Background(), msgs, []*llm.Tool{tool})
 	if err != nil {
@@ -228,7 +277,7 @@ func TestExecute_APIError_ReturnsError(t *testing.T) {
 	defer srv.Close()
 
 	c := openai.New("bad-key", openai.WithBaseURL(srv.URL+"/v1"))
-	msgs := []llm.Message{{Role: llm.ChatMessageRoleUser, Content: "hi"}}
+	msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
 
 	_, err := c.Execute(context.Background(), msgs, nil)
 	if err == nil {

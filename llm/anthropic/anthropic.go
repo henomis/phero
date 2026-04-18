@@ -21,8 +21,8 @@ import (
 
 	anthropicapi "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/google/uuid"
-	openaiapi "github.com/sashabaranov/go-openai"
 
 	"github.com/henomis/phero/llm"
 )
@@ -42,16 +42,14 @@ const (
 )
 
 // Client is an llm.LLM implementation that uses github.com/anthropics/anthropic-sdk-go.
-//
-// The boundary types are OpenAI-shaped because `llm.Message` and tool calls are
-// aliases of go-openai types.
 type Client struct {
 	client anthropicapi.Client
 
-	apiKey    string
-	baseURL   string
-	model     string
-	maxTokens int64
+	apiKey      string
+	baseURL     string
+	model       string
+	temperature float32
+	maxTokens   int64
 }
 
 // Option configures a Client created by New.
@@ -85,20 +83,21 @@ func New(apiKey string, opts ...Option) *Client {
 	return c
 }
 
-// Execute calls the Anthropic Messages API with the given OpenAI-shaped messages and tools.
+// Execute calls the Anthropic Messages API with the given messages and tools.
 //
-// It converts the response to an OpenAI-shaped assistant message, including any tool calls.
+// It converts the response to a Phero assistant message, including any tool calls.
 func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
-	system, anthropicMessages, err := openAIMessagesToAnthropic(messages)
+	system, anthropicMessages, err := messagesToAnthropic(messages)
 	if err != nil {
 		return nil, err
 	}
 
 	params := anthropicapi.MessageNewParams{
-		Model:     anthropicapi.Model(strings.TrimSpace(c.model)),
-		MaxTokens: c.maxTokens,
-		Messages:  anthropicMessages,
-		System:    system,
+		Model:       anthropicapi.Model(strings.TrimSpace(c.model)),
+		MaxTokens:   c.maxTokens,
+		Messages:    anthropicMessages,
+		System:      system,
+		Temperature: param.NewOpt(float64(c.temperature)),
 	}
 
 	if len(tools) > 0 {
@@ -113,7 +112,7 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*l
 		return nil, err
 	}
 
-	msg, err := anthropicMessageToOpenAI(res)
+	msg, err := messageFromAnthropic(res)
 	if err != nil {
 		return nil, err
 	}
@@ -127,29 +126,36 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*l
 	}, nil
 }
 
-func openAIMessagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam, []anthropicapi.MessageParam, error) {
+// messagesToAnthropic converts Phero messages to Anthropic wire types.
+//
+// System messages are collected and returned separately as required by the Anthropic API.
+func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam, []anthropicapi.MessageParam, error) {
 	var systemParts []string
 	out := make([]anthropicapi.MessageParam, 0, len(messages))
 
 	for _, m := range messages {
-		text := openAIMessageText(m)
 		switch m.Role {
-		case llm.ChatMessageRoleSystem:
+		case llm.RoleSystem:
+			text := m.TextContent()
 			if strings.TrimSpace(text) != "" {
 				systemParts = append(systemParts, text)
 			}
 
-		case llm.ChatMessageRoleUser:
-			blocks := make([]anthropicapi.ContentBlockParamUnion, 0, 1)
-			if strings.TrimSpace(text) != "" {
-				blocks = append(blocks, anthropicapi.NewTextBlock(text))
+		case llm.RoleUser:
+			blocks, err := contentBlocksToAnthropic(m.Parts)
+			if err != nil {
+				return nil, nil, err
 			}
-			out = append(out, anthropicapi.NewUserMessage(blocks...))
+			if len(blocks) > 0 {
+				out = append(out, anthropicapi.NewUserMessage(blocks...))
+			}
 
-		case llm.ChatMessageRoleAssistant:
-			blocks := make([]anthropicapi.ContentBlockParamUnion, 0, 1+len(m.ToolCalls))
-			if strings.TrimSpace(text) != "" {
-				blocks = append(blocks, anthropicapi.NewTextBlock(text))
+		case llm.RoleAssistant:
+			blocks := make([]anthropicapi.ContentBlockParamUnion, 0, len(m.Parts)+len(m.ToolCalls))
+			for _, p := range m.Parts {
+				if p.Type == llm.ContentTypeText && strings.TrimSpace(p.Text) != "" {
+					blocks = append(blocks, anthropicapi.NewTextBlock(p.Text))
+				}
 			}
 			for _, tc := range m.ToolCalls {
 				id := strings.TrimSpace(tc.ID)
@@ -166,19 +172,23 @@ func openAIMessagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlock
 						return nil, nil, &ToolArgumentsParseError{ToolName: tc.Function.Name, Err: err}
 					}
 				}
-
 				blocks = append(blocks, anthropicapi.NewToolUseBlock(id, input, tc.Function.Name))
 			}
 			out = append(out, anthropicapi.NewAssistantMessage(blocks...))
 
-		case llm.ChatMessageRoleTool:
+		case llm.RoleTool:
 			toolUseID := strings.TrimSpace(m.ToolCallID)
 			if toolUseID == "" {
 				return nil, nil, ErrToolMessageMissingToolCallID
 			}
-			// Anthropic expects tool results in a `user` message.
+			// Build tool result content blocks from parts.
+			content := toolResultContentToAnthropic(m.Parts)
+			toolBlock := anthropicapi.ToolResultBlockParam{
+				ToolUseID: toolUseID,
+				Content:   content,
+			}
 			out = append(out, anthropicapi.NewUserMessage(
-				anthropicapi.NewToolResultBlock(toolUseID, m.Content, false),
+				anthropicapi.ContentBlockParamUnion{OfToolResult: &toolBlock},
 			))
 
 		default:
@@ -195,22 +205,86 @@ func openAIMessagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlock
 	return system, out, nil
 }
 
-func anthropicMessageToOpenAI(m *anthropicapi.Message) (*llm.Message, error) {
+// contentBlocksToAnthropic converts Phero ContentParts to Anthropic content block params.
+func contentBlocksToAnthropic(parts []llm.ContentPart) ([]anthropicapi.ContentBlockParamUnion, error) {
+	blocks := make([]anthropicapi.ContentBlockParamUnion, 0, len(parts))
+	for _, p := range parts {
+		switch p.Type {
+		case llm.ContentTypeText:
+			if strings.TrimSpace(p.Text) != "" {
+				blocks = append(blocks, anthropicapi.NewTextBlock(p.Text))
+			}
+		case llm.ContentTypeImageURL:
+			blocks = append(blocks, anthropicapi.NewImageBlock(
+				anthropicapi.URLImageSourceParam{URL: p.ImageURL},
+			))
+		case llm.ContentTypeImageBase64:
+			blocks = append(blocks, anthropicapi.NewImageBlock(
+				anthropicapi.Base64ImageSourceParam{
+					Data:      p.ImageBase64,
+					MediaType: anthropicapi.Base64ImageSourceMediaType(p.MIMEType),
+				},
+			))
+		}
+	}
+	return blocks, nil
+}
+
+// toolResultContentToAnthropic converts Phero ContentParts to Anthropic ToolResultBlockParamContentUnion entries.
+//
+// Text parts become text blocks; image-URL parts become image blocks.
+// This allows tools to return images as part of their result.
+func toolResultContentToAnthropic(parts []llm.ContentPart) []anthropicapi.ToolResultBlockParamContentUnion {
+	content := make([]anthropicapi.ToolResultBlockParamContentUnion, 0, len(parts))
+	for _, p := range parts {
+		switch p.Type {
+		case llm.ContentTypeText:
+			text := p.Text
+			content = append(content, anthropicapi.ToolResultBlockParamContentUnion{
+				OfText: &anthropicapi.TextBlockParam{Text: text},
+			})
+		case llm.ContentTypeImageURL:
+			imgBlock := anthropicapi.ImageBlockParam{
+				Source: anthropicapi.ImageBlockParamSourceUnion{
+					OfURL: &anthropicapi.URLImageSourceParam{URL: p.ImageURL},
+				},
+			}
+			content = append(content, anthropicapi.ToolResultBlockParamContentUnion{
+				OfImage: &imgBlock,
+			})
+		case llm.ContentTypeImageBase64:
+			imgBlock := anthropicapi.ImageBlockParam{
+				Source: anthropicapi.ImageBlockParamSourceUnion{
+					OfBase64: &anthropicapi.Base64ImageSourceParam{
+						Data:      p.ImageBase64,
+						MediaType: anthropicapi.Base64ImageSourceMediaType(p.MIMEType),
+					},
+				},
+			}
+			content = append(content, anthropicapi.ToolResultBlockParamContentUnion{
+				OfImage: &imgBlock,
+			})
+		}
+	}
+	return content
+}
+
+// messageFromAnthropic converts an Anthropic API response to a Phero Message.
+func messageFromAnthropic(m *anthropicapi.Message) (*llm.Message, error) {
 	if m == nil {
 		return nil, &NilResponseError{}
 	}
 
-	var textParts []string
+	parts := make([]llm.ContentPart, 0)
 	toolCalls := make([]llm.ToolCall, 0)
 
 	for _, b := range m.Content {
 		switch b.Type {
 		case "text":
 			if strings.TrimSpace(b.Text) != "" {
-				textParts = append(textParts, b.Text)
+				parts = append(parts, llm.Text(b.Text))
 			}
 		case "tool_use":
-			// b.Input is raw JSON.
 			args := strings.TrimSpace(string(b.Input))
 			if args == "" {
 				args = "{}"
@@ -218,39 +292,22 @@ func anthropicMessageToOpenAI(m *anthropicapi.Message) (*llm.Message, error) {
 			toolCalls = append(toolCalls, llm.ToolCall{
 				ID:   b.ID,
 				Type: llm.ToolTypeFunction,
-				Function: openaiapi.FunctionCall{
+				Function: llm.FunctionCall{
 					Name:      b.Name,
 					Arguments: args,
 				},
 			})
 		default:
-			// Ignore non-text blocks (thinking, etc) for now.
+			// Ignore non-text blocks (thinking, etc.) for now.
 		}
 	}
 
-	content := strings.TrimSpace(strings.Join(textParts, "\n"))
-	return &llm.Message{
-		Role:      llm.ChatMessageRoleAssistant,
-		Content:   content,
+	msg := &llm.Message{
+		Role:      llm.RoleAssistant,
+		Parts:     parts,
 		ToolCalls: toolCalls,
-	}, nil
-}
-
-func openAIMessageText(m llm.Message) string {
-	if strings.TrimSpace(m.Content) != "" {
-		return m.Content
 	}
-	if len(m.MultiContent) == 0 {
-		return ""
-	}
-
-	parts := make([]string, 0, len(m.MultiContent))
-	for _, p := range m.MultiContent {
-		if strings.TrimSpace(p.Text) != "" {
-			parts = append(parts, p.Text)
-		}
-	}
-	return strings.Join(parts, "\n")
+	return msg, nil
 }
 
 func anthropicTools(tools []*llm.Tool) ([]anthropicapi.ToolUnionParam, error) {
@@ -334,5 +391,11 @@ func WithMaxTokens(maxTokens int64) Option {
 		if maxTokens > 0 {
 			c.maxTokens = maxTokens
 		}
+	}
+}
+
+func WithTemperature(temp float32) Option {
+	return func(c *Client) {
+		c.temperature = temp
 	}
 }

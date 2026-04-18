@@ -20,8 +20,6 @@ import (
 	"testing"
 	"time"
 
-	openaiapi "github.com/sashabaranov/go-openai"
-
 	"github.com/henomis/phero/agent"
 	"github.com/henomis/phero/llm"
 	"github.com/henomis/phero/trace"
@@ -72,8 +70,8 @@ func makeStub(pairs ...any) *stubLLM {
 func textResult(content string) *llm.Result {
 	return &llm.Result{
 		Message: &llm.Message{
-			Role:    llm.ChatMessageRoleAssistant,
-			Content: content,
+			Role:  llm.RoleAssistant,
+			Parts: []llm.ContentPart{llm.Text(content)},
 		},
 		Usage: &llm.Usage{InputTokens: 10, OutputTokens: 5},
 	}
@@ -83,12 +81,12 @@ func textResult(content string) *llm.Result {
 func toolCallResult(toolName, callID, arguments string) *llm.Result {
 	return &llm.Result{
 		Message: &llm.Message{
-			Role: llm.ChatMessageRoleAssistant,
+			Role: llm.RoleAssistant,
 			ToolCalls: []llm.ToolCall{
 				{
 					ID:   callID,
 					Type: llm.ToolTypeFunction,
-					Function: openaiapi.FunctionCall{
+					Function: llm.FunctionCall{
 						Name:      toolName,
 						Arguments: arguments,
 					},
@@ -256,12 +254,12 @@ func TestRun_Simple(t *testing.T) {
 	stub := makeStub(textResult("Hello, world!"), nil)
 	a := mustNew(t, stub, "agent", "a helpful agent")
 
-	result, err := a.Run(context.Background(), "hi")
+	result, err := a.Run(context.Background(), llm.Text("hi"))
 	if err != nil {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
-	if result.Content != "Hello, world!" {
-		t.Fatalf("expected %q, got %q", "Hello, world!", result.Content)
+	if result.TextContent() != "Hello, world!" {
+		t.Fatalf("expected %q, got %q", "Hello, world!", result.TextContent())
 	}
 	if result.HandoffAgent != nil {
 		t.Fatalf("expected no handoff agent, got %v", result.HandoffAgent)
@@ -272,7 +270,7 @@ func TestRun_LLMError(t *testing.T) {
 	stub := makeStub(nil, errors.New("model unavailable"))
 	a := mustNew(t, stub, "agent", "a helpful agent")
 
-	_, err := a.Run(context.Background(), "hi")
+	_, err := a.Run(context.Background(), llm.Text("hi"))
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -290,7 +288,7 @@ func TestRun_MaxIterations(t *testing.T) {
 	a := mustNew(t, stub, "agent", "desc")
 	a.SetMaxIterations(2)
 
-	_, err := a.Run(context.Background(), "go")
+	_, err := a.Run(context.Background(), llm.Text("go"))
 	if !errors.Is(err, agent.ErrMaxIterationsReached) {
 		t.Fatalf("expected ErrMaxIterationsReached, got %v", err)
 	}
@@ -318,15 +316,15 @@ func TestRun_ToolCall_Success(t *testing.T) {
 		t.Fatalf("AddTool: %v", err)
 	}
 
-	result, err := a.Run(context.Background(), "do it")
+	result, err := a.Run(context.Background(), llm.Text("do it"))
 	if err != nil {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
 	if !toolInvoked {
 		t.Fatal("expected tool to be invoked")
 	}
-	if result.Content != "done" {
-		t.Fatalf("expected %q, got %q", "done", result.Content)
+	if result.TextContent() != "done" {
+		t.Fatalf("expected %q, got %q", "done", result.TextContent())
 	}
 }
 
@@ -350,19 +348,19 @@ func TestRun_ToolCall_ToolErrors_AgentContinues(t *testing.T) {
 		t.Fatalf("AddTool: %v", err)
 	}
 
-	result, err := a.Run(context.Background(), "break it")
+	result, err := a.Run(context.Background(), llm.Text("break it"))
 	if err != nil {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
-	if result.Content != "recovered" {
-		t.Fatalf("expected %q, got %q", "recovered", result.Content)
+	if result.TextContent() != "recovered" {
+		t.Fatalf("expected %q, got %q", "recovered", result.TextContent())
 	}
 }
 
 func TestRun_Memory_ReadAndWrite(t *testing.T) {
 	prevMessages := []llm.Message{
-		{Role: llm.ChatMessageRoleUser, Content: "old message"},
-		{Role: llm.ChatMessageRoleAssistant, Content: "old reply"},
+		llm.UserMessage(llm.Text("old message")),
+		llm.AssistantMessage([]llm.ContentPart{llm.Text("old reply")}),
 	}
 	mem := &stubMemory{retrieved: prevMessages}
 
@@ -370,7 +368,7 @@ func TestRun_Memory_ReadAndWrite(t *testing.T) {
 	a := mustNew(t, stub, "agent", "desc")
 	a.SetMemory(mem)
 
-	_, err := a.Run(context.Background(), "new message")
+	_, err := a.Run(context.Background(), llm.Text("new message"))
 	if err != nil {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
@@ -388,7 +386,7 @@ func TestRun_Memory_RetrieveError(t *testing.T) {
 	a := mustNew(t, stub, "agent", "desc")
 	a.SetMemory(mem)
 
-	_, err := a.Run(context.Background(), "hi")
+	_, err := a.Run(context.Background(), llm.Text("hi"))
 	if err == nil {
 		t.Fatal("expected error from memory.Retrieve, got nil")
 	}
@@ -401,13 +399,13 @@ func TestRun_Memory_SaveError_ResultStillReturned(t *testing.T) {
 	a := mustNew(t, stub, "agent", "desc")
 	a.SetMemory(mem)
 
-	result, err := a.Run(context.Background(), "hi")
+	result, err := a.Run(context.Background(), llm.Text("hi"))
 	// Run must return both the result and the joined save error.
 	if result == nil {
 		t.Fatal("expected result even when save fails")
 	}
-	if result.Content != "answer" {
-		t.Fatalf("expected %q, got %q", "answer", result.Content)
+	if result.TextContent() != "answer" {
+		t.Fatalf("expected %q, got %q", "answer", result.TextContent())
 	}
 	if err == nil {
 		t.Fatal("expected save error to be surfaced")
@@ -433,7 +431,7 @@ func TestRun_Handoff(t *testing.T) {
 		t.Fatalf("AddHandoff: %v", err)
 	}
 
-	result, err := orchestrator.Run(context.Background(), "delegate")
+	result, err := orchestrator.Run(context.Background(), llm.Text("delegate"))
 	if err != nil {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
@@ -448,8 +446,8 @@ func TestRun_Handoff(t *testing.T) {
 func TestRun_PopulatesRunSummary(t *testing.T) {
 	mem := &stubMemory{
 		retrieved: []llm.Message{
-			{Role: llm.ChatMessageRoleUser, Content: "previous question"},
-			{Role: llm.ChatMessageRoleAssistant, Content: "previous answer"},
+			llm.UserMessage(llm.Text("previous question")),
+			llm.AssistantMessage([]llm.ContentPart{llm.Text("previous answer")}),
 		},
 		retrieveDur: time.Millisecond,
 		saveDur:     time.Millisecond,
@@ -474,7 +472,7 @@ func TestRun_PopulatesRunSummary(t *testing.T) {
 		t.Fatalf("AddTool: %v", err)
 	}
 
-	result, err := a.Run(context.Background(), "do it")
+	result, err := a.Run(context.Background(), llm.Text("do it"))
 	if err != nil {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
@@ -530,6 +528,7 @@ func TestRun_PopulatesRunSummary(t *testing.T) {
 	}
 	if eventSummary == nil {
 		t.Fatal("expected AgentRunSummaryEvent to be emitted")
+		return
 	}
 	if eventSummary.ToolCalls != summary.ToolCalls {
 		t.Fatalf("event summary tool calls = %d, want %d", eventSummary.ToolCalls, summary.ToolCalls)
@@ -540,11 +539,11 @@ func TestRun_EmptyInput(t *testing.T) {
 	stub := makeStub(textResult("what can I help with?"), nil)
 	a := mustNew(t, stub, "agent", "desc")
 
-	result, err := a.Run(context.Background(), "")
+	result, err := a.Run(context.Background())
 	if err != nil {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
-	if result.Content == "" {
+	if result.TextContent() == "" {
 		t.Fatal("expected non-empty result")
 	}
 }

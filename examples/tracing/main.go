@@ -87,13 +87,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	result, err := a.Run(context.Background(), "What is (123 * 456) + (789 / 3)?")
+	result, err := a.Run(context.Background(), llm.Text("What is (123 * 456) + (789 / 3)?"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Run: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("\nResult: %s\n", result.Content)
+	fmt.Printf("\nResult: %s\n", result.TextContent())
 	printRunSummary(result.Summary)
 }
 

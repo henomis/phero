@@ -78,11 +78,8 @@ func ClampSummarySize(summarizeThreshold, summarySize uint) uint {
 func FormatSummaryPrompt(conversation []llm.Message) llm.Message {
 	var formatted string
 	for _, msg := range conversation {
-		formatted += "## " + msg.Role + "\n" + msg.Content + "\n\n"
+		formatted += "## " + msg.Role + "\n" + msg.TextContent() + "\n\n"
 	}
 
-	return llm.Message{
-		Role:    llm.ChatMessageRoleUser,
-		Content: fmt.Sprintf(summaryPrompt, formatted),
-	}
+	return llm.UserMessage(llm.Text(fmt.Sprintf(summaryPrompt, formatted)))
 }

@@ -20,8 +20,6 @@ import (
 	"strings"
 	"testing"
 
-	openai "github.com/sashabaranov/go-openai"
-
 	"github.com/henomis/phero/llm"
 )
 
@@ -45,8 +43,8 @@ func TestSkillAsToolRegistersOnlyAllowedDefaultTools(t *testing.T) {
 			}
 
 			return &llm.Result{Message: &llm.Message{
-				Role:    llm.ChatMessageRoleAssistant,
-				Content: "ok",
+				Role:  llm.RoleAssistant,
+				Parts: []llm.ContentPart{llm.Text("ok")},
 			}}, nil
 		},
 	}
@@ -75,19 +73,19 @@ func TestSkillAsToolRegistersOnlyAllowedDefaultTools(t *testing.T) {
 func TestSkillAsToolRejectsNullCreateFileArguments(t *testing.T) {
 	client := stubLLM{
 		execute: func(_ context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
-			if len(messages) >= 2 && messages[len(messages)-1].Role == llm.ChatMessageRoleTool {
+			if len(messages) >= 2 && messages[len(messages)-1].Role == llm.RoleTool {
 				return &llm.Result{Message: &llm.Message{
-					Role:    llm.ChatMessageRoleAssistant,
-					Content: messages[len(messages)-1].Content,
+					Role:  llm.RoleAssistant,
+					Parts: []llm.ContentPart{llm.Text(messages[len(messages)-1].TextContent())},
 				}}, nil
 			}
 
 			return &llm.Result{Message: &llm.Message{
-				Role: llm.ChatMessageRoleAssistant,
-				ToolCalls: []openai.ToolCall{{
+				Role: llm.RoleAssistant,
+				ToolCalls: []llm.ToolCall{{
 					ID:   "call_1",
-					Type: openai.ToolTypeFunction,
-					Function: openai.FunctionCall{
+					Type: llm.ToolTypeFunction,
+					Function: llm.FunctionCall{
 						Name:      toolNameCreateFile,
 						Arguments: `null`,
 					},

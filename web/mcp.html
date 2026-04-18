@@ -83,8 +83,8 @@
       _ = a.AddTool(tool)
     }
 
-    res, _ := a.Run(ctx, "Give me a random quote.")
-    fmt.Println(res)</code></pre>
+    res, _ := a.Run(ctx, llm.Text("Give me a random quote."))
+    fmt.Println(res.TextContent())</code></pre>
     </section>
 
     <section>
@@ -134,8 +134,8 @@ for _, tool := range tools {
     _ = a.AddTool(tool)
 }
 
-res, _ := a.Run(ctx, "Give me a random quote.")
-fmt.Println(res)</code></pre>
+res, _ := a.Run(ctx, llm.Text("Give me a random quote."))
+fmt.Println(res.TextContent())</code></pre>
 
       <h3>Server side (define and run a tool)</h3>
       <pre><code class="language-go">server := mcp.NewServer(&mcp.Implementation{Name: "random_quote", Version: "v1.0.0"}, nil)

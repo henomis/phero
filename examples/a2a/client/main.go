@@ -70,12 +70,12 @@ func main() {
 
 	fmt.Printf("LLM: %s\n", llmInfo)
 
-	result, err := orchestrator.Run(ctx, "Please greet Alice via the remote greeter agent.")
+	result, err := orchestrator.Run(ctx, llm.Text("Please greet Alice via the remote greeter agent."))
 	if err != nil {
 		log.Fatalf("run: %v", err)
 	}
 
-	fmt.Println(result.Content)
+	fmt.Println(result.TextContent())
 }
 
 func buildLLMFromEnv() (llm.LLM, string) {

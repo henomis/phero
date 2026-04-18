@@ -106,8 +106,8 @@ Rules:
 a, _ := agent.New(llmClient, "RAG Chatbot", sysPrompt)
 _ = a.AddTool(ragTool)
 
-out, _ := a.Run(ctx, "Question: What does this document say about X?")
-fmt.Println(out)</code></pre>
+out, _ := a.Run(ctx, llm.Text("Question: What does this document say about X?"))
+fmt.Println(out.TextContent())</code></pre>
 
       <p>
         The important bit is the prompt contract: the agent is instructed to call the retrieval tool first whenever the
@@ -131,8 +131,8 @@ a, _ := agent.New(llmClient, "Long-Term Memory Assistant", sysPrompt)
 
 a.SetMemory(conversationMemory)
 
-out, _ := a.Run(ctx, "Remember that my favorite color is blue.")
-fmt.Println(out)</code></pre>
+out, _ := a.Run(ctx, llm.Text("Remember that my favorite color is blue."))
+fmt.Println(out.TextContent())</code></pre>
     </section>
 
     <section>
