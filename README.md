@@ -106,7 +106,7 @@ Phero is organized into focused packages, each solving a specific problem:
 - **`trace`** Typed observability events; `trace/text` for human-readable colorized output; `trace/jsonfile` for NDJSON file logging; `trace.NewLLM` for raw LLM call wrapping
 - **`tool/file`** Filesystem tools (`read`, `write`, `edit`, `glob`, `grep`)
 - **`tool/bash`** Bash command execution with blocklist, allowlist, timeout, and safe-mode guardrails
-- **`tool/human`** Human-in-the-loop input collection
+- **`tool/human`** Structured user-interaction checkpoints with validated questions/options
 
 
 

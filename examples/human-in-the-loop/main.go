@@ -15,10 +15,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +40,18 @@ type ActionInput struct {
 // ActionOutput is the result returned by the simulate_action tool.
 type ActionOutput struct {
 	Status string `json:"status" jsonschema:"description=Outcome of the action: 'applied' or 'skipped'."`
+}
+
+type consoleInteractor struct {
+	reader *bufio.Reader
+	writer io.Writer
+}
+
+func newConsoleInteractor(reader io.Reader, writer io.Writer) *consoleInteractor {
+	return &consoleInteractor{
+		reader: bufio.NewReader(reader),
+		writer: writer,
+	}
 }
 
 func main() {
@@ -108,7 +123,9 @@ func buildLLMFromEnv() (llm.LLM, string) {
 }
 
 func buildAgent(llmClient llm.LLM) (*agent.Agent, error) {
-	humanTool, err := human.New()
+	interactor := newConsoleInteractor(os.Stdin, os.Stdout)
+
+	humanTool, err := human.New(human.WithInteractor(interactor.Ask))
 	if err != nil {
 		return nil, err
 	}
@@ -125,21 +142,26 @@ func buildAgent(llmClient llm.LLM) (*agent.Agent, error) {
 	a, err := agent.New(llmClient, "DevOps Assistant", strings.TrimSpace(`You are a DevOps assistant helping a developer set up a new project.
 
 You have two tools:
-- ask_human: use this to propose an action and ask for the developer's approval BEFORE doing anything.
-- simulate_action: use this ONLY after the human has explicitly approved the action.
+- user_interaction: use this to ask structured user questions before taking any consequential action.
+- simulate_action: use this only after explicit user approval.
 
-Workflow for every action you intend to take:
-1. Call ask_human describing the action you plan to take and why.
-2. Read the human's response carefully.
-   - If they approve (e.g. "yes", "ok", "proceed", "accept"): call simulate_action.
-   - If they decline (e.g. "no", "skip", "skip it"): skip this action and move on.
-   - If they ask for a modification: adjust the action accordingly, then ask again before simulating.
-   - If they say "stop" or "abort": stop all remaining actions and summarise what was completed.
-3. Continue to the next action.
+For each action you plan to execute, call user_interaction with exactly one question:
+- header: "Approval"
+- question: describe the action and end with a question mark.
+- multiSelect: false
+- options:
+	1) label "Approve" description "Proceed with the proposed action"
+	2) label "Skip" description "Skip this action"
+	3) label "Modify" description "User wants a modified version first"
+	4) label "Stop" description "Stop the remaining plan"
 
-At the end, summarise which actions were applied and which were skipped.
+Interpret the tool output from answers["Approval"]:
+- selection "Approve": call simulate_action.
+- selection "Skip": skip this action.
+- selection "Modify": revise action using the optional free-text field and ask again.
+- selection "Stop": stop all remaining actions and summarize.
 
-Never simulate an action without explicit human approval.`))
+Never call simulate_action without an explicit "Approve" selection.`))
 	if err != nil {
 		return nil, err
 	}
@@ -165,4 +187,105 @@ func simulateAction(_ context.Context, in *ActionInput) (*ActionOutput, error) {
 	fmt.Printf("[action applied] %s - %s\n", in.Action, in.Description)
 
 	return &ActionOutput{Status: "applied"}, nil
+}
+
+// Ask presents structured questions and returns selected option labels.
+func (c *consoleInteractor) Ask(ctx context.Context, in *human.Input) (map[string]human.Answer, error) {
+	_ = ctx
+
+	answers := make(map[string]human.Answer, len(in.Questions))
+
+	for _, question := range in.Questions {
+		if _, err := fmt.Fprintf(c.writer, "\n[%s] %s\n", question.Header, question.Question); err != nil {
+			return nil, err
+		}
+		for idx, option := range question.Options {
+			if _, err := fmt.Fprintf(c.writer, "  %d) %s - %s\n", idx+1, option.Label, option.Description); err != nil {
+				return nil, err
+			}
+		}
+
+		if question.MultiSelect {
+			if _, err := fmt.Fprint(c.writer, "Select one or more options (comma separated labels or numbers). Optional free text: other: <text>\n> "); err != nil {
+				return nil, err
+			}
+		} else {
+			if _, err := fmt.Fprint(c.writer, "Select one option (label or number). Optional free text: other: <text>\n> "); err != nil {
+				return nil, err
+			}
+		}
+
+		line, err := c.reader.ReadString('\n')
+		if err != nil {
+			return nil, err
+		}
+
+		answer, err := parseAnswer(strings.TrimSpace(line), question)
+		if err != nil {
+			return nil, err
+		}
+
+		answers[question.Header] = answer
+	}
+
+	return answers, nil
+}
+
+func parseAnswer(raw string, question human.Question) (human.Answer, error) {
+	result := human.Answer{}
+	if raw == "" {
+		return result, nil
+	}
+
+	parts := strings.Split(raw, ",")
+	seen := map[string]struct{}{}
+
+	for _, part := range parts {
+		choice := strings.TrimSpace(part)
+		if choice == "" {
+			continue
+		}
+
+		if strings.HasPrefix(strings.ToLower(choice), "other:") {
+			result.Other = strings.TrimSpace(choice[len("other:"):])
+			continue
+		}
+
+		label, err := resolveOptionLabel(choice, question.Options)
+		if err != nil {
+			return human.Answer{}, err
+		}
+
+		normalized := strings.ToLower(label)
+		if _, exists := seen[normalized]; exists {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		result.Selections = append(result.Selections, label)
+	}
+
+	if !question.MultiSelect && len(result.Selections) > 1 {
+		return human.Answer{}, fmt.Errorf("question %q allows only one selection", question.Header)
+	}
+
+	return result, nil
+}
+
+func resolveOptionLabel(choice string, options []human.Choice) (string, error) {
+	index, err := strconv.Atoi(choice)
+	if err == nil {
+		if index < 1 || index > len(options) {
+			return "", fmt.Errorf("invalid option index: %d", index)
+		}
+		return options[index-1].Label, nil
+	}
+
+	normalizedChoice := strings.ToLower(strings.TrimSpace(choice))
+	for _, option := range options {
+		if strings.ToLower(option.Label) == normalizedChoice {
+			return option.Label, nil
+		}
+	}
+
+	return "", fmt.Errorf("invalid option label: %q", choice)
 }
