@@ -36,9 +36,9 @@ const (
 	defaultSkillsRootPath = "skills"
 	skillFileName         = "SKILL.md"
 	yamlFrontmatterDelim  = "---"
-	toolNameView          = "view"
-	toolNameCreateFile    = "create_file"
-	toolNameStrReplace    = "str_replace"
+	toolNameRead          = "read"
+	toolNameWrite         = "write"
+	toolNameEdit          = "edit"
 	toolNameBash          = "bash"
 )
 
@@ -214,24 +214,24 @@ func (s *Skill) allowsTool(toolName string) bool {
 }
 
 func (s *Skill) addDefaultTools(agent *agent.Agent) error {
-	if s.allowsTool(toolNameView) {
-		viewTool, err := file.NewViewTool(file.WithWorkingDirectory(s.RootPath))
+	if s.allowsTool(toolNameRead) {
+		readTool, err := file.NewReadTool(file.WithWorkingDirectory(s.RootPath))
 		if err != nil {
 			return err
 		}
-		if err := agent.AddTool(viewTool.Tool()); err != nil {
+		if err := agent.AddTool(readTool.Tool()); err != nil {
 			return err
 		}
 	}
 
-	if s.allowsTool(toolNameCreateFile) {
-		createTool, err := file.NewCreateFileTool(file.WithWorkingDirectory(s.RootPath))
+	if s.allowsTool(toolNameWrite) {
+		writeTool, err := file.NewWriteTool(file.WithWorkingDirectory(s.RootPath))
 		if err != nil {
 			return err
 		}
-		createToolLLM := createTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
+		writeToolLLM := writeTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
 			return func(ctx context.Context, arguments string) (any, error) {
-				input, err := decodeToolInput[file.CreateFileInput](arguments)
+				input, err := decodeToolInput[file.WriteInput](arguments)
 				if err != nil {
 					return nil, err
 				}
@@ -241,17 +241,17 @@ func (s *Skill) addDefaultTools(agent *agent.Agent) error {
 				return next(ctx, arguments)
 			}
 		})
-		if err := agent.AddTool(createToolLLM); err != nil {
+		if err := agent.AddTool(writeToolLLM); err != nil {
 			return err
 		}
 	}
 
-	if s.allowsTool(toolNameStrReplace) {
-		strReplaceTool, err := file.NewStrReplaceTool(file.WithWorkingDirectory(s.RootPath))
+	if s.allowsTool(toolNameEdit) {
+		editTool, err := file.NewEditTool(file.WithWorkingDirectory(s.RootPath))
 		if err != nil {
 			return err
 		}
-		if err := agent.AddTool(strReplaceTool.Tool()); err != nil {
+		if err := agent.AddTool(editTool.Tool()); err != nil {
 			return err
 		}
 	}
@@ -293,8 +293,8 @@ func decodeToolInput[T any](arguments string) (*T, error) {
 	return input, nil
 }
 
-func createFileValidationFunc(_ context.Context, input *file.CreateFileInput) error {
-	fmt.Printf("Do you want to write to the file '%s'? (y/N): ", input.Path)
+func createFileValidationFunc(_ context.Context, input *file.WriteInput) error {
+	fmt.Printf("Do you want to write to the file '%s'? (y/N): ", input.FilePath)
 	var permission string
 	_, scanErr := fmt.Scanln(&permission)
 	if scanErr != nil {

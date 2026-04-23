@@ -104,7 +104,7 @@ Phero is organized into focused packages, each solving a specific problem:
 - **`mcp`** Model Context Protocol adapter for external tool integration
 - **`a2a`** Agent-to-Agent (A2A) protocol — expose agents as HTTP servers or call remote agents as tools
 - **`trace`** Typed observability events; `trace/text` for human-readable colorized output; `trace/jsonfile` for NDJSON file logging; `trace.NewLLM` for raw LLM call wrapping
-- **`tool/file`** File viewing and editing helpers (`view`, `create_file` with optional no-overwrite, `str_replace`)
+- **`tool/file`** Filesystem tools (`read`, `write`, `edit`, `glob`, `grep`)
 - **`tool/bash`** Bash command execution with blocklist, allowlist, timeout, and safe-mode guardrails
 - **`tool/human`** Human-in-the-loop input collection
 

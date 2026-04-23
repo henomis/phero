@@ -24,6 +24,15 @@ import (
 
 func resolveToolPath(workingDir, inputPath string) (string, error) {
 	path := filepath.Clean(inputPath)
+	if !filepath.IsAbs(path) {
+		return "", ErrPathMustBeAbsolute
+	}
+
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve path: %w", err)
+	}
+
 	if workingDir == "" {
 		return path, nil
 	}
@@ -35,14 +44,6 @@ func resolveToolPath(workingDir, inputPath string) (string, error) {
 	resolvedWorkingDir, err = filepath.EvalSymlinks(resolvedWorkingDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve working directory symlinks: %w", err)
-	}
-
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(resolvedWorkingDir, path)
-	}
-	path, err = filepath.Abs(filepath.Clean(path))
-	if err != nil {
-		return "", fmt.Errorf("resolve path: %w", err)
 	}
 
 	resolvedPath, err := resolvePathWithSymlinks(path)

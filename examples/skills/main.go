@@ -70,13 +70,13 @@ func main() {
 		panic(err)
 	}
 
-	createFileTool, err := file.NewCreateFileTool()
+	writeTool, err := file.NewWriteTool()
 	if err != nil {
 		panic(err)
 	}
-	tools = append(tools, createFileTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
+	tools = append(tools, writeTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
 		return func(ctx context.Context, arguments string) (any, error) {
-			var input *file.CreateFileInput
+			var input *file.WriteInput
 			if err := json.Unmarshal([]byte(arguments), &input); err != nil {
 				return nil, &llm.ToolArgumentParseError{Err: err}
 			}
@@ -143,8 +143,8 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	return client, info
 }
 
-func writeValidationFunc(_ context.Context, input *file.CreateFileInput) error {
-	fmt.Printf("Do you want to write to the file '%s'? (y/N): ", input.Path)
+func writeValidationFunc(_ context.Context, input *file.WriteInput) error {
+	fmt.Printf("Do you want to write to the file '%s'? (y/N): ", input.FilePath)
 	var permission string
 	_, scanErr := fmt.Scanln(&permission)
 	if scanErr != nil {

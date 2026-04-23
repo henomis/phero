@@ -54,7 +54,7 @@ func TestSkillAsToolRegistersOnlyAllowedDefaultTools(t *testing.T) {
 		Description:  "test skill",
 		Body:         "system instructions",
 		RootPath:     t.TempDir(),
-		AllowedTools: toolNameView + " " + toolNameStrReplace,
+		AllowedTools: toolNameRead + " " + toolNameEdit,
 	}).AsTool(client)
 	if err != nil {
 		t.Fatalf("AsTool() error = %v", err)
@@ -65,12 +65,12 @@ func TestSkillAsToolRegistersOnlyAllowedDefaultTools(t *testing.T) {
 	}
 
 	got := strings.Join(capturedToolNames, ",")
-	if got != toolNameView+","+toolNameStrReplace {
-		t.Fatalf("registered tools = %q, want %q", got, toolNameView+","+toolNameStrReplace)
+	if got != toolNameRead+","+toolNameEdit {
+		t.Fatalf("registered tools = %q, want %q", got, toolNameRead+","+toolNameEdit)
 	}
 }
 
-func TestSkillAsToolRejectsNullCreateFileArguments(t *testing.T) {
+func TestSkillAsToolRejectsNullWriteArguments(t *testing.T) {
 	client := stubLLM{
 		execute: func(_ context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
 			if len(messages) >= 2 && messages[len(messages)-1].Role == llm.RoleTool {
@@ -86,7 +86,7 @@ func TestSkillAsToolRejectsNullCreateFileArguments(t *testing.T) {
 					ID:   "call_1",
 					Type: llm.ToolTypeFunction,
 					Function: llm.FunctionCall{
-						Name:      toolNameCreateFile,
+						Name:      toolNameWrite,
 						Arguments: `null`,
 					},
 				}},
@@ -99,7 +99,7 @@ func TestSkillAsToolRejectsNullCreateFileArguments(t *testing.T) {
 		Description:  "test skill",
 		Body:         "system instructions",
 		RootPath:     t.TempDir(),
-		AllowedTools: toolNameCreateFile,
+		AllowedTools: toolNameWrite,
 	}).AsTool(client)
 	if err != nil {
 		t.Fatalf("AsTool() error = %v", err)
@@ -118,7 +118,7 @@ func TestSkillAsToolRejectsNullCreateFileArguments(t *testing.T) {
 	if !strings.Contains(string(resultJSON), "tool arguments must be a JSON object") {
 		t.Fatalf("result = %s, want parse error for null tool arguments", string(resultJSON))
 	}
-	if !strings.Contains(string(resultJSON), toolNameCreateFile) {
+	if !strings.Contains(string(resultJSON), toolNameWrite) {
 		t.Fatalf("result = %s, want tool name in tool execution error", string(resultJSON))
 	}
 }

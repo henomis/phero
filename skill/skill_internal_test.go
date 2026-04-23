@@ -24,10 +24,10 @@ func TestSkillAllowsTool(t *testing.T) {
 		want         bool
 	}{
 		{name: "empty allowlist allows all", allowedTools: "", toolName: toolNameBash, want: true},
-		{name: "whitespace allowlist allows all", allowedTools: "   ", toolName: toolNameView, want: true},
-		{name: "explicitly allowed tool", allowedTools: toolNameView + " " + toolNameCreateFile, toolName: toolNameCreateFile, want: true},
-		{name: "explicitly denied tool", allowedTools: toolNameView + " " + toolNameCreateFile, toolName: toolNameBash, want: false},
-		{name: "newline separated allowlist", allowedTools: toolNameView + "\n" + toolNameStrReplace, toolName: toolNameStrReplace, want: true},
+		{name: "whitespace allowlist allows all", allowedTools: "   ", toolName: toolNameRead, want: true},
+		{name: "explicitly allowed tool", allowedTools: toolNameRead + " " + toolNameWrite, toolName: toolNameWrite, want: true},
+		{name: "explicitly denied tool", allowedTools: toolNameRead + " " + toolNameWrite, toolName: toolNameBash, want: false},
+		{name: "newline separated allowlist", allowedTools: toolNameRead + "\n" + toolNameEdit, toolName: toolNameEdit, want: true},
 	}
 
 	for _, tt := range tests {

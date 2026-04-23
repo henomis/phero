@@ -53,7 +53,7 @@
       </p>
 
       <ul>
-        <li><strong>File tools</strong> (<code>tool/file</code>): <code>view</code>, <code>create_file</code>, <code>str_replace</code></li>
+        <li><strong>Filesystem tools</strong> (<code>tool/file</code>): <code>read</code>, <code>write</code>, <code>edit</code>, <code>glob</code>, <code>grep</code></li>
         <li><strong>Bash tool</strong> (<code>tool/bash</code>): run bash commands with optional guardrails (blocklist, allowlist, timeout, safe mode)</li>
         <li><strong>Human tool</strong> (<code>tool/human</code>): ask the user for input/approval mid-run</li>
       </ul>
@@ -97,17 +97,17 @@ bashTool, err := bash.New(
     </section>
 
     <section>
-      <h2>File tool: prevent overwriting</h2>
+      <h2>Write Tool: Prevent Overwriting</h2>
       <p>
-        By default <code>CreateFileTool</code> silently overwrites existing files.
+        By default <code>WriteTool</code> overwrites existing files.
         Pass <code>WithNoOverwrite()</code> to return <code>ErrFileExists</code> instead.
       </p>
 
       <pre><code class="language-go">import "github.com/henomis/phero/tool/file"
 
-createTool, err := file.NewCreateFileTool(
-    file.WithWorkingDirectory("/workspace"),
-    file.WithNoOverwrite(),
+writeTool, err := fs.NewWriteTool(
+    fs.WithWorkingDirectory("/workspace"),
+    fs.WithNoOverwrite(),
 )
 if err != nil {
     panic(err)
@@ -122,14 +122,14 @@ if err != nil {
 
       <pre><code class="language-go">// From examples/skills (edited for brevity)
 
-createFileTool, err := file.NewCreateFileTool()
+writeTool, err := fs.NewWriteTool()
 if err != nil {
     panic(err)
 }
 
-tools = append(tools, createFileTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
+tools = append(tools, writeTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
     return func(ctx context.Context, arguments string) (any, error) {
-        var input *file.CreateFileInput
+    var input *fs.WriteInput
         if err := json.Unmarshal([]byte(arguments), &input); err != nil {
             return nil, &llm.ToolArgumentParseError{Err: err}
         }
@@ -148,8 +148,8 @@ for _, tool := range tools {
 
       <pre><code class="language-go">// From examples/skills (edited for brevity)
 
-func writeValidationFunc(_ context.Context, input *file.WriteInput) error {
-    fmt.Printf("Do you want to write to the file '%s'? (y/N): ", input.Path)
+func writeValidationFunc(_ context.Context, input *fs.WriteInput) error {
+  fmt.Printf("Do you want to write to the file '%s'? (y/N): ", input.FilePath)
     var permission string
     _, scanErr := fmt.Scanln(&permission)
     if scanErr != nil {
@@ -172,7 +172,7 @@ func writeValidationFunc(_ context.Context, input *file.WriteInput) error {
       <h2>Default tools inside skills</h2>
       <p>
         When you convert a <a href="skill.html">skill</a> into a tool, Phero automatically gives the skill-agent a small local toolbox rooted at the skill directory:
-        <code>view</code>, <code>create_file</code>, <code>str_replace</code>, and <code>bash</code>.
+        <code>read</code>, <code>write</code>, <code>edit</code>, and <code>bash</code>.
       </p>
       <p>
         That makes skill execution self-contained: the skill can inspect files, make targeted edits, or run commands without needing separate tool wiring in the caller.
