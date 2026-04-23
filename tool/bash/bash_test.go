@@ -16,6 +16,7 @@ package bash
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"strings"
 	"testing"
@@ -182,6 +183,106 @@ func TestBashTool_Timeout_KillsLongRunning(t *testing.T) {
 	_, err = tool.run(context.Background(), &Input{Command: "sleep 10"})
 	if err == nil {
 		t.Fatal("expected error from timeout, got nil")
+	}
+}
+
+func TestBashTool_PerCallTimeoutTooLarge(t *testing.T) {
+	tool, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	_, err = tool.run(context.Background(), &Input{Command: "echo hello", Timeout: 700000})
+	if err == nil {
+		t.Fatal("expected timeout limit error")
+	}
+	if !errors.Is(err, ErrTimeoutTooLarge) {
+		t.Fatalf("expected ErrTimeoutTooLarge, got: %v", err)
+	}
+}
+
+func TestBashTool_OutputTruncated(t *testing.T) {
+	requireBash(t)
+
+	tool, err := New(WithMaxOutputChars(10))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	out, err := tool.run(context.Background(), &Input{Command: "printf 'abcdefghijklmnopqrstuvwxyz'"})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out == nil {
+		t.Fatalf("expected output")
+	}
+	if len(out.Output) != 10 {
+		t.Fatalf("expected length 10, got %d", len(out.Output))
+	}
+	if !out.Truncated {
+		t.Fatal("expected truncated output")
+	}
+}
+
+func TestBashTool_RunInBackground_WithOutputTool(t *testing.T) {
+	requireBash(t)
+
+	tool, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	start, err := tool.run(context.Background(), &Input{
+		Command:         "printf 'one\n'; sleep 0.1; printf 'two\n'",
+		RunInBackground: true,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if start == nil || start.BashID == "" {
+		t.Fatal("expected bash_id for background command")
+	}
+
+	var got string
+	for i := 0; i < 20; i++ {
+		out, outputErr := tool.output(context.Background(), &BashOutputInput{BashID: start.BashID})
+		if outputErr != nil {
+			t.Fatalf("output: %v", outputErr)
+		}
+		got += out.Output
+		if !out.Running {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	if !strings.Contains(got, "one") || !strings.Contains(got, "two") {
+		t.Fatalf("unexpected background output: %q", got)
+	}
+}
+
+func TestBashTool_KillBackgroundShell(t *testing.T) {
+	requireBash(t)
+
+	tool, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	start, err := tool.run(context.Background(), &Input{
+		Command:         "sleep 5",
+		RunInBackground: true,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	res, err := tool.kill(context.Background(), &KillShellInput{ShellID: start.BashID})
+	if err != nil {
+		t.Fatalf("kill: %v", err)
+	}
+	if !res.Killed {
+		t.Fatal("expected shell to be killed")
 	}
 }
 
