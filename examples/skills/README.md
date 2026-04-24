@@ -3,7 +3,7 @@
 This example demonstrates how to:
 
 - discover and parse local `SKILL.md` definitions
-- turn each skill into a callable tool for an `agent.Agent`
+- expose a single dispatcher tool for skill execution
 - let the agent combine a skill output with a file-writing tool
 
 It includes one skill: `get-random-quote`, which fetches a quote from https://zenquotes.io by running a small Go script.
@@ -58,9 +58,8 @@ and a file named `quote.html` will be created in the current directory.
 
 ## What it does
 
-- Creates a skills parser rooted at `./skills`.
-- Lists skill directories (each contains a `SKILL.md`).
-- Parses each `SKILL.md` and converts it into a tool via `skill.AsTool(...)`.
+- Creates a skill dispatcher rooted at `./skills`.
+- Exposes one `skill` tool via `tool/skill` and lets the agent choose a skill by name at runtime.
 - Adds an explicit file write tool (with an interactive validation prompt).
 - Runs the agent with: "create a web page containing a random quote, and save the html to a file called quote.html".
 

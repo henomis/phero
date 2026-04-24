@@ -56,6 +56,7 @@
         <li><strong>Filesystem tools</strong> (<code>tool/file</code>): <code>read</code>, <code>write</code>, <code>edit</code>, <code>glob</code>, <code>grep</code></li>
         <li><strong>Bash tool</strong> (<code>tool/bash</code>): run bash commands with optional guardrails (blocklist, allowlist, timeout, safe mode)</li>
         <li><strong>Human tool</strong> (<code>tool/human</code>): ask the user for input/approval mid-run</li>
+        <li><strong>Skill dispatcher</strong> (<code>tool/skill</code>): load a named <code>SKILL.md</code> into the current conversation</li>
       </ul>
 
       <p>
@@ -169,13 +170,12 @@ func writeValidationFunc(_ context.Context, input *fs.WriteInput) error {
     </section>
 
     <section>
-      <h2>Default tools inside skills</h2>
+      <h2>Skills tool model</h2>
       <p>
-        When you convert a <a href="skill.html">skill</a> into a tool, Phero automatically gives the skill-agent a small local toolbox rooted at the skill directory:
-        <code>read</code>, <code>write</code>, <code>edit</code>, and <code>bash</code>.
+        Use <strong><code>tool/skill</code> dispatcher</strong> to expose a single <code>skill</code> tool that loads instructions and base path into the main conversation.
       </p>
       <p>
-        That makes skill execution self-contained: the skill can inspect files, make targeted edits, or run commands without needing separate tool wiring in the caller.
+        This keeps the agent toolset compact while still allowing it to select and apply the correct SKILL.md workflow at runtime.
       </p>
     </section>
 
