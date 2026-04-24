@@ -34,9 +34,6 @@ var ErrPathOutsideWorkingDirectory = errors.New("path is outside the working dir
 // ErrFileTooLarge is returned when a file exceeds the configured read size limit.
 var ErrFileTooLarge = errors.New("file too large")
 
-// ErrReadRequired is returned when a write/edit operation is attempted without a prior read in the session.
-var ErrReadRequired = errors.New("read is required before write/edit")
-
 // ErrFileExists is returned when write is configured to disallow overwriting existing files.
 var ErrFileExists = errors.New("file already exists")
 
@@ -64,19 +61,4 @@ func (e *FileTooLargeError) Error() string {
 // Is reports sentinel compatibility for errors.Is.
 func (e *FileTooLargeError) Is(target error) bool {
 	return target == ErrFileTooLarge
-}
-
-// ReadRequiredError includes the target path requiring prior read.
-type ReadRequiredError struct {
-	Path string
-}
-
-// Error returns the formatted read-required message.
-func (e *ReadRequiredError) Error() string {
-	return fmt.Sprintf("%s: %v", e.Path, ErrReadRequired)
-}
-
-// Is reports sentinel compatibility for errors.Is.
-func (e *ReadRequiredError) Is(target error) bool {
-	return target == ErrReadRequired
 }

@@ -30,8 +30,7 @@ func TestReadTool_ReadAndTrackSession(t *testing.T) {
 		t.Fatalf("write fixture: %v", err)
 	}
 
-	session := NewSession()
-	tool, err := NewReadTool(WithWorkingDirectory(tmp), WithSession(session))
+	tool, err := NewReadTool(WithWorkingDirectory(tmp))
 	if err != nil {
 		t.Fatalf("new read tool: %v", err)
 	}
@@ -43,9 +42,6 @@ func TestReadTool_ReadAndTrackSession(t *testing.T) {
 
 	if !strings.Contains(out.Content, "2\tb") {
 		t.Fatalf("unexpected read output: %q", out.Content)
-	}
-	if !session.HasRead(path) {
-		t.Fatalf("expected path to be tracked as read")
 	}
 }
 

@@ -41,7 +41,6 @@ type WriteTool struct {
 	tool        *llm.Tool
 	workingDir  string
 	noOverwrite bool
-	session     *Session
 }
 
 // NewWriteTool creates a new write tool.
@@ -51,7 +50,6 @@ func NewWriteTool(opts ...Option) (*WriteTool, error) {
 	w := &WriteTool{
 		workingDir:  o.workingDir,
 		noOverwrite: o.noOverwrite,
-		session:     o.session,
 	}
 
 	tool, err := llm.NewTool(
@@ -89,9 +87,6 @@ func (w *WriteTool) write(_ context.Context, input *WriteInput) (*WriteOutput, e
 	if info, statErr := os.Stat(resolvedPath); statErr == nil {
 		if w.noOverwrite {
 			return nil, ErrFileExists
-		}
-		if !w.session.HasRead(resolvedPath) {
-			return nil, &ReadRequiredError{Path: resolvedPath}
 		}
 		perm = info.Mode().Perm()
 	} else if !errors.Is(statErr, os.ErrNotExist) {

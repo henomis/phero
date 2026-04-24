@@ -46,7 +46,6 @@ type ReadTool struct {
 	tool        *llm.Tool
 	workingDir  string
 	maxFileSize int64
-	session     *Session
 }
 
 // NewReadTool creates a new read tool.
@@ -56,7 +55,6 @@ func NewReadTool(opts ...Option) (*ReadTool, error) {
 	r := &ReadTool{
 		workingDir:  o.workingDir,
 		maxFileSize: o.maxFileSize,
-		session:     o.session,
 	}
 
 	tool, err := llm.NewTool(
@@ -119,7 +117,6 @@ func (r *ReadTool) read(_ context.Context, input *ReadInput) (*ReadOutput, error
 	}
 
 	if offset >= len(lines) {
-		r.session.MarkRead(resolvedPath)
 		return &ReadOutput{Content: ""}, nil
 	}
 	end := offset + limit
@@ -133,7 +130,6 @@ func (r *ReadTool) read(_ context.Context, input *ReadInput) (*ReadOutput, error
 		fmt.Fprintf(&b, "%6d\t%s\n", i+1, line)
 	}
 
-	r.session.MarkRead(resolvedPath)
 	return &ReadOutput{Content: strings.TrimRight(b.String(), "\n")}, nil
 }
 

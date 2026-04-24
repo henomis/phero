@@ -14,13 +14,10 @@
 
 package file
 
-import "sync"
-
 type toolOptions struct {
 	workingDir  string
 	maxFileSize int64
 	noOverwrite bool
-	session     *Session
 }
 
 // Option configures fs tools.
@@ -48,52 +45,10 @@ func WithNoOverwrite() Option {
 	}
 }
 
-// WithSession sets a shared read-tracking session across fs tools.
-func WithSession(session *Session) Option {
-	return func(o *toolOptions) {
-		o.session = session
-	}
-}
-
-// Session tracks which files have been read in the current tool session.
-type Session struct {
-	mu    sync.RWMutex
-	paths map[string]struct{}
-}
-
-// NewSession creates a new empty read-tracking session.
-func NewSession() *Session {
-	return &Session{paths: make(map[string]struct{})}
-}
-
-// MarkRead marks a resolved absolute path as read.
-func (s *Session) MarkRead(path string) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.paths[path] = struct{}{}
-}
-
-// HasRead reports whether a resolved absolute path has been read.
-func (s *Session) HasRead(path string) bool {
-	if s == nil {
-		return false
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	_, ok := s.paths[path]
-	return ok
-}
-
 func applyOptions(opts ...Option) *toolOptions {
 	o := &toolOptions{}
 	for _, opt := range opts {
 		opt(o)
-	}
-	if o.session == nil {
-		o.session = NewSession()
 	}
 	return o
 }

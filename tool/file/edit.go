@@ -41,14 +41,13 @@ type EditOutput struct {
 type EditTool struct {
 	tool       *llm.Tool
 	workingDir string
-	session    *Session
 }
 
 // NewEditTool creates a new edit tool.
 func NewEditTool(opts ...Option) (*EditTool, error) {
 	o := applyOptions(opts...)
 
-	e := &EditTool{workingDir: o.workingDir, session: o.session}
+	e := &EditTool{workingDir: o.workingDir}
 
 	tool, err := llm.NewTool(
 		"edit",
@@ -85,9 +84,6 @@ func (e *EditTool) edit(_ context.Context, input *EditInput) (*EditOutput, error
 	resolvedPath, err := resolveToolPath(e.workingDir, input.FilePath)
 	if err != nil {
 		return nil, err
-	}
-	if !e.session.HasRead(resolvedPath) {
-		return nil, &ReadRequiredError{Path: resolvedPath}
 	}
 
 	info, err := os.Stat(resolvedPath)

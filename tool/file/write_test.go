@@ -16,50 +16,15 @@ package file
 
 import (
 	"context"
-	"errors"
-	"os"
 	"path/filepath"
 	"testing"
 )
-
-func TestWriteTool_RequiresReadForExistingFile(t *testing.T) {
-	tmp := t.TempDir()
-	path := filepath.Join(tmp, "existing.txt")
-	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
-		t.Fatalf("write fixture: %v", err)
-	}
-
-	session := NewSession()
-	tool, err := NewWriteTool(WithWorkingDirectory(tmp), WithSession(session))
-	if err != nil {
-		t.Fatalf("new write tool: %v", err)
-	}
-
-	_, err = tool.write(context.Background(), &WriteInput{FilePath: path, Content: "new"})
-	if !errors.Is(err, ErrReadRequired) {
-		t.Fatalf("expected ErrReadRequired, got %v", err)
-	}
-
-	session.MarkRead(path)
-	_, err = tool.write(context.Background(), &WriteInput{FilePath: path, Content: "new"})
-	if err != nil {
-		t.Fatalf("write with prior read failed: %v", err)
-	}
-
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read written file: %v", err)
-	}
-	if string(b) != "new" {
-		t.Fatalf("unexpected file content: %q", string(b))
-	}
-}
 
 func TestWriteTool_NewFileDoesNotRequireRead(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "new.txt")
 
-	tool, err := NewWriteTool(WithWorkingDirectory(tmp), WithSession(NewSession()))
+	tool, err := NewWriteTool(WithWorkingDirectory(tmp))
 	if err != nil {
 		t.Fatalf("new write tool: %v", err)
 	}
