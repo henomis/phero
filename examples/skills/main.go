@@ -121,7 +121,7 @@ func confirmBeforeRun(r *os.File, w *os.File) llm.ToolMiddleware {
 	scanner := bufio.NewScanner(r)
 	return func(tool *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
 		return func(ctx context.Context, arguments string) (any, error) {
-			fmt.Fprintf(w, "\n[confirm] tool=%s args=%s\nProceed? [y/N] ", tool.Name(), arguments)
+			_, _ = fmt.Fprintf(w, "\n[confirm] tool=%s args=%s\nProceed? [y/N] ", tool.Name(), arguments)
 			if !scanner.Scan() {
 				return nil, ErrConfirmationDenied
 			}

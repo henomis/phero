@@ -17,7 +17,6 @@ package skill
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -119,8 +118,6 @@ func New(skillsRootPath string, opts ...Option) (*Tool, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	os.WriteFile("/tmp/desc", []byte(description), 0o666)
 
 	t.tool = tool
 	return t, nil

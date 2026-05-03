@@ -21,8 +21,6 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v2"
-
-	"github.com/henomis/phero/memory"
 )
 
 const (
@@ -53,9 +51,6 @@ type Skill struct {
 	Metadata      map[string]any `yaml:"metadata,omitempty"`
 	AllowedTools  string         `yaml:"allowed-tools,omitempty"`
 	Body          string         `yaml:"-"`
-
-	memory        memory.Memory `yaml:"-"`
-	maxIterations int           `yaml:"-"`
 }
 
 // New returns a Parser rooted at skillsRootPath.
