@@ -1,0 +1,210 @@
+package llm
+
+import (
+	"context"
+	"encoding/json"
+	"reflect"
+
+	"github.com/invopop/jsonschema"
+)
+
+// ToolHandler is the low-level handler signature used by FunctionTool.
+//
+// arguments is the raw JSON string received from the model.
+type ToolHandler func(ctx context.Context, arguments string) (any, error)
+
+// ToolMiddleware wraps a tool handler.
+//
+// Middlewares can be used to add cross-cutting behavior (e.g. input validation,
+// permission checks, logging) without baking that logic into each tool implementation.
+//
+// Middleware order is preserved: if you call tool.Use(m1, m2), m1 runs before m2.
+type ToolMiddleware func(tool *Tool, next ToolHandler) ToolHandler
+
+// Tool is a Tool that wraps a function.
+type Tool struct {
+	// The name of the tool, as shown to the LLM. Generally the name of the function.
+	name string
+
+	// A description of the tool, as shown to the LLM.
+	description string
+
+	// The JSON schema for the tool's parameters.
+	inputSchema map[string]any
+
+	// Handle calls the underlying function with the given arguments.
+	handle ToolHandler
+
+	// middlewares wraps the tool handler to provide cross-cutting behavior
+	// (e.g., input validation, permission checks, logging).
+	middlewares []ToolMiddleware
+}
+
+// Name returns the stable name used to identify this tool to the LLM.
+func (t *Tool) Name() string {
+	return t.name
+}
+
+// Description returns the description of the tool, as shown to the LLM.
+func (t *Tool) Description() string {
+	return t.description
+}
+
+// InputSchema returns the JSON schema for the tool's parameters, as shown to the LLM.
+func (t *Tool) InputSchema() map[string]any {
+	return t.inputSchema
+}
+
+// Handle calls the underlying function with the given arguments.
+func (t *Tool) Handle(ctx context.Context, arguments string) (any, error) {
+	h := t.handle
+	for i := len(t.middlewares) - 1; i >= 0; i-- {
+		h = t.middlewares[i](t, h)
+	}
+	return h(ctx, arguments)
+}
+
+// Use appends middleware(s) to this tool.
+//
+// Middlewares are executed in the order they are added.
+func (t *Tool) Use(middlewares ...ToolMiddleware) *Tool {
+	t.middlewares = append(t.middlewares, middlewares...)
+	return t
+}
+
+// NewTool creates a new Tool with the given name, description, and handler function.
+//
+// The handler function must be of the form func(context.Context, T) (R, error) where T and R can be any types.
+// The input type T is used to generate a JSON schema for the tool's parameters, which is passed to the LLM.
+// When the tool is called, the LLM will provide the arguments as a JSON string, which will be unmarshaled into T and passed to the handler.
+// The handler's return value R will be returned as the result of the tool call.
+//
+// Example usage:
+//
+//	type Input struct {
+//		Text string `json:"text"`
+//	}
+//
+//	type Output struct {
+//		Reversed string `json:"reversed"`
+//	}
+//
+//	func reverse(ctx context.Context, input Input) (Output, error) {
+//		// reverse the input text and return it in Output.Reversed
+//	}
+//
+//	reverseTool, err := NewTool(
+//		"reverse",
+//		"use this function to reverse a string",
+//		reverse,
+//	)
+//	if err != nil {
+//		// handle error
+//	}
+func NewTool[T, R any](name, description string, handler func(ctx context.Context, args T) (R, error)) (*Tool, error) {
+	if name == "" {
+		return nil, ErrToolNameRequired
+	}
+
+	reflector := &jsonschema.Reflector{
+		ExpandedStruct:             true,
+		RequiredFromJSONSchemaTags: false,
+		AllowAdditionalProperties:  false,
+	}
+
+	var zero T
+	t := reflect.TypeOf(zero)
+	if t == nil {
+		return nil, &ToolNilInputTypeError{ToolName: name}
+	}
+
+	schemaType := t
+	schemaTarget := any(&zero)
+	if t.Kind() == reflect.Pointer && t.Elem().Kind() == reflect.Struct {
+		// If the handler takes a pointer-to-struct input (e.g. *Input), we still want
+		// to generate a strict object schema based on the underlying struct (Input),
+		// not a nullable pointer schema.
+		schemaType = t.Elem()
+		schemaTarget = reflect.New(schemaType).Interface()
+	}
+	var schema *jsonschema.Schema
+	if schemaType.Kind() == reflect.Struct && schemaType.Name() == "" && schemaType.NumField() == 0 {
+		// Avoid panic in jsonschema when reflecting an anonymous empty struct
+		schema = &jsonschema.Schema{
+			Version:    jsonschema.Version,
+			Type:       "object",
+			Properties: jsonschema.NewProperties(),
+		}
+		if !reflector.AllowAdditionalProperties {
+			schema.AdditionalProperties = jsonschema.FalseSchema
+		}
+	} else {
+		schema = reflector.Reflect(schemaTarget)
+	}
+
+	schemaMap, err := mapFromJSON(schema)
+	if err != nil {
+		return nil, &ToolSchemaTransformError{Err: err}
+	}
+
+	schemaMap, err = ensureStrictJSONSchema(schemaMap)
+	if err != nil {
+		return nil, &ToolSchemaStrictnessError{Err: err}
+	}
+
+	// Add description at the top level if provided
+	if description != "" && schemaMap != nil {
+		schemaMap["description"] = description
+	}
+
+	return &Tool{
+		name:        name,
+		description: description,
+		inputSchema: schemaMap,
+		handle: func(ctx context.Context, arguments string) (any, error) {
+			var args T
+			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+				return nil, &ToolArgumentParseError{Err: err}
+			}
+			return handler(ctx, args)
+		},
+	}, nil
+}
+
+// NewRawTool creates a new Tool from an externally supplied JSON Schema and a raw handler.
+//
+// Use this when the input schema is already known rather than inferred from a Go type —
+// for example when forwarding tools from an MCP server or loading them from configuration.
+//
+// The provided schema is deep-cloned via a JSON round-trip and then normalized through
+// ensureStrictJSONSchema, so the caller's original map is never mutated.
+//
+// The handler receives the raw JSON argument string exactly as sent by the model,
+// without any intermediate unmarshaling.
+func NewRawTool(name, description string, inputSchema map[string]any, handler ToolHandler) (*Tool, error) {
+	if name == "" {
+		return nil, ErrToolNameRequired
+	}
+
+	// Deep-clone via JSON round-trip so the caller's map is never mutated.
+	schemaMap, err := jsonEncodeDecode[map[string]any](inputSchema)
+	if err != nil {
+		return nil, &ToolSchemaTransformError{Err: err}
+	}
+
+	schemaMap, err = ensureStrictJSONSchema(schemaMap)
+	if err != nil {
+		return nil, &ToolSchemaStrictnessError{Err: err}
+	}
+
+	if description != "" && schemaMap != nil {
+		schemaMap["description"] = description
+	}
+
+	return &Tool{
+		name:        name,
+		description: description,
+		inputSchema: schemaMap,
+		handle:      handler,
+	}, nil
+}
