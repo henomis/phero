@@ -28,3 +28,20 @@ var ErrCommandBlocked = errors.New("bash: command blocked by policy")
 // ErrCommandNotAllowed is returned when an allowlist is configured and the
 // command does not match any allowed pattern.
 var ErrCommandNotAllowed = errors.New("bash: command not in allowlist")
+
+// ErrTimeoutTooLarge is returned when a command timeout exceeds the configured
+// maximum timeout.
+var ErrTimeoutTooLarge = errors.New("bash: timeout exceeds maximum")
+
+// ErrBashIDRequired is returned when bash_id is missing from BashOutputInput.
+var ErrBashIDRequired = errors.New("bash: bash_id is required")
+
+// ErrShellIDRequired is returned when shell_id is missing from KillShellInput.
+var ErrShellIDRequired = errors.New("bash: shell_id is required")
+
+// ErrShellNotFound is returned when a background shell cannot be found.
+var ErrShellNotFound = errors.New("bash: shell not found")
+
+// ErrInvalidOutputFilter is returned when a BashOutputInput filter is not a
+// valid regular expression.
+var ErrInvalidOutputFilter = errors.New("bash: invalid output filter")

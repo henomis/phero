@@ -11,9 +11,9 @@ goal
   ▼
 DevOps Assistant
   │
-  ├─► ask_human("I plan to create a Dockerfile. Approve?")
+  ├─► user_interaction({ structured approval question })
   │         │
-  │    human response
+  │    structured user answer
   │         │
   │    approved? ──yes──► simulate_action("create Dockerfile")
   │         │
@@ -26,10 +26,11 @@ DevOps Assistant
 ```
 
 Key properties:
-- **`tool/human`** — the built-in `ask_human` tool presents a question on stdout and reads the answer from stdin.
+- **`tool/human`** — the built-in `user_interaction` tool validates a structured question payload (questions, options, multi-select flags) and returns structured answers.
+- **Host-provided interactor** — applications inject how answers are collected (CLI, web, IDE, etc.). In this example, a console callback renders options and reads stdin.
 - **Agent-controlled gate** — the agent itself decides when to ask; it is instructed never to simulate an action without prior approval.
 - **No hardcoded workflow** — the agent plans its own steps based on the goal; the human controls what actually runs.
-- **Interactive by design** — this example requires stdin interaction and is not suitable for CI.
+- **Interactive by design** — this sample callback uses stdin interaction and is not suitable for CI.
 
 ## Run
 
@@ -47,11 +48,13 @@ go run ./examples/human-in-the-loop \
   -goal "Set up infrastructure for a Python FastAPI service: virtual environment, Dockerfile, nginx config."
 ```
 
-When prompted, respond with:
-- `yes` / `ok` / `proceed` — approve the action
-- `no` / `skip` — skip this action
-- `stop` / `abort` — stop all remaining actions
-- Any freeform text — the agent will adjust accordingly
+When prompted, select an option label or number:
+- `Approve` / `1` — approve the action
+- `Skip` / `2` — skip this action
+- `Modify` / `3` — ask the agent to revise first
+- `Stop` / `4` — stop all remaining actions
+
+Optional free text can be provided as `other: <text>` in the same answer.
 
 ### Flags
 

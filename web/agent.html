@@ -260,7 +260,8 @@ a.SetMaxIterations(10)</code></pre>
         <li><code>ErrDescriptionRequired</code>: empty system prompt / description</li>
         <li><code>ToolAlreadyExistsError</code>: tool name collision on <code>AddTool</code> or <code>AddHandoff</code></li>
         <li><code>ToolUnknownError</code>: model requested a tool that is not registered</li>
-        <li><code>ErrMaxIterationsReached</code>: iteration cap hit (often due to repeated tool calls)</li>
+        <li><code>ErrMaxIterationsReached</code>: iteration cap hit (often due to repeated tool calls); <code>Run</code> still returns any partial text result alongside this error</li>
+        <li><code>ErrSessionSaveFailed</code>: the run completed successfully but saving the conversation to memory failed</li>
       </ul>
     </section>
 

@@ -152,7 +152,9 @@ func (a *Agent) SetMemory(mem memory.Memory) {
 
 // SetMaxIterations sets a maximum number of iterations for the agent loop.
 //
-// If the limit is reached, Run() returns an error. By default, there is no limit.
+// If the limit is reached, Run() returns ErrMaxIterationsReached together with
+// any partial text the model produced so far (the result may be non-nil even
+// when the error is set). By default, there is no limit.
 func (a *Agent) SetMaxIterations(maxIterations int) {
 	a.maxIterations = maxIterations
 }
@@ -171,6 +173,10 @@ func (a *Agent) SetTracer(t trace.Tracer) {
 //
 // The agent calls the LLM, executes any requested tool calls, and repeats until
 // the model returns a message without tool calls.
+//
+// If the maximum iterations limit is reached, the function returns
+// ErrMaxIterationsReached together with any partial text the model produced
+// (result may be non-nil even when err is set — use errors.Is to distinguish).
 //
 // If the run succeeds but saving the session to memory fails, the result is
 // still returned together with the save error joined via errors.Join.
@@ -225,7 +231,7 @@ func (a *Agent) Run(ctx context.Context, parts ...llm.ContentPart) (result *Resu
 	for {
 		iteration++
 		if a.maxIterations > 0 && iteration > a.maxIterations {
-			return nil, ErrMaxIterationsReached
+			return partialResultFromSession(session), ErrMaxIterationsReached
 		}
 
 		a.tracer.Trace(trace.AgentIterationEvent{
@@ -251,6 +257,28 @@ func (a *Agent) Run(ctx context.Context, parts ...llm.ContentPart) (result *Resu
 			return &Result{Parts: iterationResult.lastMessage.Parts, HandoffAgent: iterationResult.handoffAgent}, nil
 		}
 	}
+}
+
+// partialResultFromSession scans the session backwards and returns a Result
+// built from the last assistant message that contains at least one text part.
+// Returns nil if no such message exists.
+func partialResultFromSession(session []llm.Message) *Result {
+	for i := len(session) - 1; i >= 0; i-- {
+		msg := session[i]
+		if msg.Role != llm.RoleAssistant {
+			continue
+		}
+		textParts := make([]llm.ContentPart, 0, len(msg.Parts))
+		for _, p := range msg.Parts {
+			if p.Type == llm.ContentTypeText {
+				textParts = append(textParts, p)
+			}
+		}
+		if len(textParts) > 0 {
+			return &Result{Parts: textParts}
+		}
+	}
+	return nil
 }
 
 // saveSession saves the conversation messages to memory, if memory is configured.

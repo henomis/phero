@@ -15,107 +15,217 @@
 package human
 
 import (
-	"bufio"
 	"context"
-	"fmt"
-	"io"
-	"os"
+	"errors"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/henomis/phero/llm"
 )
 
-// Input represents the input for the HumanTool, containing the question to ask the human.
+const (
+	toolName        = "user_interaction"
+	toolDescription = "Use this tool to ask the user one or more structured questions and collect their answers."
+
+	minQuestions = 1
+	maxQuestions = 4
+	minOptions   = 2
+	maxOptions   = 4
+
+	maxHeaderLen       = 12
+	maxOptionLabelWord = 5
+)
+
+// Input defines the user interaction request.
 type Input struct {
-	Question string `json:"question" jsonschema:"description=The question or prompt to ask the human user"`
+	Questions []Question `json:"questions" jsonschema:"description=Questions to ask the user (1-4 questions)"`
 }
 
-// Output represents the output from the HumanTool, containing the human's response.
+// Question defines a single user-facing question.
+type Question struct {
+	Header      string   `json:"header" jsonschema:"description=Very short label (max 12 chars)"`
+	Question    string   `json:"question" jsonschema:"description=The complete question to ask the user"`
+	MultiSelect bool     `json:"multiSelect" jsonschema:"description=Allow multiple selections"`
+	Options     []Choice `json:"options" jsonschema:"description=Available choices (2-4 options)"`
+}
+
+// Choice defines a single selectable option for a question.
+type Choice struct {
+	Label       string `json:"label" jsonschema:"description=Display text for this option (1-5 words)"`
+	Description string `json:"description" jsonschema:"description=Explanation of this option"`
+}
+
+// Answer defines user selections for a question.
+type Answer struct {
+	Selections []string `json:"selections,omitempty" jsonschema:"description=Option labels selected by the user"`
+	Other      string   `json:"other,omitempty" jsonschema:"description=Optional custom free-text answer"`
+}
+
+// Output is the structured result returned by the tool.
 type Output struct {
-	Response string `json:"response"`
+	Answers map[string]Answer `json:"answers" jsonschema:"description=Collected user answers keyed by question header"`
 }
 
-// Tool is a tool that allows the agent to ask a human for input.
+// Interactor is the callback used to present questions and collect answers.
+type Interactor func(ctx context.Context, input *Input) (map[string]Answer, error)
+
+// Tool wraps the user interaction tool.
 type Tool struct {
-	tool   *llm.Tool
-	reader *bufio.Reader
-	writer io.Writer
+	tool       *llm.Tool
+	interactor Interactor
 }
 
 // Option configures a Tool created by New.
 type Option func(*Tool)
 
-// WithReader overrides the input reader used to capture the human's response.
-//
-// Default is os.Stdin.
-func WithReader(r io.Reader) Option {
+// WithInteractor overrides the callback used to collect user answers.
+func WithInteractor(interactor Interactor) Option {
 	return func(t *Tool) {
-		t.reader = bufio.NewReader(r)
+		t.interactor = interactor
 	}
 }
 
-// WithWriter overrides the output writer used to display prompts to the human.
-//
-// Default is os.Stdout.
-func WithWriter(w io.Writer) Option {
-	return func(t *Tool) {
-		t.writer = w
-	}
-}
-
-// New creates a new instance of HumanTool.
-//
-// This tool enables the agent to request human input during execution.
-// The tool will prompt the user with the provided question and return their response.
+// New creates a new user interaction tool.
 func New(opts ...Option) (*Tool, error) {
-	name := "ask_human"
-	description := "use this tool to ask a human user for input, clarification, or decision. The input is the question or prompt to show the user. The output is the user's response."
-
-	humanTool := &Tool{
-		reader: bufio.NewReader(os.Stdin),
-		writer: os.Stdout,
-	}
+	t := &Tool{}
 
 	for _, opt := range opts {
 		if opt != nil {
-			opt(humanTool)
+			opt(t)
 		}
 	}
 
+	if t.interactor == nil {
+		return nil, ErrInteractorRequired
+	}
+
 	tool, err := llm.NewTool(
-		name,
-		description,
-		humanTool.ask,
+		toolName,
+		toolDescription,
+		t.ask,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	humanTool.tool = tool
+	t.tool = tool
 
-	return humanTool, nil
+	return t, nil
 }
 
-// Tool returns the llm.Tool representation of the HumanTool.
+// Tool returns the llm.Tool representation of the user interaction tool.
 func (h *Tool) Tool() *llm.Tool {
 	return h.tool
 }
 
 func (h *Tool) ask(ctx context.Context, input *Input) (*Output, error) {
-	_ = ctx
 	if input == nil {
 		return nil, ErrNilInput
 	}
-
-	_, _ = fmt.Fprintf(h.writer, "\n🤔 Human Input Required:\n%s\n\n", input.Question)
-	_, _ = fmt.Fprint(h.writer, "Your response: ")
-
-	response, err := h.reader.ReadString('\n')
-	if err != nil {
-		return nil, fmt.Errorf("failed to read human input: %w", err)
+	if err := validateInput(input); err != nil {
+		return nil, err
 	}
 
-	response = strings.TrimSpace(response)
+	answers, err := h.interactor(ctx, input)
+	if err != nil {
+		return nil, errors.Join(ErrInteractionFailed, err)
+	}
 
-	return &Output{Response: response}, nil
+	if answers == nil {
+		answers = map[string]Answer{}
+	}
+
+	if err := validateAnswers(input.Questions, answers); err != nil {
+		return nil, err
+	}
+
+	return &Output{Answers: answers}, nil
+}
+
+func validateInput(input *Input) error {
+	questions := input.Questions
+	if len(questions) < minQuestions {
+		return ErrQuestionsRequired
+	}
+	if len(questions) > maxQuestions {
+		return ErrTooManyQuestions
+	}
+
+	seenHeaders := map[string]struct{}{}
+	for _, q := range questions {
+		header := strings.TrimSpace(q.Header)
+		if header == "" {
+			return ErrHeaderRequired
+		}
+		if utf8.RuneCountInString(header) > maxHeaderLen {
+			return ErrHeaderTooLong
+		}
+
+		normalizedHeader := strings.ToLower(header)
+		if _, exists := seenHeaders[normalizedHeader]; exists {
+			return ErrDuplicateQuestionHeader
+		}
+		seenHeaders[normalizedHeader] = struct{}{}
+
+		questionText := strings.TrimSpace(q.Question)
+		if questionText == "" {
+			return ErrQuestionTextRequired
+		}
+		if !strings.HasSuffix(questionText, "?") {
+			return ErrQuestionMustEndWithQuestionMark
+		}
+
+		if len(q.Options) < minOptions || len(q.Options) > maxOptions {
+			return ErrInvalidOptionCount
+		}
+
+		for _, option := range q.Options {
+			label := strings.TrimSpace(option.Label)
+			if label == "" {
+				return ErrOptionLabelRequired
+			}
+
+			words := strings.Fields(label)
+			if len(words) == 0 || len(words) > maxOptionLabelWord {
+				return ErrOptionLabelTooLong
+			}
+
+			if strings.TrimSpace(option.Description) == "" {
+				return ErrOptionDescriptionRequired
+			}
+		}
+	}
+
+	return nil
+}
+
+func validateAnswers(questions []Question, answers map[string]Answer) error {
+	allowed := map[string]Question{}
+	for _, q := range questions {
+		allowed[strings.ToLower(strings.TrimSpace(q.Header))] = q
+	}
+
+	for key, answer := range answers {
+		q, exists := allowed[strings.ToLower(strings.TrimSpace(key))]
+		if !exists {
+			return ErrInvalidAnswerHeader
+		}
+
+		if !q.MultiSelect && len(answer.Selections) > 1 {
+			return ErrMultipleSelectionsNotAllowed
+		}
+
+		optionLabels := map[string]struct{}{}
+		for _, option := range q.Options {
+			optionLabels[strings.ToLower(strings.TrimSpace(option.Label))] = struct{}{}
+		}
+
+		for _, selection := range answer.Selections {
+			if _, ok := optionLabels[strings.ToLower(strings.TrimSpace(selection))]; !ok {
+				return ErrInvalidOptionSelection
+			}
+		}
+	}
+
+	return nil
 }

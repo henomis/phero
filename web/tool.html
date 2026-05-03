@@ -29,7 +29,7 @@
 
   <header>
     <h1>Tool</h1>
-    <p class="subtitle">Give agents real capabilities: files, commands, and human approvals.</p>
+    <p class="subtitle">Give agents real capabilities: files, commands, sub-agents, and human approvals.</p>
   </header>
 
   <main>
@@ -38,7 +38,7 @@
       <p>
         Tools are callable functions the LLM can request during an agent run.
         They are the primary way an agent interacts with the outside world: reading/writing files, executing commands,
-        talking to services, or asking a human for confirmation.
+        delegating to sub-agents, or asking a human for confirmation.
       </p>
       <p>
         Phero tools are just function tools from <a href="llm.html">llm</a>, registered on an <a href="agent.html">agent</a>.
@@ -48,14 +48,17 @@
     <section>
       <h2>Built-in tool packages</h2>
       <p>
-        Phero includes a few ready-to-use tools under <code>tool/</code>. These are designed to be easy to attach to an agent.
+        Phero includes ready-to-use tools under <code>tool/</code>. Each tool is constructed with a <code>New…</code>
+        function and exposes a <code>.Tool()</code> method that returns the <code>*llm.Tool</code> to pass to <code>AddTool</code>.
         Exact behavior can be customized with <code>llm.Tool.Use(...)</code> middleware.
       </p>
 
       <ul>
-        <li><strong>File tools</strong> (<code>tool/file</code>): <code>view</code>, <code>create_file</code>, <code>str_replace</code></li>
-        <li><strong>Bash tool</strong> (<code>tool/bash</code>): run bash commands with optional guardrails (blocklist, allowlist, timeout, safe mode)</li>
-        <li><strong>Human tool</strong> (<code>tool/human</code>): ask the user for input/approval mid-run</li>
+        <li><strong>Agent tool</strong> (<code>tool/agent</code>): create and run a sub-agent at runtime with a given name, role, and instructions</li>
+        <li><strong>Filesystem tools</strong> (<code>tool/file</code>): five separate tools — <code>read</code>, <code>write</code>, <code>edit</code>, <code>glob</code>, <code>grep</code></li>
+        <li><strong>Bash tool</strong> (<code>tool/bash</code>): run bash commands with optional guardrails (blocklist, allowlist, timeout, safe mode) and background execution</li>
+        <li><strong>Human tool</strong> (<code>tool/human</code>): present structured questions and collect user answers mid-run</li>
+        <li><strong>Skill dispatcher</strong> (<code>tool/skill</code>): load a named <code>SKILL.md</code> into the current conversation</li>
       </ul>
 
       <p>
@@ -64,10 +67,110 @@
     </section>
 
     <section>
-      <h2>Bash tool guardrails</h2>
+      <h2>Agent tool (<code>tool/agent</code>)</h2>
       <p>
-        The bash tool ships with several security options to restrict what the agent can run.
+        The agent tool lets an orchestrator delegate an open-ended task to a purpose-built sub-agent at runtime.
+        The LLM provides the sub-agent's <code>name</code>, <code>description</code> (system prompt), and <code>input</code> (task instructions).
+        The tool creates an agent, runs it, and returns the text result.
       </p>
+
+      <pre><code class="language-go">import agenttool "github.com/henomis/phero/tool/agent"
+
+// Pass the same LLM client used by the orchestrator.
+agentTool, err := agenttool.New(llmClient)
+if err != nil {
+    panic(err)
+}
+
+if err := a.AddTool(agentTool.Tool()); err != nil {
+    panic(err)
+}</code></pre>
+
+      <p>
+        Optionally pass tools that every created sub-agent will have access to:
+      </p>
+      <pre><code class="language-go">readTool, _  := file.NewReadTool()
+writeTool, _ := file.NewWriteTool()
+
+agentTool, err := agenttool.New(llmClient, readTool.Tool(), writeTool.Tool())
+if err != nil {
+    panic(err)
+}</code></pre>
+
+      <p>The JSON input schema expected from the LLM:</p>
+      <ul>
+        <li><code>name</code>: short name for the delegated agent</li>
+        <li><code>description</code>: system prompt / role description</li>
+        <li><code>input</code>: the task or question the agent should solve</li>
+      </ul>
+      <p>Errors: <code>ErrLLMRequired</code>, <code>ErrNilInput</code>, <code>ErrNameRequired</code>, <code>ErrDescriptionRequired</code>, <code>ErrInputRequired</code>.</p>
+    </section>
+
+    <section>
+      <h2>Filesystem tools (<code>tool/file</code>)</h2>
+      <p>
+        Each filesystem operation is a separate constructor returning its own typed struct.
+        All constructors accept shared <code>Option</code> values.
+      </p>
+
+      <pre><code class="language-go">import "github.com/henomis/phero/tool/file"
+
+readTool, err  := file.NewReadTool(file.WithWorkingDirectory("/workspace"))
+writeTool, err := file.NewWriteTool(file.WithWorkingDirectory("/workspace"))
+editTool, err  := file.NewEditTool(file.WithWorkingDirectory("/workspace"))
+globTool, err  := file.NewGlobTool(file.WithWorkingDirectory("/workspace"))
+grepTool, err  := file.NewGrepTool(file.WithWorkingDirectory("/workspace"))
+
+// Each exposes .Tool() to get the *llm.Tool:
+if err := a.AddTool(readTool.Tool()); err != nil {
+    panic(err)
+}</code></pre>
+
+      <p>Available options:</p>
+      <ul>
+        <li><code>WithWorkingDirectory(dir)</code>: confine all operations to a directory; paths are validated against it to prevent traversal</li>
+        <li><code>WithMaxFileSize(bytes)</code>: limit the file size the read tool will return (0 = unlimited)</li>
+        <li><code>WithNoOverwrite()</code>: configure write to return <code>ErrFileExists</code> when the target already exists</li>
+      </ul>
+
+      <p>Using middleware to require user confirmation before a write:</p>
+      <pre><code class="language-go">writeTool, err := file.NewWriteTool(file.WithWorkingDirectory("/workspace"))
+if err != nil {
+    panic(err)
+}
+
+writeTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
+    return func(ctx context.Context, arguments string) (any, error) {
+        var input file.WriteInput
+        if err := json.Unmarshal([]byte(arguments), &input); err != nil {
+            return nil, err
+        }
+        fmt.Printf("Write to %s? (y/N): ", input.FilePath)
+        var answer string
+        fmt.Scanln(&answer)
+        if !strings.EqualFold(answer, "y") {
+            return nil, fmt.Errorf("write denied by user")
+        }
+        return next(ctx, arguments)
+    }
+})
+
+if err := a.AddTool(writeTool.Tool()); err != nil {
+    panic(err)
+}</code></pre>
+    </section>
+
+    <section>
+      <h2>Bash tool (<code>tool/bash</code>)</h2>
+      <p>
+        The bash tool runs shell commands with configurable guardrails and supports background execution.
+        <code>bash.New</code> returns a <code>*Tool</code> that exposes three <code>*llm.Tool</code> values:
+      </p>
+      <ul>
+        <li><code>Tool()</code>: the main <code>bash</code> tool — execute a command, optionally in the background</li>
+        <li><code>OutputTool()</code>: <code>bash_output</code> — retrieve incremental output from a running background shell</li>
+        <li><code>KillTool()</code>: <code>kill_shell</code> — terminate a background shell by ID</li>
+      </ul>
 
       <pre><code class="language-go">import (
     "time"
@@ -75,111 +178,121 @@
     "github.com/henomis/phero/tool/bash"
 )
 
-// Safe mode: applies a built-in blocklist of dangerous patterns
-// and sets a 30-second timeout.
-bashTool, err := bash.New(bash.WithSafeMode())
-
-// Fine-grained control:
 bashTool, err := bash.New(
+    bash.WithSafeMode(),                         // built-in dangerous-command blocklist + 30 s timeout
     bash.WithWorkingDirectory("/tmp/sandbox"),
-    bash.WithTimeout(10*time.Second),
-    bash.WithBlocklist("curl", "wget"),       // blocked substrings
-    bash.WithAllowlist("ls", "cat", "echo"),  // only these are allowed
-)</code></pre>
-
-      <ul>
-        <li><code>WithSafeMode()</code>: enables a built-in blocklist (<code>rm -rf /</code>, <code>dd if=</code>, fork bombs, …) and a 30 s timeout</li>
-        <li><code>WithTimeout(d)</code>: maximum execution time per command; context deadline takes precedence when shorter</li>
-        <li><code>WithBlocklist(patterns...)</code>: any command containing a pattern (case-insensitive) returns <code>ErrCommandBlocked</code></li>
-        <li><code>WithAllowlist(patterns...)</code>: when set, the command must match at least one pattern or <code>ErrCommandNotAllowed</code> is returned</li>
-        <li><code>WithWorkingDirectory(dir)</code>: directory in which commands run</li>
-      </ul>
-    </section>
-
-    <section>
-      <h2>File tool: prevent overwriting</h2>
-      <p>
-        By default <code>CreateFileTool</code> silently overwrites existing files.
-        Pass <code>WithNoOverwrite()</code> to return <code>ErrFileExists</code> instead.
-      </p>
-
-      <pre><code class="language-go">import "github.com/henomis/phero/tool/file"
-
-createTool, err := file.NewCreateFileTool(
-    file.WithWorkingDirectory("/workspace"),
-    file.WithNoOverwrite(),
 )
-if err != nil {
-    panic(err)
-}</code></pre>
-    </section>
-
-    <section>
-      <p>
-        The <a href="https://github.com/henomis/phero/tree/main/examples/skills">examples/skills</a> program combines skills with a
-        file-writing tool that asks the user to approve writes before the underlying tool handler runs.
-      </p>
-
-      <pre><code class="language-go">// From examples/skills (edited for brevity)
-
-createFileTool, err := file.NewCreateFileTool()
 if err != nil {
     panic(err)
 }
 
-tools = append(tools, createFileTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
-    return func(ctx context.Context, arguments string) (any, error) {
-        var input *file.CreateFileInput
-        if err := json.Unmarshal([]byte(arguments), &input); err != nil {
-            return nil, &llm.ToolArgumentParseError{Err: err}
-        }
-        if err := writeValidationFunc(ctx, input); err != nil {
-            return nil, err
-        }
-        return next(ctx, arguments)
-    }
-}))
+// Register all three tools so the agent can manage background processes:
+if err := a.AddTool(bashTool.Tool());       err != nil { panic(err) }
+if err := a.AddTool(bashTool.OutputTool()); err != nil { panic(err) }
+if err := a.AddTool(bashTool.KillTool());   err != nil { panic(err) }</code></pre>
 
-for _, tool := range tools {
-    if err := a.AddTool(tool); err != nil {
-        panic(err)
-    }
+      <p>Guardrail options:</p>
+      <ul>
+        <li><code>WithSafeMode()</code>: enables a built-in blocklist (<code>rm -rf /</code>, <code>dd if=</code>, fork bombs, …) and a 30 s timeout</li>
+        <li><code>WithTimeout(d)</code>: fixed maximum execution time per command</li>
+        <li><code>WithDefaultTimeout(d)</code>: timeout used when the LLM does not supply one in the request (default: 120 s)</li>
+        <li><code>WithMaxTimeout(d)</code>: cap on the LLM-supplied per-request timeout value (default: 600 s)</li>
+        <li><code>WithMaxOutputChars(n)</code>: output truncation threshold (default: 30 000 chars)</li>
+        <li><code>WithBlocklist(patterns...)</code>: any command containing a pattern (case-insensitive) returns <code>ErrCommandBlocked</code></li>
+        <li><code>WithAllowlist(patterns...)</code>: when set, the command must match at least one pattern or <code>ErrCommandNotAllowed</code> is returned</li>
+        <li><code>WithWorkingDirectory(dir)</code>: directory in which commands run</li>
+      </ul>
+      <p>Background execution fields in <code>Input</code>:</p>
+      <ul>
+        <li><code>RunInBackground bool</code>: start the command in the background; the tool returns a <code>bash_id</code> immediately</li>
+        <li><code>Timeout int</code>: optional per-request timeout in milliseconds, capped by <code>WithMaxTimeout</code></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Human tool (<code>tool/human</code>)</h2>
+      <p>
+        The human tool pauses the agent to collect structured input from the user.
+        You provide the <em>interactor</em> — the function that presents questions and reads answers — via
+        <code>WithInteractor</code>. This keeps the tool backend-agnostic (terminal, web UI, etc.).
+      </p>
+
+      <pre><code class="language-go">import "github.com/henomis/phero/tool/human"
+
+humanTool, err := human.New(
+    human.WithInteractor(consoleInteractor),
+)
+if err != nil {
+    panic(err)
+}
+
+if err := a.AddTool(humanTool.Tool()); err != nil {
+    panic(err)
 }</code></pre>
 
-      <pre><code class="language-go">// From examples/skills (edited for brevity)
+      <p>The <code>Interactor</code> signature:</p>
+      <pre><code class="language-go">type Interactor func(ctx context.Context, input *human.Input) (map[string]human.Answer, error)</code></pre>
 
-func writeValidationFunc(_ context.Context, input *file.WriteInput) error {
-    fmt.Printf("Do you want to write to the file '%s'? (y/N): ", input.Path)
-    var permission string
-    _, scanErr := fmt.Scanln(&permission)
-    if scanErr != nil {
-        return fmt.Errorf("failed to read user input: %w", scanErr)
+      <p>
+        The LLM supplies an <code>Input</code> with 1–4 questions. Each <code>Question</code> has:
+      </p>
+      <ul>
+        <li><code>Header string</code>: short label (max 12 characters); used as the answer map key</li>
+        <li><code>Question string</code>: text shown to the user (must end with <code>?</code>)</li>
+        <li><code>MultiSelect bool</code>: whether multiple options can be selected</li>
+        <li><code>Options []Choice</code>: 2–4 options, each with a <code>Label</code> (1–5 words) and <code>Description</code></li>
+      </ul>
+
+      <p>A minimal terminal interactor:</p>
+      <pre><code class="language-go">func consoleInteractor(_ context.Context, in *human.Input) (map[string]human.Answer, error) {
+    answers := make(map[string]human.Answer)
+    for _, q := range in.Questions {
+        fmt.Printf("[%s] %s\n", q.Header, q.Question)
+        for i, opt := range q.Options {
+            fmt.Printf("  %d) %s — %s\n", i+1, opt.Label, opt.Description)
+        }
+        fmt.Print("Your choice: ")
+        var line string
+        fmt.Scanln(&line)
+        answers[q.Header] = human.Answer{Selections: []string{strings.TrimSpace(line)}}
     }
-
-    if strings.EqualFold(permission, "y") {
-        return nil
-    }
-
-    return fmt.Errorf("user permission denied")
+    return answers, nil
 }</code></pre>
 
       <p>
-        This pattern keeps the agent powerful while still giving the user control.
+        See <a href="https://github.com/henomis/phero/tree/main/examples/human-in-the-loop">examples/human-in-the-loop</a>
+        for a complete working example with a multi-step approval flow.
       </p>
     </section>
 
     <section>
-      <h2>Default tools inside skills</h2>
+      <h2>Skill dispatcher (<code>tool/skill</code>)</h2>
       <p>
-        When you convert a <a href="skill.html">skill</a> into a tool, Phero automatically gives the skill-agent a small local toolbox rooted at the skill directory:
-        <code>view</code>, <code>create_file</code>, <code>str_replace</code>, and <code>bash</code>.
+        Use the skill dispatcher to expose a single <code>skill</code> tool that loads SKILL.md instructions
+        and a base path into the current conversation, keeping the agent toolset compact.
       </p>
-      <p>
-        That makes skill execution self-contained: the skill can inspect files, make targeted edits, or run commands without needing separate tool wiring in the caller.
-      </p>
-    </section>
 
-    
+      <pre><code class="language-go">import skilltool "github.com/henomis/phero/tool/skill"
+
+dispatcher, err := skilltool.New("./skills")
+if err != nil {
+    panic(err)
+}
+
+if err := a.AddTool(dispatcher.Tool()); err != nil {
+    panic(err)
+}</code></pre>
+
+      <p>
+        The dispatcher scans <code>skillsRootPath</code> for subdirectories containing <code>SKILL.md</code> files,
+        builds a catalog, and embeds it in the tool description so the model can select the right skill by name at runtime.
+      </p>
+      <p>Available options:</p>
+      <ul>
+        <li><code>WithAvailableSkillsLocation(loc)</code>: override the location string shown in the skill catalog</li>
+        <li><code>WithParser(parser)</code>: inject a custom <code>Parser</code> implementation (useful for testing)</li>
+      </ul>
+    </section>
 
     <section>
       <h2>Run an example</h2>
@@ -187,12 +300,13 @@ func writeValidationFunc(_ context.Context, input *file.WriteInput) error {
         These are good starting points to see tools in action (provider setup is described in each example README):
       </p>
 
-      <pre><code class="language-bash"># Skills + built-in file/bash tools (run from example dir)
-cd ./examples/skills
-go run .
+      <pre><code class="language-bash"># Human-in-the-loop: multi-step approval flow
+go run ./examples/human-in-the-loop
 
-    # Multi-agent workflow (uses a custom restricted command tool)
-cd -
+# Skills + built-in file/bash tools
+cd ./examples/skills && go run .
+
+# Multi-agent workflow (uses a custom restricted command tool)
 go run ./examples/multi-agent-workflow</code></pre>
     </section>
 

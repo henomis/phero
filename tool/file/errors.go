@@ -19,48 +19,46 @@ import (
 	"fmt"
 )
 
-// ErrFileTooLarge is returned when a file exceeds the configured maximum size
-// for text viewing.
-var ErrFileTooLarge = errors.New("file too large")
+// ErrPathRequired is returned when a required file path is missing.
+var ErrPathRequired = errors.New("file_path is required")
 
-// ErrImageTooLarge is returned when an image file exceeds the configured
-// maximum size for base64 rendering.
-var ErrImageTooLarge = errors.New("image too large")
+// ErrPatternRequired is returned when a required pattern is missing.
+var ErrPatternRequired = errors.New("pattern is required")
 
-// ErrPathOutsideWorkingDirectory is returned when a requested file path would
-// resolve outside the configured working directory.
+// ErrPathMustBeAbsolute is returned when a path argument is not absolute.
+var ErrPathMustBeAbsolute = errors.New("path must be absolute")
+
+// ErrPathOutsideWorkingDirectory is returned when a resolved path escapes the configured working directory.
 var ErrPathOutsideWorkingDirectory = errors.New("path is outside the working directory")
 
-// ErrFileExists is returned by CreateFileTool when the target file already
-// exists and the tool was configured with WithNoOverwrite.
+// ErrFileTooLarge is returned when a file exceeds the configured read size limit.
+var ErrFileTooLarge = errors.New("file too large")
+
+// ErrFileExists is returned when write is configured to disallow overwriting existing files.
 var ErrFileExists = errors.New("file already exists")
 
-// FileTooLargeError carries the file path, actual size, and configured limit.
+// ErrOldStringRequired is returned when edit is called without old_string.
+var ErrOldStringRequired = errors.New("old_string is required")
+
+// ErrInvalidOutputMode is returned when grep receives an unsupported output_mode value.
+var ErrInvalidOutputMode = errors.New("invalid output_mode")
+
+// ErrContextFlagsRequireContentMode is returned when -A/-B/-C/-n are used with a non-content mode.
+var ErrContextFlagsRequireContentMode = errors.New("-A/-B/-C/-n require output_mode=content")
+
+// FileTooLargeError includes the path, actual file size, and configured limit.
 type FileTooLargeError struct {
 	Path  string
 	Size  int64
 	Limit int64
 }
 
+// Error returns the formatted file-too-large message.
 func (e *FileTooLargeError) Error() string {
 	return fmt.Sprintf("%s: file size %d bytes exceeds limit of %d bytes", e.Path, e.Size, e.Limit)
 }
 
+// Is reports sentinel compatibility for errors.Is.
 func (e *FileTooLargeError) Is(target error) bool {
 	return target == ErrFileTooLarge
-}
-
-// ImageTooLargeError carries the image path, actual size, and configured limit.
-type ImageTooLargeError struct {
-	Path  string
-	Size  int64
-	Limit int64
-}
-
-func (e *ImageTooLargeError) Error() string {
-	return fmt.Sprintf("%s: image size %d bytes exceeds limit of %d bytes", e.Path, e.Size, e.Limit)
-}
-
-func (e *ImageTooLargeError) Is(target error) bool {
-	return target == ErrImageTooLarge
 }

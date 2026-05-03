@@ -104,9 +104,11 @@ Phero is organized into focused packages, each solving a specific problem:
 - **`mcp`** Model Context Protocol adapter for external tool integration
 - **`a2a`** Agent-to-Agent (A2A) protocol — expose agents as HTTP servers or call remote agents as tools
 - **`trace`** Typed observability events; `trace/text` for human-readable colorized output; `trace/jsonfile` for NDJSON file logging; `trace.NewLLM` for raw LLM call wrapping
-- **`tool/file`** File viewing and editing helpers (`view`, `create_file` with optional no-overwrite, `str_replace`)
-- **`tool/bash`** Bash command execution with blocklist, allowlist, timeout, and safe-mode guardrails
-- **`tool/human`** Human-in-the-loop input collection
+- **`tool/agent`** Create and run a sub-agent at runtime as a delegated tool
+- **`tool/file`** Filesystem tools (`read`, `write`, `edit`, `glob`, `grep`)
+- **`tool/bash`** Bash command execution with guardrails (blocklist, allowlist, timeout, safe mode) and background execution (`RunInBackground`, `bash_output`, `kill_shell`)
+- **`tool/human`** Structured user-interaction checkpoints; caller provides the interactor via `WithInteractor`
+- **`tool/skill`** Dispatcher-style SKILL.md loader tool that expands instructions in the main conversation
 
 
 
@@ -133,7 +135,7 @@ Comprehensive examples are included in the [`examples/`](examples/) directory:
 | [Parallel Research](examples/parallel-research/) | Fan-out/fan-in workflow that runs multiple specialist researchers in parallel and merges their findings |
 | [Prompt Chaining](examples/prompt-chaining/) | Sequential multi-step prompting with a programmatic gate between stages |
 | [RAG Chatbot](examples/rag-chatbot/) | Terminal chatbot with semantic search over local documents using Qdrant |
-| [Skill](examples/skills/) | Discover SKILL.md files and expose them as callable agent tools |
+| [Skill](examples/skills/) | Use the `tool/skill` dispatcher to load SKILL.md instructions into the current conversation |
 | [Social Simulation](examples/social-simulation/) | Multi-agent social simulation with persona-driven actors and emergent interactions |
 | [MCP Integration](examples/mcp/) | Run an MCP server as a subprocess and expose its tools to agents |
 | [Playwright MCP](examples/playwright-mcp/) | Connect browser automation tools through MCP and orchestrate them from an agent |

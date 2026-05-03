@@ -14,39 +14,41 @@
 
 package file
 
-// toolOptions holds shared configuration for file tools in this package.
 type toolOptions struct {
 	workingDir  string
-	maxFileSize int64 // 0 means no limit; applies to both text and image reads in ViewTool
-	noOverwrite bool  // if true, CreateFileTool refuses to overwrite existing files
+	maxFileSize int64
+	noOverwrite bool
 }
 
-// Option is a configuration function for file tools.
+// Option configures fs tools.
 type Option func(*toolOptions)
 
-// WithWorkingDirectory sets the working directory used to resolve relative paths.
-// When an input path is not absolute it is joined with this directory.
+// WithWorkingDirectory sets the working directory used for path confinement.
 func WithWorkingDirectory(dir string) Option {
 	return func(o *toolOptions) {
 		o.workingDir = dir
 	}
 }
 
-// WithMaxFileSize sets the maximum number of bytes that may be read from any
-// file (text or image) during a view operation.
-// Text files exceeding the limit return ErrFileTooLarge; images return ErrImageTooLarge.
-//
-// A value of 0 disables the limit (default).
+// WithMaxFileSize sets the maximum file size in bytes for read operations.
+// A value of 0 disables the limit.
 func WithMaxFileSize(bytes int64) Option {
 	return func(o *toolOptions) {
 		o.maxFileSize = bytes
 	}
 }
 
-// WithNoOverwrite configures CreateFileTool to return ErrFileExists when the
-// target file already exists, instead of silently overwriting it.
+// WithNoOverwrite configures write to fail when the target file already exists.
 func WithNoOverwrite() Option {
 	return func(o *toolOptions) {
 		o.noOverwrite = true
 	}
+}
+
+func applyOptions(opts ...Option) *toolOptions {
+	o := &toolOptions{}
+	for _, opt := range opts {
+		opt(o)
+	}
+	return o
 }

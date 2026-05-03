@@ -15,8 +15,9 @@
 package main
 
 import (
+	"bufio"
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -24,9 +25,9 @@ import (
 	"github.com/henomis/phero/agent"
 	"github.com/henomis/phero/llm"
 	"github.com/henomis/phero/llm/openai"
-	memory "github.com/henomis/phero/memory/jsonfile"
-	"github.com/henomis/phero/skill"
+	"github.com/henomis/phero/tool/bash"
 	"github.com/henomis/phero/tool/file"
+	skilltool "github.com/henomis/phero/tool/skill"
 )
 
 type Options[I, O any] struct {
@@ -43,26 +44,9 @@ func main() {
 	llmClient, llmInfo := buildLLMFromEnv()
 	ctx := context.Background()
 
-	history, _ := memory.New("memory.json")
-
-	skillParser := skill.New("./skills")
-	list, err := skillParser.List()
+	dispatcher, err := skilltool.New("./skills")
 	if err != nil {
 		panic(err)
-	}
-
-	tools := make([]*llm.Tool, 0, len(list))
-	for _, skillName := range list {
-		skillItem, err := skillParser.Parse(skillName)
-		if err != nil {
-			panic(err)
-		}
-
-		skillAsTool, err := skillItem.AsTool(llmClient, skill.WithMemory(history))
-		if err != nil {
-			panic(err)
-		}
-		tools = append(tools, skillAsTool)
 	}
 
 	a, err := agent.New(llmClient, "Agent", "An agent that helps create web pages and fetch random quotes")
@@ -70,30 +54,46 @@ func main() {
 		panic(err)
 	}
 
-	createFileTool, err := file.NewCreateFileTool()
+	if err := a.AddTool(dispatcher.Tool()); err != nil {
+		panic(err)
+	}
+
+	bashTool, err := bash.New()
 	if err != nil {
 		panic(err)
 	}
-	tools = append(tools, createFileTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
-		return func(ctx context.Context, arguments string) (any, error) {
-			var input *file.CreateFileInput
-			if err := json.Unmarshal([]byte(arguments), &input); err != nil {
-				return nil, &llm.ToolArgumentParseError{Err: err}
-			}
-			if err := writeValidationFunc(ctx, input); err != nil {
-				return nil, err
-			}
-			return next(ctx, arguments)
-		}
-	}))
-
-	for _, tool := range tools {
-		if err := a.AddTool(tool); err != nil {
-			panic(err)
-		}
+	bashTool.Tool().Use(confirmBeforeRun(os.Stdin, os.Stdout))
+	if err := a.AddTool(bashTool.Tool()); err != nil {
+		panic(err)
 	}
 
-	a.SetMemory(history)
+	readTool, err := file.NewReadTool()
+	if err != nil {
+		panic(err)
+	}
+	if err := a.AddTool(readTool.Tool()); err != nil {
+		panic(err)
+	}
+
+	writeTool, err := file.NewWriteTool()
+	if err != nil {
+		panic(err)
+	}
+	writeTool.Tool().Use(confirmBeforeRun(os.Stdin, os.Stdout))
+	if err := a.AddTool(writeTool.Tool()); err != nil {
+		panic(err)
+	}
+
+	editTool, err := file.NewEditTool()
+	if err != nil {
+		panic(err)
+	}
+	editTool.Tool().Use(confirmBeforeRun(os.Stdin, os.Stdout))
+	if err := a.AddTool(editTool.Tool()); err != nil {
+		panic(err)
+	}
+
+	// a.SetTracer(text.New(os.Stderr))
 
 	res, err := a.Run(ctx, llm.Text(`Your task:
 1. Check if the file "/tmp/quote.html" exists.
@@ -109,6 +109,28 @@ Respond only with a summary of the action taken and the quote used. Do not inclu
 
 	fmt.Printf("LLM used: %s\n", llmInfo)
 	fmt.Printf("Agent response: %s\n", res.TextContent())
+}
+
+// ErrConfirmationDenied is returned when the user rejects a tool call.
+var ErrConfirmationDenied = errors.New("user denied confirmation")
+
+// confirmBeforeRun returns a ToolMiddleware that prints the tool name and
+// arguments to w, reads a y/N answer from r, and short-circuits with
+// ErrConfirmationDenied when the user does not confirm.
+func confirmBeforeRun(r *os.File, w *os.File) llm.ToolMiddleware {
+	scanner := bufio.NewScanner(r)
+	return func(tool *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
+		return func(ctx context.Context, arguments string) (any, error) {
+			_, _ = fmt.Fprintf(w, "\n[confirm] tool=%s args=%s\nProceed? [y/N] ", tool.Name(), arguments)
+			if !scanner.Scan() {
+				return nil, ErrConfirmationDenied
+			}
+			if strings.ToLower(strings.TrimSpace(scanner.Text())) != "y" {
+				return nil, ErrConfirmationDenied
+			}
+			return next(ctx, arguments)
+		}
+	}
 }
 
 func buildLLMFromEnv() (llm.LLM, string) {
@@ -141,19 +163,4 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	}
 
 	return client, info
-}
-
-func writeValidationFunc(_ context.Context, input *file.CreateFileInput) error {
-	fmt.Printf("Do you want to write to the file '%s'? (y/N): ", input.Path)
-	var permission string
-	_, scanErr := fmt.Scanln(&permission)
-	if scanErr != nil {
-		return fmt.Errorf("failed to read user input: %w", scanErr)
-	}
-
-	if strings.EqualFold(permission, "y") {
-		return nil
-	}
-
-	return fmt.Errorf("user permission denied")
 }

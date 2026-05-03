@@ -151,19 +151,19 @@ func TestSkill_FileToolComposition(t *testing.T) {
 	ctx := context.Background()
 	workDir := t.TempDir()
 
-	createFileTool, err := toolfile.NewCreateFileTool(toolfile.WithWorkingDirectory(workDir))
+	writeTool, err := toolfile.NewWriteTool(toolfile.WithWorkingDirectory(workDir))
 	if err != nil {
-		t.Fatalf("NewCreateFileTool: %v", err)
+		t.Fatalf("NewWriteTool: %v", err)
 	}
 
-	wrapped := createFileTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
+	wrapped := writeTool.Tool().Use(func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
 		return func(ctx context.Context, arguments string) (any, error) {
-			var input *toolfile.CreateFileInput
+			var input *toolfile.WriteInput
 			if err := json.Unmarshal([]byte(arguments), &input); err != nil {
 				return nil, err
 			}
-			if input != nil && strings.TrimSpace(input.Path) == "" {
-				input.Path = "default.txt"
+			if input != nil && strings.TrimSpace(input.FilePath) == "" {
+				input.FilePath = filepath.Join(workDir, "default.txt")
 				patched, err := json.Marshal(input)
 				if err != nil {
 					return nil, err
@@ -174,7 +174,7 @@ func TestSkill_FileToolComposition(t *testing.T) {
 		}
 	})
 
-	_, err = wrapped.Handle(ctx, `{"path":"","content":"hello from skill test"}`)
+	_, err = wrapped.Handle(ctx, `{"file_path":"","content":"hello from skill test"}`)
 	if err != nil {
 		t.Fatalf("wrapped.Handle: %v", err)
 	}
