@@ -26,7 +26,8 @@ var (
 	ErrDescriptionRequired = errors.New("agent description is required")
 	// ErrNameRequired is returned when creating an agent with an empty name.
 	ErrNameRequired = errors.New("agent name is required")
-	// ErrMaxIterationsReached is returned when the agent loop reaches the maximum number of iterations.
+	// ErrMaxIterationsReached is returned when the agent loop reaches the maximum number of
+	// iterations. Run() will still return any partial text result alongside this error.
 	ErrMaxIterationsReached = errors.New("maximum iterations reached")
 	// ErrSessionSaveFailed is returned when the memory save after a successful run fails.
 	ErrSessionSaveFailed = errors.New("session save failed")
