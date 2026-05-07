@@ -77,7 +77,7 @@ Phero is organized into focused packages, each solving a specific problem:
 ### 🤖 Agent Layer
 
 - **`agent`** Core orchestration for LLM-based agents with tool execution, chat loops, and runtime handoffs
-- **`memory`** Conversational context management for multi-turn interactions (in-process, file-backed, RAG-backed, or PostgreSQL-backed)
+- **`memory`** Conversational context management for multi-turn interactions (in-process, file-backed, RAG-backed, PostgreSQL-backed, or NATS JetStream KV-backed)
 
 ### 💬 LLM Layer
 
@@ -124,6 +124,7 @@ Comprehensive examples are included in the [`examples/`](examples/) directory:
 | [LLM Middleware](examples/llm-middleware/) | Wrap an LLM with composable middleware for logging and other cross-cutting concerns |
 | [Conversational Agent](examples/conversational-agent/) | REPL-style chatbot with short-term conversational memory and a simple built-in tool |
 | [Long-Term Memory](examples/long-term-memory/) | REPL-style chatbot with semantic long-term memory (RAG) backed by Qdrant |
+| [NATS Memory](examples/nats-memory/) | Persistent chatbot backed by NATS JetStream KV; conversation survives process restarts and supports named sessions |
 | [Handoff](examples/handoff/) | One agent hands work off to a specialist agent at runtime using the built-in handoff mechanism |
 | [A2A Server](examples/a2a/server/) | Expose a Phero agent as an A2A-compliant HTTP server for cross-process agent calls |
 | [A2A Client](examples/a2a/client/) | Connect to a remote A2A agent and use it as a local tool inside an orchestrator |

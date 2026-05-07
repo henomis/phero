@@ -64,7 +64,7 @@
         <li><strong>Agent Layer</strong>
           <ul>
             <li><code>agent</code>: Core orchestration for LLM-based agents with tool execution and chat loops</li>
-            <li><code>memory</code>: Conversational context management for multi-turn interactions (in-process, file-backed, PostgreSQL-backed, or semantic RAG-backed)</li>
+            <li><code>memory</code>: Conversational context management for multi-turn interactions (in-process, file-backed, PostgreSQL-backed, NATS JetStream KV-backed, or semantic RAG-backed)</li>
           </ul>
         </li>
         <li><strong>LLM Layer</strong>
@@ -118,6 +118,7 @@
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/llm-middleware">LLM Middleware</a></td><td>Wrap an LLM with composable middleware for logging and other cross-cutting concerns</td></tr>
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/conversational-agent">Conversational Agent</a></td><td>REPL-style chatbot with short-term conversational memory and a simple built-in tool</td></tr>
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/long-term-memory">Long-Term Memory</a></td><td>REPL-style chatbot with semantic long-term memory (RAG) backed by Qdrant</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/nats-memory">NATS Memory</a></td><td>Persistent chatbot backed by NATS JetStream KV; conversation survives process restarts and supports named sessions</td></tr>
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/handoff">Handoff</a></td><td>One agent hands work off to a specialist agent at runtime using the built-in handoff mechanism</td></tr>
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/a2a/server">A2A Server</a></td><td>Expose a Phero agent as an A2A-compliant HTTP server for cross-process agent calls</td></tr>
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/a2a/client">A2A Client</a></td><td>Connect to a remote A2A agent and use it as a local tool inside an orchestrator</td></tr>
