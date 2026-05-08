@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/henomis/phero/llm"
@@ -122,7 +123,7 @@ type AgentHandoffInput struct {
 //
 // It returns ToolAlreadyExistsError if a tool with the same name is already present.
 func (a *Agent) AddHandoff(handoffAgent *Agent) error {
-	toolName := fmt.Sprintf("handoff_to_%s", normalizeAgentName(handoffAgent.Name()))
+	toolName := fmt.Sprintf("handoff_to_%s", SanitizeToolName(handoffAgent.Name()))
 
 	if _, exists := a.getTool(toolName); exists {
 		return &ToolAlreadyExistsError{Name: toolName}
@@ -330,15 +331,40 @@ func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message,
 		return agentIteration{session: session, lastMessage: msg.Message}, nil
 	}
 
-	for _, toolCall := range msg.Message.ToolCalls {
-		resultMessage := a.handleToolCall(ctx, toolCall, iteration, stats)
-		session = append(session, *resultMessage)
+	// Execute all tool calls concurrently, preserving order.
+	toolCalls := msg.Message.ToolCalls
+	results := make([]*llm.Message, len(toolCalls))
 
-		handoffAgent, isHandoff := a.handoffs[toolCall.Function.Name]
-		if isHandoff {
-			// remove the tool call message from the session, so the handoff agent doesn't see it as input
-			return agentIteration{session: session, lastMessage: resultMessage, handoffAgent: handoffAgent}, nil
+	var wg sync.WaitGroup
+	wg.Add(len(toolCalls))
+	for i, toolCall := range toolCalls {
+		go func() {
+			defer wg.Done()
+			results[i] = a.handleToolCall(ctx, toolCall, iteration, stats)
+		}()
+	}
+	wg.Wait()
+
+	// Append results in order; find the first handoff, if any.
+	var handoffAgent *Agent
+	for i, result := range results {
+		session = append(session, *result)
+		if hAgent, ok := a.handoffs[toolCalls[i].Function.Name]; ok && handoffAgent == nil {
+			handoffAgent = hAgent
 		}
+	}
+
+	if handoffAgent != nil {
+		// All tool results are preserved in session. Return the handoff tool's
+		// result as lastMessage so callers receive it in Result.Parts.
+		var handoffMsg *llm.Message
+		for i, toolCall := range toolCalls {
+			if _, ok := a.handoffs[toolCall.Function.Name]; ok {
+				handoffMsg = results[i]
+				break
+			}
+		}
+		return agentIteration{session: session, lastMessage: handoffMsg, handoffAgent: handoffAgent}, nil
 	}
 
 	return agentIteration{session: session}, nil
@@ -490,6 +516,22 @@ func (a *Agent) AsTool(toolName, toolDescription string) (*llm.Tool, error) {
 	)
 }
 
-func normalizeAgentName(s string) string {
-	return strings.ReplaceAll(s, " ", "_")
+// SanitizeToolName maps any string to one accepted by LLM providers.
+// Only [a-zA-Z0-9_-] are kept (all others become '_'); capped at 64 chars;
+// empty result falls back to "agent".
+func SanitizeToolName(name string) string {
+	s := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '_' || r == '-' {
+			return r
+		}
+		return '_'
+	}, name)
+	if len(s) > 64 {
+		s = s[:64]
+	}
+	if s == "" {
+		s = "agent"
+	}
+	return s
 }

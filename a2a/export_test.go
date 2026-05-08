@@ -29,7 +29,7 @@ var (
 	TranslateResultToA2A  = translateResultToA2A
 	ExtractTextFromResult = extractTextFromResult
 	ExtractStatusMessage  = extractStatusMessage
-	SanitizeToolName      = sanitizeToolName
+	SanitizeToolName      = agent.SanitizeToolName
 )
 
 // RESTPathPrefix exposes the constant for tests that verify URL construction.

@@ -16,6 +16,7 @@ package agent
 
 import (
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/henomis/phero/llm"
@@ -23,6 +24,8 @@ import (
 )
 
 type runStats struct {
+	mu sync.Mutex // protects tool fields accessed concurrently during parallel tool execution
+
 	agentName       string
 	startedAt       time.Time
 	llmCalls        int
@@ -62,6 +65,9 @@ func (s *runStats) recordLLM(duration time.Duration, usage *llm.Usage) {
 }
 
 func (s *runStats) recordTool(toolName string, err error, duration time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	s.toolCalls++
 	s.toolDuration += duration
 

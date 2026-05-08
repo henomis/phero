@@ -18,13 +18,13 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"strings"
 	"time"
 
 	sdka2a "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/a2aproject/a2a-go/v2/a2aclient/agentcard"
 
+	"github.com/henomis/phero/agent"
 	"github.com/henomis/phero/llm"
 )
 
@@ -208,27 +208,9 @@ func (c *Client) AsTool() (*llm.Tool, error) {
 		return &toolOutput{Output: text}, nil
 	}
 
-	return llm.NewTool(sanitizeToolName(c.card.Name), c.card.Description, handler)
+	return llm.NewTool(agent.SanitizeToolName(c.card.Name), c.card.Description, handler)
 }
 
-// sanitizeToolName maps an AgentCard name to a string accepted by LLM providers.
-// Most providers (OpenAI, Anthropic) require names matching [a-zA-Z0-9_-]{1,64}.
-func sanitizeToolName(name string) string {
-	s := strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-			(r >= '0' && r <= '9') || r == '_' || r == '-' {
-			return r
-		}
-		return '_'
-	}, name)
-	if len(s) > 64 {
-		s = s[:64]
-	}
-	if s == "" {
-		s = "agent"
-	}
-	return s
-}
 
 // extractStatusMessage returns the first text part from a task status message,
 // or an empty string if the message is nil or contains no text parts.
