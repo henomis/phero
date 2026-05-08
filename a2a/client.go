@@ -16,7 +16,10 @@ package a2a
 
 import (
 	"context"
+	"fmt"
 	"net/url"
+	"strings"
+	"time"
 
 	sdka2a "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
@@ -29,14 +32,54 @@ import (
 type ClientOption func(*clientConfig)
 
 type clientConfig struct {
-	resolver *agentcard.Resolver
+	resolver            *agentcard.Resolver
+	pushConfig          *sdka2a.PushConfig
+	acceptedOutputModes []string
+	preferredTransports []sdka2a.TransportProtocol
+	interceptors        []a2aclient.CallInterceptor
+	pollingInterval     time.Duration
 }
 
 // WithResolver overrides the default [agentcard.Resolver] used to fetch the
 // remote AgentCard.
 func WithResolver(r *agentcard.Resolver) ClientOption {
+	return func(c *clientConfig) { c.resolver = r }
+}
+
+// WithPushConfig sets the default push notification configuration applied to
+// every task sent by this client.
+func WithPushConfig(cfg *sdka2a.PushConfig) ClientOption {
+	return func(c *clientConfig) { c.pushConfig = cfg }
+}
+
+// WithAcceptedOutputModes declares the MIME types the client can consume.
+// Agents may use this to decide which output format to produce.
+func WithAcceptedOutputModes(modes ...string) ClientOption {
+	return func(c *clientConfig) { c.acceptedOutputModes = modes }
+}
+
+// WithPreferredTransports sets the ordered list of preferred transport protocols.
+// The first protocol supported by both client and server will be selected.
+func WithPreferredTransports(protocols ...sdka2a.TransportProtocol) ClientOption {
+	return func(c *clientConfig) { c.preferredTransports = protocols }
+}
+
+// WithClientInterceptors registers one or more [a2aclient.CallInterceptor] values
+// that run before and after every outgoing A2A call. Use this to inject
+// authentication headers (e.g. Authorization: Bearer …), distributed tracing
+// spans, or custom logging.
+func WithClientInterceptors(interceptors ...a2aclient.CallInterceptor) ClientOption {
+	return func(c *clientConfig) { c.interceptors = append(c.interceptors, interceptors...) }
+}
+
+// WithPollingInterval sets the interval used when polling GetTask for completion
+// after a streaming subscription fails or is unavailable. Defaults to 500 ms.
+// Non-positive values are ignored and the default is kept.
+func WithPollingInterval(d time.Duration) ClientOption {
 	return func(c *clientConfig) {
-		c.resolver = r
+		if d > 0 {
+			c.pollingInterval = d
+		}
 	}
 }
 
@@ -44,6 +87,7 @@ func WithResolver(r *agentcard.Resolver) ClientOption {
 type Client struct {
 	card   *sdka2a.AgentCard
 	client *a2aclient.Client
+	cfg    *clientConfig
 }
 
 // NewClient resolves the AgentCard at baseURL and creates a transport-agnostic
@@ -63,7 +107,8 @@ func NewClient(ctx context.Context, baseURL string, opts ...ClientOption) (*Clie
 	}
 
 	cfg := &clientConfig{
-		resolver: agentcard.DefaultResolver,
+		resolver:        agentcard.DefaultResolver,
+		pollingInterval: 500 * time.Millisecond,
 	}
 
 	for _, o := range opts {
@@ -75,18 +120,43 @@ func NewClient(ctx context.Context, baseURL string, opts ...ClientOption) (*Clie
 		return nil, err
 	}
 
-	c, err := a2aclient.NewFromCard(ctx, card)
+	clientCfg := a2aclient.Config{
+		AcceptedOutputModes: cfg.acceptedOutputModes,
+		PreferredTransports: cfg.preferredTransports,
+	}
+	if cfg.pushConfig != nil {
+		clientCfg.PushConfig = cfg.pushConfig
+	}
+
+	factoryOpts := []a2aclient.FactoryOption{a2aclient.WithConfig(clientCfg)}
+	if len(cfg.interceptors) > 0 {
+		factoryOpts = append(factoryOpts, a2aclient.WithCallInterceptors(cfg.interceptors...))
+	}
+
+	c, err := a2aclient.NewFromCard(ctx, card, factoryOpts...)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Client{card: card, client: c}, nil
+	return &Client{card: card, client: c, cfg: cfg}, nil
 }
 
-// AsTool converts the remote agent into an [llm.Tool] that a phero agent can
-// call.
+// Card returns the AgentCard resolved for the remote agent.
+func (c *Client) Card() *sdka2a.AgentCard {
+	return c.card
+}
+
+// AsTool converts the remote agent into an [llm.Tool] that a phero agent can call.
 //
-// The tool name and description are taken from the remote AgentCard.
+// The tool name and description are taken from the remote AgentCard. The tool
+// handler sends a SendMessage request and waits for the task to reach a terminal
+// state, transparently handling both synchronous (inline Message) and asynchronous
+// (Task-based) responses. Async tasks are resolved via event subscription with a
+// polling fallback.
+//
+// The tool input and output are text-only. Non-text parts in the remote agent's
+// response (images, raw bytes) are not surfaced; if the response contains no text
+// the tool returns [ErrNoTextContent].
 func (c *Client) AsTool() (*llm.Tool, error) {
 	type toolInput struct {
 		Input string `json:"input" jsonschema:"description=Instructions or question for the remote agent."`
@@ -108,6 +178,28 @@ func (c *Client) AsTool() (*llm.Tool, error) {
 			return nil, ErrEmptyResponse
 		}
 
+		// If the server returned a non-terminal Task, wait until it completes.
+		if task, ok := result.(*sdka2a.Task); ok && !task.Status.State.Terminal() {
+			task, err = c.waitForTask(ctx, task)
+			if err != nil {
+				return nil, err
+			}
+			result = task
+		}
+
+		// Translate task failure/cancellation to errors.
+		if task, ok := result.(*sdka2a.Task); ok {
+			switch task.Status.State {
+			case sdka2a.TaskStateFailed:
+				if reason := extractStatusMessage(task.Status.Message); reason != "" {
+					return nil, fmt.Errorf("%w: %s", ErrTaskFailed, reason)
+				}
+				return nil, ErrTaskFailed
+			case sdka2a.TaskStateCanceled:
+				return nil, ErrTaskCanceled
+			}
+		}
+
 		text, err := extractTextFromResult(result)
 		if err != nil {
 			return nil, err
@@ -116,37 +208,91 @@ func (c *Client) AsTool() (*llm.Tool, error) {
 		return &toolOutput{Output: text}, nil
 	}
 
-	return llm.NewTool(c.card.Name, c.card.Description, handler)
+	return llm.NewTool(sanitizeToolName(c.card.Name), c.card.Description, handler)
 }
 
-// extractTextFromResult extracts the first text content from a SendMessageResult.
-//
-// A result is either a *sdka2a.Message (when the agent responds inline) or a
-// *sdka2a.Task (when the server creates a task to track the work). Both cases
-// are handled here.
-func extractTextFromResult(result sdka2a.SendMessageResult) (string, error) {
-	switch v := result.(type) {
-	case *sdka2a.Message:
-		for _, part := range v.Parts {
-			if t := part.Text(); t != "" {
+// sanitizeToolName maps an AgentCard name to a string accepted by LLM providers.
+// Most providers (OpenAI, Anthropic) require names matching [a-zA-Z0-9_-]{1,64}.
+func sanitizeToolName(name string) string {
+	s := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '_' || r == '-' {
+			return r
+		}
+		return '_'
+	}, name)
+	if len(s) > 64 {
+		s = s[:64]
+	}
+	if s == "" {
+		s = "agent"
+	}
+	return s
+}
+
+// extractStatusMessage returns the first text part from a task status message,
+// or an empty string if the message is nil or contains no text parts.
+func extractStatusMessage(msg *sdka2a.Message) string {
+	if msg == nil {
+		return ""
+	}
+	for _, part := range msg.Parts {
+		if t := part.Text(); t != "" {
+			return t
+		}
+	}
+	return ""
+}
+
+// waitForTask blocks until the task reaches a terminal state and returns the
+// final Task. It first attempts to subscribe to the task's event stream; if
+// that fails or the server does not support streaming, it falls back to polling
+// GetTask at the configured polling interval (default 500 ms).
+func (c *Client) waitForTask(ctx context.Context, task *sdka2a.Task) (*sdka2a.Task, error) {
+	if task.Status.State.Terminal() {
+		return task, nil
+	}
+
+	// Try streaming subscription first (works when server supports streaming).
+	subCtx, cancelSub := context.WithCancel(ctx)
+	defer cancelSub()
+
+	for event, err := range c.client.SubscribeToTask(subCtx, &sdka2a.SubscribeToTaskRequest{ID: task.ID}) {
+		if err != nil {
+			break
+		}
+		switch v := event.(type) {
+		case *sdka2a.Task:
+			if v.Status.State.Terminal() {
+				return v, nil
+			}
+		case *sdka2a.TaskStatusUpdateEvent:
+			if v.Status.State.Terminal() {
+				t, err := c.client.GetTask(ctx, &sdka2a.GetTaskRequest{ID: task.ID})
+				if err != nil {
+					return nil, err
+				}
 				return t, nil
 			}
 		}
+	}
 
-		return "", ErrNoTextContent
+	// Fall back to polling.
+	ticker := time.NewTicker(c.cfg.pollingInterval)
+	defer ticker.Stop()
 
-	case *sdka2a.Task:
-		if v.Status.Message != nil {
-			for _, part := range v.Status.Message.Parts {
-				if t := part.Text(); t != "" {
-					return t, nil
-				}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-ticker.C:
+			t, err := c.client.GetTask(ctx, &sdka2a.GetTaskRequest{ID: task.ID})
+			if err != nil {
+				return nil, err
+			}
+			if t.Status.State.Terminal() {
+				return t, nil
 			}
 		}
-
-		return "", ErrNoTextContent
-
-	default:
-		return "", ErrNoTextContent
 	}
 }
