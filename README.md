@@ -27,6 +27,7 @@ Phero is a modern Go framework for building multi-agent AI systems. Like ants in
 - **🤝 Agent orchestration** Multi-agent workflows with role specialization, coordination, and runtime handoffs
 - **🔀 Agent handoffs** Transfer control between agents at runtime; `Result.HandoffAgent` tells you where to route next
 - **🌐 A2A protocol** Expose any agent as an HTTP A2A server, or call remote A2A agents as local tools
+- **🔀 NATS Agent Protocol** Register agents as NATS micro services and discover/call them over pub/sub; wire-compatible with TypeScript and Python SDKs
 - **🧩 LLM abstraction** Work with OpenAI-compatible endpoints (OpenAI, Ollama, etc.) and Anthropic
 - **🖼️ Multimodal input** Mix text and images with typed content parts (`llm.Text`, `llm.ImageURL`, `llm.ImageFile`)
 - **🔊 Audio I/O** OpenAI backend supports speech-to-text and text-to-speech via `llm.Transcriber` and `llm.SpeechSynthesizer`
@@ -103,6 +104,7 @@ Phero is organized into focused packages, each solving a specific problem:
 - **`skill`** Parse SKILL.md files and expose them as agent capabilities
 - **`mcp`** Model Context Protocol adapter for external tool integration
 - **`a2a`** Agent-to-Agent (A2A) protocol — expose agents as HTTP servers or call remote agents as tools
+- **`nats`** NATS Agent Protocol v0.3 — register agents as NATS micro services; discover and call them over pub/sub
 - **`trace`** Typed observability events; `trace/text` for human-readable colorized output; `trace/jsonfile` for NDJSON file logging; `trace.NewLLM` for raw LLM call wrapping
 - **`tool/agent`** Create and run a sub-agent at runtime as a delegated tool
 - **`tool/file`** Filesystem tools (`read`, `write`, `edit`, `glob`, `grep`)
@@ -128,6 +130,9 @@ Comprehensive examples are included in the [`examples/`](examples/) directory:
 | [Handoff](examples/handoff/) | One agent hands work off to a specialist agent at runtime using the built-in handoff mechanism |
 | [A2A Server](examples/a2a/server/) | Expose a Phero agent as an A2A-compliant HTTP server for cross-process agent calls |
 | [A2A Client](examples/a2a/client/) | Connect to a remote A2A agent and use it as a local tool inside an orchestrator |
+| [A2A Multi-Agent Newsroom](examples/a2a/multi-agent/) | Three specialised agents (researcher, writer, editor) each running as an independent A2A server, coordinated by a local orchestrator |
+| [NATS Agent](examples/nats-agent/) | Register a Phero agent as a NATS micro service and interact with it from an interactive client using the NATS Agent Protocol |
+| [NATS Multi-Agent Newsroom](examples/nats-agent/multi-agent/) | Three specialised agents running as NATS micro services, orchestrated via service discovery and `Client.AsTool()` |
 | [Debate Committee](examples/debate-committee/) | Multi-agent architecture where committee members debate independently and a judge synthesizes the final decision |
 | [Evaluator-Optimizer](examples/evaluator-optimizer/) | Iterative generation loop where an optimizer proposes drafts and an evaluator critiques them until quality criteria are met |
 | [Human-in-the-Loop](examples/human-in-the-loop/) | Multi-agent flow that pauses for explicit human approval/input before continuing |

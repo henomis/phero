@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phero • NATS</title>
+  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css?family=Space+Grotesk:700|Inter:400,500|JetBrains+Mono:400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+  <nav class="navbar">
+    <ul>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="llm.html">LLM</a></li>
+      <li><a href="agent.html">Agent</a></li>
+      <li><a href="trace.html">Trace</a></li>
+      <li><a href="tool.html">Tool</a></li>
+      <li><a href="mcp.html">MCP</a></li>
+      <li><a href="a2a.html">A2A</a></li>
+      <li><a href="nats.html">NATS</a></li>
+      <li><a href="embedding.html">Embedding</a></li>
+      <li><a href="textsplitter.html">Textsplitter</a></li>
+      <li><a href="vectorstore.html">Vectorstore</a></li>
+      <li><a href="rag.html">RAG</a></li>
+      <li><a href="memory.html">Memory</a></li>
+      <li><a href="skill.html">Skill</a></li>
+    </ul>
+  </nav>
+
+  <header>
+    <h1>NATS</h1>
+    <p class="subtitle">Connect agents over NATS pub/sub with the NATS Agent Protocol.</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>What it is</h2>
+      <p>
+        The <code>nats</code> package implements the
+        <a href="https://github.com/synadia-ai/nats-agent-sdk-docs/blob/main/core-protocol.md">NATS Agent Protocol v0.3</a>
+        for Phero agents. It provides two top-level types:
+      </p>
+      <ul>
+        <li>
+          <strong><code>nats.Server</code></strong>: registers any <code>agent.Agent</code> as a NATS micro service.
+          It handles discovery (via <code>$SRV.PING/INFO</code>), streaming prompt responses, periodic heartbeats,
+          and on-demand status replies. The agent is wire-compatible with the TypeScript and Python SDKs in the
+          <a href="https://github.com/synadia-ai/synadia-agents">synadia-agents</a> repository.
+        </li>
+        <li>
+          <strong><code>nats.Client</code></strong>: discovers compliant agents on the NATS bus and sends them
+          prompts. <code>Client.AsTool()</code> wraps a remote agent as an <code>llm.Tool</code> that any local
+          Phero agent can call.
+        </li>
+      </ul>
+      <p>
+        Unlike the <a href="a2a.html">A2A</a> transport (HTTP-based), the NATS transport uses pub/sub messaging,
+        which makes it well-suited for service meshes and environments where NATS is already running.
+      </p>
+    </section>
+
+    <section>
+      <h2>Example: registering an agent as a NATS server</h2>
+      <p>
+        See the full code in <a href="https://github.com/henomis/phero/tree/main/examples/nats-agent/server">examples/nats-agent/server</a>.
+      </p>
+
+      <pre><code class="language-go">package main
+
+import (
+    "context"
+    "os"
+    "os/signal"
+    "syscall"
+
+    natsgo "github.com/nats-io/nats.go"
+
+    "github.com/henomis/phero/agent"
+    "github.com/henomis/phero/llm/openai"
+    natsagent "github.com/henomis/phero/nats"
+)
+
+func main() {
+    nc, _ := natsgo.Connect(natsgo.DefaultURL)
+    defer nc.Drain()
+
+    llmClient := openai.New(os.Getenv("OPENAI_API_KEY"))
+
+    a, _ := agent.New(llmClient, "my-agent", "A helpful assistant.")
+
+    srv, _ := natsagent.New(nc, a, "alice", "demo")
+
+    ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+    defer stop()
+
+    srv.Start(ctx) // blocks until ctx is cancelled
+}</code></pre>
+
+      <p>
+        <code>New(nc, agent, owner, name)</code> registers the agent as a NATS micro service.
+        The <code>owner</code> and <code>name</code> values become the 4th and 5th tokens of the prompt subject
+        (<code>agents.prompt.phero.&lt;owner&gt;.&lt;name&gt;</code>).
+        <code>Start(ctx)</code> blocks until the context is cancelled, then drains cleanly.
+      </p>
+    </section>
+
+    <section>
+      <h2>Example: discovering and prompting a remote agent</h2>
+      <p>
+        See the full code in <a href="https://github.com/henomis/phero/tree/main/examples/nats-agent/client">examples/nats-agent/client</a>.
+      </p>
+
+      <pre><code class="language-go">nc, _ := natsgo.Connect(natsgo.DefaultURL)
+defer nc.Drain()
+
+c := natsagent.NewClient(nc)
+
+// Discover all compliant agents on the bus
+agents, err := c.Discover(ctx)
+if err != nil {
+    panic(err)
+}
+
+// Stream a prompt to the first discovered agent
+stream, err := c.Prompt(ctx, agents[0], "What is NATS?")
+if err != nil {
+    panic(err)
+}
+defer stream.Close()
+
+text, _ := stream.Text(ctx)
+fmt.Println(text)</code></pre>
+
+      <p>
+        <code>Discover</code> uses a stall strategy: it collects responses to a <code>$SRV.INFO.agents</code>
+        fan-out request for up to 750 ms of silence (configurable), capped by a 2-second absolute deadline.
+        Discovery options such as <code>FilterByOwner</code> and <code>FilterByName</code> narrow the results
+        client-side.
+      </p>
+    </section>
+
+    <section>
+      <h2>Wrapping a remote agent as a tool</h2>
+      <p>
+        Any discovered agent can be turned into an <code>llm.Tool</code> that a local Phero agent can call.
+        This is the building block for NATS-based multi-agent pipelines.
+      </p>
+
+      <pre><code class="language-go">c := natsagent.NewClient(nc)
+agents, _ := c.Discover(ctx, natsagent.FilterByName("researcher"))
+
+tool, err := agents[0].AsTool("researcher", "Research a topic and return key facts.")
+if err != nil {
+    panic(err)
+}
+
+orchestrator.AddTool(tool)</code></pre>
+
+      <p>
+        <code>AgentHandle.AsTool(toolName, toolDesc)</code> is shorthand for <code>Client.AsTool(info, toolName, toolDesc)</code>.
+        The tool sends a JSON-encoded prompt to the remote agent's prompt subject and collects the streamed
+        response chunks before returning the full text to the LLM.
+      </p>
+    </section>
+
+    <section>
+      <h2>Multi-agent NATS pipeline</h2>
+      <p>
+        For a production-style example, see
+        <a href="https://github.com/henomis/phero/tree/main/examples/nats-agent/multi-agent">examples/nats-agent/multi-agent</a>.
+        It shows three specialised agents (researcher, writer, editor) each running as a NATS micro service,
+        coordinated by a local orchestrator that discovers them via <code>$SRV.INFO.agents</code> and calls
+        each one as an <code>llm.Tool</code>.
+      </p>
+
+      <pre><code class="language-bash">docker run --rm -p 4222:4222 nats
+
+# Terminal 1
+OPENAI_API_KEY=&lt;key&gt; go run ./examples/nats-agent/multi-agent/researcher
+
+# Terminal 2
+OPENAI_API_KEY=&lt;key&gt; go run ./examples/nats-agent/multi-agent/writer
+
+# Terminal 3
+OPENAI_API_KEY=&lt;key&gt; go run ./examples/nats-agent/multi-agent/editor
+
+# Terminal 4 — orchestrator
+OPENAI_API_KEY=&lt;key&gt; go run ./examples/nats-agent/multi-agent/orchestrator -topic "quantum computing"</code></pre>
+    </section>
+
+    <section>
+      <h2>API reference</h2>
+
+      <h3>Server</h3>
+      <ul>
+        <li><code>nats.New(nc, agent, owner, name, opts...) (*Server, error)</code> — create a server</li>
+        <li><code>srv.Start(ctx context.Context)</code> — start serving; blocks until ctx is cancelled</li>
+      </ul>
+
+      <h4>Server options</h4>
+      <ul>
+        <li><code>WithHeartbeatInterval(d time.Duration)</code> — how often to publish a heartbeat (default: 10 s)</li>
+        <li><code>WithMaxPayloadBytes(n int64)</code> — advertised max payload size in the AgentCard</li>
+        <li><code>WithAttachmentsOk(ok bool)</code> — advertise attachment support in discovery metadata</li>
+      </ul>
+
+      <h3>Client</h3>
+      <ul>
+        <li><code>nats.NewClient(nc, opts...) *Client</code> — create a client</li>
+        <li><code>client.Discover(ctx, opts...) ([]*AgentHandle, error)</code> — discover agents on the bus</li>
+        <li><code>client.Prompt(ctx, info, text) (*Stream, error)</code> — send a prompt and get a stream</li>
+        <li><code>client.AsTool(info, toolName, toolDesc) (*llm.Tool, error)</code> — wrap a remote agent as a tool</li>
+      </ul>
+
+      <h4>Client options</h4>
+      <ul>
+        <li><code>WithDiscoveryTimeout(d time.Duration)</code> — absolute deadline for discovery (default: 2 s)</li>
+        <li><code>WithStallTimeout(d time.Duration)</code> — silence window before discovery ends (default: 750 ms)</li>
+        <li><code>WithInactivityTimeout(d time.Duration)</code> — stream read timeout per chunk (default: 30 s)</li>
+      </ul>
+
+      <h4>Discovery options</h4>
+      <ul>
+        <li><code>FilterByAgent(agent string)</code> — keep only agents with matching <code>metadata.agent</code></li>
+        <li><code>FilterByOwner(owner string)</code> — keep only agents with matching <code>metadata.owner</code></li>
+        <li><code>FilterByName(name string)</code> — keep only agents with matching instance name</li>
+      </ul>
+
+      <h3>AgentHandle</h3>
+      <ul>
+        <li><code>handle.Prompt(ctx, text) (*Stream, error)</code> — shorthand for <code>Client.Prompt</code></li>
+        <li><code>handle.AsTool(toolName, toolDesc) (*llm.Tool, error)</code> — shorthand for <code>Client.AsTool</code></li>
+        <li><code>handle.AgentInfo</code> — embedded <code>AgentInfo</code> with name, owner, subjects, etc.</li>
+      </ul>
+
+      <h3>Stream</h3>
+      <ul>
+        <li><code>stream.Text(ctx) (string, error)</code> — collect all chunks into a single string</li>
+        <li><code>stream.Close() error</code> — unsubscribe from the reply subject</li>
+      </ul>
+
+      <h3>Errors</h3>
+      <ul>
+        <li><code>ErrNoAgentsFound</code> — <code>Discover</code> found no matching agents</li>
+        <li><code>ErrEmptyPrompt</code> — empty prompt passed to <code>Prompt</code></li>
+        <li><code>ErrPayloadTooLarge</code> — prompt exceeds the agent's advertised max payload</li>
+        <li><code>ErrAgentRequired</code> — nil agent passed to <code>New</code></li>
+        <li><code>ErrConnectionRequired</code> — nil NATS connection passed to <code>New</code> or <code>NewClient</code></li>
+        <li><code>ErrOwnerRequired</code> / <code>ErrNameRequired</code> — blank owner or name passed to <code>New</code></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Run the simple example</h2>
+      <p>Start a NATS server first (plain core NATS — no JetStream needed):</p>
+      <pre><code class="language-bash">docker run --rm -p 4222:4222 nats</code></pre>
+
+      <pre><code class="language-bash"># Terminal 1 — start the agent server
+OPENAI_API_KEY=&lt;key&gt; go run ./examples/nats-agent/server -owner=alice -name=demo
+
+# Terminal 2 — interactive client
+go run ./examples/nats-agent/client</code></pre>
+    </section>
+
+    <section>
+      <h2>Interoperability</h2>
+      <p>
+        Phero agents are fully wire-compatible with the TypeScript and Python SDKs from
+        <a href="https://github.com/synadia-ai/synadia-agents">synadia-agents</a>.
+        Any client speaking the NATS Agent Protocol can discover and prompt a Phero agent.
+      </p>
+      <pre><code class="language-bash"># Discover the running Phero agent with the Python SDK
+uv run python examples/01-discover.py --url nats://127.0.0.1:4222
+
+# Stream a single prompt
+uv run python examples/02-prompt-text.py --url nats://127.0.0.1:4222 "What is 2+2?"</code></pre>
+    </section>
+
+    <section>
+      <h2>Related packages</h2>
+      <ul>
+        <li><a href="a2a.html">a2a</a>: HTTP-based agent-to-agent transport — use when NATS is not available</li>
+        <li><a href="memory.html">memory</a>: <code>memory/nats</code> stores conversation history in NATS JetStream KV</li>
+        <li><a href="agent.html">agent</a>: the agent type wrapped by both <code>Server</code> and <code>Client.AsTool</code></li>
+        <li><a href="llm.html">llm</a>: <code>AsTool()</code> returns an <code>*llm.Tool</code></li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-go.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
+</body>
+</html>

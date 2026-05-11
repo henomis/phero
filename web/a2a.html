@@ -18,6 +18,7 @@
       <li><a href="tool.html">Tool</a></li>
       <li><a href="mcp.html">MCP</a></li>
       <li><a href="a2a.html">A2A</a></li>
+      <li><a href="nats.html">NATS</a></li>
       <li><a href="embedding.html">Embedding</a></li>
       <li><a href="textsplitter.html">Textsplitter</a></li>
       <li><a href="vectorstore.html">Vectorstore</a></li>
@@ -48,7 +49,7 @@
     <section>
       <h2>The two sides</h2>
       <ul>
-        <li><strong><code>a2a.Server</code></strong>: wraps a Phero <code>agent.Agent</code> and exposes it as an A2A-compliant HTTP handler set (AgentCard + JSON-RPC).</li>
+        <li><strong><code>a2a.Server</code></strong>: wraps a Phero <code>agent.Agent</code> and exposes it as an A2A-compliant HTTP handler set (AgentCard + JSON-RPC, and optionally HTTP+JSON/SSE).</li>
         <li><strong><code>a2a.Client</code></strong>: resolves a remote AgentCard by URL and exposes the remote agent as an <code>llm.Tool</code> you can attach to a local agent.</li>
       </ul>
     </section>
@@ -82,21 +83,24 @@ func main() {
         panic(err)
     }
 
-    srv, err := a2a.New(a, "http://localhost:8080")
+    srv, err := a2a.New(a, "http://localhost:8080",
+        a2a.WithVersion("1.0"),
+        a2a.WithStreaming(),
+    )
     if err != nil {
         panic(err)
     }
 
     mux := http.NewServeMux()
-    mux.Handle("/.well-known/agent.json", srv.AgentCardHandler())
-    mux.Handle("/", srv.JSONRPCHandler())
+    srv.Mount(mux)  // registers /.well-known/agent-card.json and /
 
     _ = http.ListenAndServe(":8080", mux)
 }</code></pre>
 
       <p>
-        <code>AgentCardHandler()</code> serves the well-known AgentCard endpoint used for discovery.
-        <code>JSONRPCHandler()</code> handles the A2A JSON-RPC messages that actually drive the agent.
+        <code>Mount(mux)</code> is the one-call convenience that registers all active handlers on the mux.
+        It is equivalent to calling <code>AgentCardHandler()</code> and <code>JSONRPCHandler()</code> separately,
+        and also registers the REST handler when <code>WithRESTTransport()</code> is used.
       </p>
     </section>
 
@@ -122,10 +126,15 @@ func main() {
     ctx := context.Background()
 
     // Resolve the remote agent card and create a client
-    remoteClient, err := a2a.NewClient(ctx, "http://localhost:8080")
+    remoteClient, err := a2a.NewClient(ctx, "http://localhost:8080",
+        a2a.WithAcceptedOutputModes("text/plain"),
+    )
     if err != nil {
         panic(err)
     }
+
+    // Inspect the discovered AgentCard
+    fmt.Println(remoteClient.Card().Name)
 
     // Expose the remote agent as a local llm.Tool
     mathTool, err := remoteClient.AsTool()
@@ -161,7 +170,34 @@ func main() {
         <code>NewClient</code> fetches the remote AgentCard from the well-known path and builds a transport client.
         <code>AsTool()</code> wraps the remote agent as an <code>llm.Tool</code> whose name and description come from
         the AgentCard itself — no manual wiring needed.
+        <code>Card()</code> returns the resolved <code>*AgentCard</code> so callers can inspect metadata before use.
       </p>
+      <p>
+        The client handles both synchronous (inline Message) and asynchronous (Task-based) responses transparently.
+        For async tasks it subscribes to the event stream, or falls back to polling <code>GetTask</code> at a
+        configurable interval (default 500 ms) until the task reaches a terminal state.
+      </p>
+    </section>
+
+    <section>
+      <h2>Multi-agent A2A pipeline</h2>
+      <p>
+        For a production-style example, see
+        <a href="https://github.com/henomis/phero/tree/main/examples/a2a/multi-agent">examples/a2a/multi-agent</a>.
+        It shows three specialised agents (researcher, writer, editor) each running as a separate A2A server,
+        coordinated by a local orchestrator that calls each one as an <code>llm.Tool</code>.
+      </p>
+      <pre><code class="language-bash"># Terminal 1
+OPENAI_API_KEY=&lt;key&gt; go run ./examples/a2a/multi-agent/researcher
+
+# Terminal 2
+OPENAI_API_KEY=&lt;key&gt; go run ./examples/a2a/multi-agent/writer
+
+# Terminal 3
+OPENAI_API_KEY=&lt;key&gt; go run ./examples/a2a/multi-agent/editor
+
+# Terminal 4 — orchestrator
+OPENAI_API_KEY=&lt;key&gt; go run ./examples/a2a/multi-agent/orchestrator -topic "quantum computing"</code></pre>
     </section>
 
     <section>
@@ -169,17 +205,49 @@ func main() {
 
       <h3>Server</h3>
       <ul>
-        <li><code>a2a.New(agent, baseURL) (*Server, error)</code> — create a server for the given agent and public base URL</li>
-        <li><code>srv.AgentCard() *AgentCard</code> — derive the AgentCard from the wrapped agent</li>
-        <li><code>srv.AgentCardHandler() http.Handler</code> — handler for the <code>/.well-known/agent.json</code> endpoint</li>
+        <li><code>a2a.New(agent, baseURL, opts...) (*Server, error)</code> — create a server for the given agent and public base URL</li>
+        <li><code>srv.AgentCard() *AgentCard</code> — derive the AgentCard from the wrapped agent and configuration</li>
+        <li><code>srv.Mount(mux)</code> — register all active handlers on the mux (recommended)</li>
+        <li><code>srv.AgentCardHandler() http.Handler</code> — handler for <code>/.well-known/agent-card.json</code></li>
         <li><code>srv.JSONRPCHandler() http.Handler</code> — handler for the A2A JSON-RPC endpoint</li>
+        <li><code>srv.RESTHandler() http.Handler</code> — handler for the HTTP+JSON/SSE endpoint (nil unless <code>WithRESTTransport()</code> was used; mount with <code>/rest/</code> prefix stripped)</li>
+      </ul>
+
+      <h4>Server options</h4>
+      <ul>
+        <li><code>WithVersion(v string)</code> — agent version in the AgentCard (default <code>"1.0"</code>)</li>
+        <li><code>WithSkills(skills ...AgentSkill)</code> — append additional skill entries to the AgentCard</li>
+        <li><code>WithInputModes(modes ...string)</code> — supported input MIME types (default <code>["text/plain"]</code>)</li>
+        <li><code>WithOutputModes(modes ...string)</code> — supported output MIME types (default <code>["text/plain"]</code>)</li>
+        <li><code>WithProvider(org, url string)</code> — provider organisation and URL in the AgentCard</li>
+        <li><code>WithIconURL(url string)</code> — agent icon URL in the AgentCard</li>
+        <li><code>WithDocURL(url string)</code> — agent documentation URL in the AgentCard</li>
+        <li><code>WithRESTTransport()</code> — enable the HTTP+JSON/SSE transport in addition to JSON-RPC</li>
+        <li><code>WithStreaming()</code> — advertise streaming capability in the AgentCard</li>
+        <li><code>WithPushNotifications(store, sender)</code> — enable push notification endpoints</li>
+        <li><code>WithTaskStore(store)</code> — replace the default in-memory task store (for persistence or clustering)</li>
+        <li><code>WithCallInterceptors(interceptors ...)</code> — request/response middleware (auth, logging, rate limiting, …)</li>
+        <li><code>WithExecutorContextInterceptors(interceptors ...)</code> — enrich the ExecutorContext before each agent invocation</li>
+        <li><code>WithConcurrencyLimit(config)</code> — cap concurrent agent invocations</li>
+        <li><code>WithLogger(logger)</code> — custom structured <code>*slog.Logger</code></li>
+        <li><code>WithExtendedCard(producer)</code> — authenticated extended AgentCard</li>
       </ul>
 
       <h3>Client</h3>
       <ul>
         <li><code>a2a.NewClient(ctx, baseURL, opts...) (*Client, error)</code> — resolve the remote AgentCard and open a client</li>
+        <li><code>client.Card() *AgentCard</code> — return the resolved AgentCard</li>
         <li><code>client.AsTool() (*llm.Tool, error)</code> — expose the remote agent as an LLM-callable tool</li>
-        <li><code>a2a.WithResolver(r)</code> — option to override the default AgentCard resolver</li>
+      </ul>
+
+      <h4>Client options</h4>
+      <ul>
+        <li><code>WithResolver(r)</code> — override the default AgentCard resolver</li>
+        <li><code>WithAcceptedOutputModes(modes ...string)</code> — MIME types the client can consume</li>
+        <li><code>WithPreferredTransports(protocols ...)</code> — ordered transport protocol preferences</li>
+        <li><code>WithClientInterceptors(interceptors ...)</code> — inject auth headers or tracing per call</li>
+        <li><code>WithPollingInterval(d time.Duration)</code> — tune the <code>GetTask</code> polling interval for async tasks</li>
+        <li><code>WithPushConfig(cfg)</code> — default push notification configuration for tasks</li>
       </ul>
 
       <h3>Errors</h3>
@@ -207,6 +275,7 @@ go run ./examples/a2a/client</code></pre>
       <h2>Related packages</h2>
       <ul>
         <li><a href="agent.html">agent</a>: the agent wrapped inside an A2A server, or the orchestrator calling a remote one</li>
+        <li><a href="nats.html">nats</a>: alternative transport using the NATS Agent Protocol instead of HTTP</li>
         <li><a href="llm.html">llm</a>: <code>AsTool()</code> returns an <code>*llm.Tool</code></li>
         <li><a href="tool.html">tool</a>: other ways to give agents external capabilities</li>
       </ul>

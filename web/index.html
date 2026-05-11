@@ -18,6 +18,7 @@
       <li><a href="tool.html">Tool</a></li>
       <li><a href="mcp.html">MCP</a></li>
       <li><a href="a2a.html">A2A</a></li>
+      <li><a href="nats.html">NATS</a></li>
       <li><a href="embedding.html">Embedding</a></li>
       <li><a href="textsplitter.html">Textsplitter</a></li>
       <li><a href="vectorstore.html">Vectorstore</a></li>
@@ -46,6 +47,8 @@
       <h2>Features</h2>
       <ul>
         <li>🤝 <strong>Agent orchestration</strong>: Multi-agent workflows with role specialization, coordination, and handoffs</li>
+        <li>🌐 <strong>A2A protocol</strong>: Expose any agent as an HTTP A2A server, or call remote A2A agents as local tools</li>
+        <li>🔀 <strong>NATS Agent Protocol</strong>: Register agents as NATS micro services and discover/call them over pub/sub; wire-compatible with TypeScript and Python SDKs</li>
         <li>🧩 <strong>LLM abstraction</strong>: Work with OpenAI-compatible endpoints (OpenAI, Ollama, etc.) and Anthropic</li>
         <li>🛠️ <strong>Function tools</strong>: Expose Go functions as callable tools with automatic JSON Schema generation</li>
         <li>📚 <strong>RAG (Retrieval-Augmented Generation)</strong>: Built-in vector storage and semantic search</li>
@@ -100,7 +103,8 @@
             <li><code>tool/file</code>: Filesystem tools (<code>read</code>, <code>write</code>, <code>edit</code>, <code>glob</code>, <code>grep</code>)</li>
             <li><code>tool/bash</code>: Bash command execution with guardrails (blocklist, allowlist, timeout, safe mode) and background execution</li>
             <li><code>tool/human</code>: Structured user-interaction checkpoints with validated questions and options</li>
-            <li><code>a2a</code>: Agent-to-Agent (A2A) protocol server and client for inter-agent networking</li>
+            <li><code>a2a</code>: Agent-to-Agent (A2A) protocol server and client for inter-agent networking over HTTP</li>
+            <li><code>nats</code>: NATS Agent Protocol v0.3 server and client for inter-agent networking over NATS pub/sub</li>
           </ul>
         </li>
       </ul>
@@ -122,6 +126,9 @@
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/handoff">Handoff</a></td><td>One agent hands work off to a specialist agent at runtime using the built-in handoff mechanism</td></tr>
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/a2a/server">A2A Server</a></td><td>Expose a Phero agent as an A2A-compliant HTTP server for cross-process agent calls</td></tr>
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/a2a/client">A2A Client</a></td><td>Connect to a remote A2A agent and use it as a local tool inside an orchestrator</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/a2a/multi-agent">A2A Multi-Agent Newsroom</a></td><td>Three specialised agents (researcher, writer, editor) each running as an independent A2A server, coordinated by a local orchestrator</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/nats-agent">NATS Agent</a></td><td>Register a Phero agent as a NATS micro service and interact with it from an interactive client using the NATS Agent Protocol</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/nats-agent/multi-agent">NATS Multi-Agent Newsroom</a></td><td>Three specialised agents running as NATS micro services, orchestrated via service discovery and <code>Client.AsTool()</code></td></tr>
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/debate-committee">Debate Committee</a></td><td>Multi-agent architecture where committee members debate independently and a judge synthesizes the final decision</td></tr>
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/evaluator-optimizer">Evaluator-Optimizer</a></td><td>Iterative generation loop where an optimizer proposes drafts and an evaluator critiques them until quality criteria are met</td></tr>
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/human-in-the-loop">Human-in-the-Loop</a></td><td>Multi-agent flow that pauses for explicit human approval before continuing each action</td></tr>
