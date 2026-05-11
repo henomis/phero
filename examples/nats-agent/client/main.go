@@ -103,7 +103,6 @@ func main() {
 		}
 
 		turnCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		c.Prompt(context.Background(), &target.AgentInfo, "hhh")
 		stream, err := target.Prompt(turnCtx, line)
 		if err != nil {
 			cancel()
