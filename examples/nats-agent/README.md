@@ -1,12 +1,12 @@
 # NATS Agent Example
 
-Registers a Phero agent on NATS and interacts with it over an interactive client, using the [NATS Agent Protocol v0.3](../../core-protocol.md).
+Registers a Phero agent on NATS and interacts with it over an interactive client, using the [NATS Agent Protocol v0.3](https://github.com/synadia-ai/nats-agent-sdk-docs/blob/main/core-protocol.md).
 
 This example shows:
 
 - **`server/`** — wrap any `agent.Agent` with `nats.New()` and call `Start()`. The agent registers as a NATS micro service discoverable via `$SRV.PING/INFO.agents`, streams responses back, and publishes heartbeats. Trace events (LLM calls, tokens, latency) go to stderr.
 - **`client/`** — discover all compliant agents on the bus, connect to the first one, and start an interactive chat loop.
-- **Wire compatibility** — Phero agents are fully interoperable with the TypeScript and Python SDKs from [synadia-agents](../../synadia-agents/).
+- **Wire compatibility** — Phero agents are fully interoperable with the TypeScript and Python SDKs from [synadia-agents](https://github.com/synadia-ai/synadia-agents/).
 
 ## What you'll learn
 
@@ -118,7 +118,7 @@ go run ./examples/nats-agent/client -owner=alice -name=demo
 
 ## Interoperability with the Python and TypeScript SDKs
 
-Because Phero implements the wire protocol faithfully, any client that speaks NATS Agent Protocol v0.3 works against the Phero server — including the numbered demo scripts from the [synadia-agents Python SDK](../../synadia-agents/client-sdk/python/examples/).
+Because Phero implements the wire protocol faithfully, any client that speaks NATS Agent Protocol v0.3 works against the Phero server — including the numbered demo scripts from the [synadia-agents Python SDK](https://github.com/synadia-ai/synadia-agents/client-sdk/python/examples/).
 
 Start the Phero server, then run the Python demos from another terminal:
 
@@ -166,7 +166,7 @@ srv.Start(ctx)
 // Client: discover, prompt, stream
 c := natsagent.NewClient(nc)
 agents, _ := c.Discover(ctx)
-stream, _ := c.Prompt(ctx, agents[0], "Hello!")
+stream, _ := agents[0].Prompt(ctx, "Hello!")
 text, _ := stream.Text(ctx)
 
 // AsTool: let a local agent call a remote one
