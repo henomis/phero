@@ -20,10 +20,10 @@ import "errors"
 var ErrAgentRequired = errors.New("a2a: agent is required")
 
 // ErrBaseURLRequired is returned when an empty public base URL is passed to New.
-var ErrBaseURLRequired = errors.New("a2a: base URL is required")
+var ErrBaseURLRequired = errors.New("a2a: server base URL is required")
 
 // ErrURLRequired is returned when an empty base URL is passed to NewClient.
-var ErrURLRequired = errors.New("a2a: base URL is required")
+var ErrURLRequired = errors.New("a2a: client URL is required")
 
 // ErrInvalidBaseURL is returned when the provided base URL is not a
 // well-formed absolute URL (must have a scheme and host).
@@ -34,3 +34,9 @@ var ErrNoTextContent = errors.New("a2a: response contains no text content")
 
 // ErrEmptyResponse is returned when a remote A2A response is nil.
 var ErrEmptyResponse = errors.New("a2a: empty response from remote agent")
+
+// ErrTaskFailed is returned when the remote A2A task reached the failed state.
+var ErrTaskFailed = errors.New("a2a: remote task failed")
+
+// ErrTaskCanceled is returned when the remote A2A task was canceled before completing.
+var ErrTaskCanceled = errors.New("a2a: remote task was canceled")

@@ -15,48 +15,83 @@
 // Package a2a exposes phero agents as A2A servers and lets agents call
 // remote A2A endpoints as tools.
 //
-// Server side: wrap a [agent.Agent] with [New], providing the required public
-// base URL. The resulting [Server] exposes [Server.AgentCardHandler] and
-// [Server.JSONRPCHandler] so the caller can mount them at caller-chosen
-// endpoints in its own HTTP server, router, and middleware stack.
+// # Server side
 //
-// Client side: use [NewClient] to resolve a remote agent's card and then call
-// [Client.AsTool] to obtain an [llm.Tool] that a phero agent can invoke.
+// Wrap a [agent.Agent] with [New], providing the public base URL and any
+// [ServerOption] values needed:
 //
-// # Current limitations
+//	srv, err := a2a.New(myAgent, "https://agent.example.com",
+//	    a2a.WithVersion("2.0"),
+//	    a2a.WithStreaming(),
+//	    a2a.WithRESTTransport(),
+//	    a2a.WithProvider("Acme Corp", "https://acme.example.com"),
+//	    a2a.WithSkills(sdka2a.AgentSkill{ID: "summarize", Name: "Summarize"}),
+//	)
 //
-// This package is a minimal, text-focused A2A bridge and does not implement
-// the full A2A protocol surface. Callers should be aware of the following
-// constraints.
+// Register handlers on an [http.ServeMux] with one call:
 //
-// Protocol coverage: only a single JSON-RPC interface is advertised. The
-// generated [Server.AgentCard] always declares text/plain as the sole input
-// and output mode and exposes exactly one skill derived from the wrapped agent.
-// Multiple transports, richer capability metadata, and multi-skill cards are
-// not supported.
+//	srv.Mount(mux)
+//	// or individually:
+//	mux.Handle("/.well-known/agent-card.json", srv.AgentCardHandler())
+//	mux.Handle("/", srv.JSONRPCHandler())
+//	// when WithRESTTransport is used — must strip the /rest prefix:
+//	mux.Handle("/rest/", http.StripPrefix("/rest", srv.RESTHandler()))
 //
-// Message handling: the server reads only text parts from an incoming A2A
-// message; non-text parts, file attachments, and richer message metadata are
-// silently ignored. If no text part is present the agent receives an empty
-// input string. Multiple text parts are concatenated without a separator.
-// The client adapter likewise sends a single plain-text user message and
-// returns an error if the remote response contains no text content.
+// Key server options:
+//   - [WithVersion] — agent version in the AgentCard
+//   - [WithSkills] — additional skill entries in the AgentCard
+//   - [WithInputModes] / [WithOutputModes] — supported MIME types
+//   - [WithProvider] — provider organisation and URL
+//   - [WithIconURL] / [WithDocURL] — card metadata URLs
+//   - [WithRESTTransport] — enable HTTP+JSON/SSE transport
+//   - [WithStreaming] — advertise streaming capability in the AgentCard
+//   - [WithPushNotifications] — enable push notification endpoints
+//   - [WithTaskStore] — persistent task state backend
+//   - [WithCallInterceptors] — request/response middleware (auth, logging, …)
+//   - [WithExecutorContextInterceptors] — enrich the ExecutorContext per-call
+//   - [WithConcurrencyLimit] — cap concurrent agent invocations
+//   - [WithLogger] — custom structured logger
+//   - [WithExtendedCard] — authenticated extended AgentCard
+//   - [WithClusterMode] — distributed execution via work queue
+//   - [WithHandlerOption] — escape hatch for raw handler options
 //
-// Task-based flows: [Client.AsTool] makes one [SendMessage] call and reads
-// the response inline. It succeeds only when the remote server returns the
-// final text immediately, either in the response Message or in the Task status
-// payload. The package does not expose separate task-polling, resumption, or
-// streaming APIs; long-running asynchronous tasks are therefore not supported
-// by this adapter.
+// Cancellation: when a client cancels a task the running [agent.Agent.Run] call
+// is interrupted via context cancellation, so long-running agents stop promptly.
 //
-// Cancellation: [Server.Cancel] reports a protocol-level cancelled status to
-// the caller but does not interrupt an in-flight phero agent. Agents always
-// run to completion or until they return an error.
+// Multimodal: incoming A2A text, URL, and raw-bytes parts are translated to the
+// corresponding phero [llm.ContentPart] types and vice-versa. Structured data
+// parts are JSON-encoded and passed as text.
 //
-// Operational responsibilities: the package only returns plain [http.Handler]
-// values. TLS termination, authentication, authorization, rate limiting, and
-// any request-validation middleware are entirely the caller's responsibility.
-// The baseURL passed to [New] is published verbatim as the JSON-RPC interface
-// URL inside the Agent Card, so it must be the externally reachable endpoint
-// at which [Server.JSONRPCHandler] is mounted.
+// # Client side
+//
+// Use [NewClient] to resolve a remote agent's AgentCard and then call
+// [Client.AsTool] to obtain an [llm.Tool] that a phero agent can invoke:
+//
+//	client, err := a2a.NewClient(ctx, "http://remote-agent:8080",
+//	    a2a.WithAcceptedOutputModes("text/plain"),
+//	    a2a.WithPreferredTransports(sdka2a.TransportProtocolHTTPJSON),
+//	)
+//	tool, err := client.AsTool()
+//	myAgent.AddTool(tool)
+//
+// The tool handler transparently handles both synchronous (inline Message) and
+// asynchronous (Task-based) responses. For async tasks it subscribes to the
+// event stream or falls back to polling GetTask at the configured interval
+// (default 500 ms) until the task reaches a terminal state.
+//
+// Key client options:
+//   - [WithResolver] — override the default AgentCard resolver
+//   - [WithPushConfig] — default push notification config for tasks
+//   - [WithAcceptedOutputModes] — MIME types the client can consume
+//   - [WithPreferredTransports] — ordered transport protocol preferences
+//   - [WithClientInterceptors] — inject auth headers or tracing per call
+//   - [WithPollingInterval] — tune the GetTask polling fallback interval
+//
+// # Operational responsibilities
+//
+// The package only returns plain [http.Handler] values. TLS termination,
+// authentication, authorisation, rate limiting, and request-validation
+// middleware are entirely the caller's responsibility. The baseURL passed to
+// [New] is published verbatim in the AgentCard, so it must be the externally
+// reachable endpoint at which the handlers are mounted.
 package a2a

@@ -17,6 +17,7 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -545,5 +546,140 @@ func TestRun_EmptyInput(t *testing.T) {
 	}
 	if result.TextContent() == "" {
 		t.Fatal("expected non-empty result")
+	}
+}
+
+// multiToolCallResult builds an LLM result that requests multiple tool calls in one turn.
+func multiToolCallResult(calls ...llm.ToolCall) *llm.Result {
+	return &llm.Result{
+		Message: &llm.Message{
+			Role:      llm.RoleAssistant,
+			ToolCalls: calls,
+		},
+	}
+}
+
+func toolCall(toolName, callID, arguments string) llm.ToolCall {
+	return llm.ToolCall{
+		ID:   callID,
+		Type: llm.ToolTypeFunction,
+		Function: llm.FunctionCall{Name: toolName, Arguments: arguments},
+	}
+}
+
+func TestSanitizeToolName(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"my-agent", "my-agent"},
+		{"My Agent", "My_Agent"},
+		{"agent v2.0!", "agent_v2_0_"},
+		{"agent(v2)", "agent_v2_"},
+		{strings.Repeat("x", 70), strings.Repeat("x", 64)},
+		{"", "agent"},
+		{"!@#$", "____"},
+		{"already_clean-name", "already_clean-name"},
+	}
+	for _, tc := range tests {
+		got := agent.SanitizeToolName(tc.in)
+		if got != tc.want {
+			t.Errorf("SanitizeToolName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestRun_ParallelToolCalls verifies that when the LLM requests two tool calls
+// in the same turn, both execute and both results appear in the final response.
+func TestRun_ParallelToolCalls(t *testing.T) {
+	var calls [2]int
+
+	toolA := mustTool(t, "tool_a", func(_ context.Context, _ *struct{}) (string, error) {
+		calls[0]++
+		return "result_a", nil
+	})
+	toolB := mustTool(t, "tool_b", func(_ context.Context, _ *struct{}) (string, error) {
+		calls[1]++
+		return "result_b", nil
+	})
+
+	stub := &stubLLM{
+		responses: []*llm.Result{
+			multiToolCallResult(
+				toolCall("tool_a", "c1", "{}"),
+				toolCall("tool_b", "c2", "{}"),
+			),
+			textResult("both done"),
+		},
+		errs: []error{nil, nil},
+	}
+
+	a := mustNew(t, stub, "agent", "desc")
+	if err := a.AddTool(toolA); err != nil {
+		t.Fatalf("AddTool tool_a: %v", err)
+	}
+	if err := a.AddTool(toolB); err != nil {
+		t.Fatalf("AddTool tool_b: %v", err)
+	}
+
+	result, err := a.Run(context.Background(), llm.Text("do both"))
+	if err != nil {
+		t.Fatalf("Run: unexpected error: %v", err)
+	}
+	if calls[0] != 1 {
+		t.Errorf("tool_a called %d times, want 1", calls[0])
+	}
+	if calls[1] != 1 {
+		t.Errorf("tool_b called %d times, want 1", calls[1])
+	}
+	if result.TextContent() != "both done" {
+		t.Errorf("result = %q, want %q", result.TextContent(), "both done")
+	}
+}
+
+// TestRun_HandoffWithPrecedingToolCall verifies that when the LLM requests a
+// regular tool call followed by a handoff in the same turn, both execute and
+// the handoff is honoured (previously the regular tool was abandoned if it
+// came after the handoff in the slice).
+func TestRun_HandoffWithPrecedingToolCall(t *testing.T) {
+	regularInvoked := false
+
+	regular := mustTool(t, "regular_tool", func(_ context.Context, _ *struct{}) (string, error) {
+		regularInvoked = true
+		return "regular_result", nil
+	})
+
+	worker := mustNew(t, makeStub(textResult("worker done"), nil), "worker", "does work")
+
+	orchestrator := mustNew(t,
+		makeStub(
+			multiToolCallResult(
+				toolCall("regular_tool", "c1", "{}"),
+				toolCall("handoff_to_worker", "c2", `{"context":"go"}`),
+			),
+			nil,
+		),
+		"orchestrator", "orchestrates",
+	)
+
+	if err := orchestrator.AddTool(regular); err != nil {
+		t.Fatalf("AddTool: %v", err)
+	}
+	if err := orchestrator.AddHandoff(worker); err != nil {
+		t.Fatalf("AddHandoff: %v", err)
+	}
+
+	result, err := orchestrator.Run(context.Background(), llm.Text("delegate"))
+	if err != nil {
+		t.Fatalf("Run: unexpected error: %v", err)
+	}
+	if !regularInvoked {
+		t.Error("regular_tool was not invoked; expected it to run even when a handoff is in the same batch")
+	}
+	if result.HandoffAgent == nil {
+		t.Fatal("expected HandoffAgent to be set")
+	}
+	if result.HandoffAgent.Name() != "worker" {
+		t.Errorf("HandoffAgent = %q, want %q", result.HandoffAgent.Name(), "worker")
 	}
 }

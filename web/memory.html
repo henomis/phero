@@ -18,6 +18,7 @@
       <li><a href="tool.html">Tool</a></li>
       <li><a href="mcp.html">MCP</a></li>
       <li><a href="a2a.html">A2A</a></li>
+      <li><a href="nats.html">NATS</a></li>
       <li><a href="embedding.html">Embedding</a></li>
       <li><a href="textsplitter.html">Textsplitter</a></li>
       <li><a href="vectorstore.html">Vectorstore</a></li>
@@ -47,6 +48,7 @@
         <li><strong>Short-term</strong>: keep the last N messages (fast, simple)</li>
         <li><strong>File-backed</strong>: persist messages locally as JSON across runs</li>
         <li><strong>PostgreSQL-backed</strong>: persist session history in a shared database</li>
+        <li><strong>NATS JetStream KV-backed</strong>: persist session history in NATS; survives restarts, supports named sessions</li>
         <li><strong>Summarized</strong>: compress older history into a structured summary</li>
         <li><strong>Semantic</strong>: retrieve by similarity search (RAG-backed)</li>
       </ul>
@@ -136,6 +138,49 @@ a.SetMemory(conversationMemory)</code></pre>
     </section>
 
     <section>
+      <h2>NATS JetStream KV memory (persistent, network-accessible)</h2>
+      <p>
+        <code>memory/nats</code> stores conversation history in a <strong>NATS JetStream Key-Value bucket</strong>.
+        Each session is a single KV key; the value is a JSON-encoded <code>[]llm.Message</code>.
+        Because JetStream persists bucket data to disk, memory survives process restarts automatically.
+      </p>
+      <p>
+        Multiple sessions can coexist in the same bucket by using different session IDs — useful for running
+        independent conversations side-by-side without separate databases.
+      </p>
+
+      <pre><code class="language-go">import (
+    "os"
+
+    "github.com/nats-io/nats.go"
+
+    natsmemory "github.com/henomis/phero/memory/nats"
+)
+
+nc, _ := nats.Connect(os.Getenv("NATS_URL"))
+js, _ := nc.JetStream()
+kv, _ := js.CreateKeyValue(&nats.KeyValueConfig{Bucket: "phero_memory"})
+
+conversationMemory, err := natsmemory.New(kv, "session-123")
+if err != nil {
+    // handle error
+}
+
+a.SetMemory(conversationMemory)</code></pre>
+
+      <p>
+        Start a local NATS server with JetStream enabled:
+      </p>
+      <pre><code class="language-bash">docker run --rm -p 4222:4222 nats -js</code></pre>
+
+      <p>
+        The full walkthrough is in the
+        <a href="https://github.com/henomis/phero/tree/main/examples/nats-memory">NATS Memory example</a>,
+        which demonstrates session resumption across two process runs.
+      </p>
+    </section>
+
+    <section>
       <h2>PostgreSQL conversation memory (persistent)</h2>
       <p>
         If you want conversation history to survive process restarts (or be shared across replicas), use <code>memory/psql</code>.
@@ -193,6 +238,13 @@ go run ./examples/conversational-agent -summarize -summary-threshold 8 -summary-
 go run .</code></pre>
 
       <p>
+        For NATS-backed persistent memory (start NATS first):
+      </p>
+      <pre><code class="language-bash">docker run --rm -p 4222:4222 nats -js
+
+go run ./examples/nats-memory -session my-session</code></pre>
+
+      <p>
         For semantic recall, try the long-term memory example (requires Qdrant):
       </p>
       <pre><code class="language-bash">go run ./examples/long-term-memory -qdrant-host localhost -qdrant-collection long_term_memory</code></pre>
@@ -204,6 +256,7 @@ go run .</code></pre>
         <li><strong>Fast prototyping</strong>: use <code>memory/simple</code> with a reasonable max messages value</li>
         <li><strong>Local persistence</strong>: use <code>memory/jsonfile</code> when you want history to survive restarts on one machine</li>
         <li><strong>Shared persistence</strong>: use <code>memory/psql</code> when sessions should live in PostgreSQL</li>
+        <li><strong>Lightweight network persistence</strong>: use <code>memory/nats</code> when you want NATS JetStream KV as the store (easy Docker setup, named sessions)</li>
         <li><strong>Long conversations</strong>: enable summarization to keep context compact</li>
         <li><strong>Long-term recall</strong>: use semantic memory via <code>memory/rag</code></li>
       </ul>
