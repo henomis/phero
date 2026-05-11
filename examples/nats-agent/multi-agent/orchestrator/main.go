@@ -73,29 +73,29 @@ func main() {
 	)
 
 	// ── Discover the three newsroom agents ──────────────────────────────────
-	researcherInfo, err := discoverOne(ctx, c, "researcher")
+	researcher, err := discoverOne(ctx, c, "researcher")
 	if err != nil {
 		log.Fatalf("discover researcher: %v", err)
 	}
 
-	writerInfo, err := discoverOne(ctx, c, "writer")
+	writer, err := discoverOne(ctx, c, "writer")
 	if err != nil {
 		log.Fatalf("discover writer: %v", err)
 	}
 
-	editorInfo, err := discoverOne(ctx, c, "editor")
+	editor, err := discoverOne(ctx, c, "editor")
 	if err != nil {
 		log.Fatalf("discover editor: %v", err)
 	}
 
 	// ── Print discovered agents ──────────────────────────────────────────────
-	printInfo("researcher", researcherInfo)
-	printInfo("writer", writerInfo)
-	printInfo("editor", editorInfo)
+	printInfo("researcher", researcher)
+	printInfo("writer", writer)
+	printInfo("editor", editor)
 	fmt.Println()
 
 	// ── Wrap each remote agent as a local tool ──────────────────────────────
-	researchTool, err := c.AsTool(researcherInfo,
+	researchTool, err := researcher.AsTool(
 		"researcher",
 		"Research a topic and produce structured notes with key facts, context, and open questions.",
 	)
@@ -103,7 +103,7 @@ func main() {
 		log.Fatalf("build researcher tool: %v", err)
 	}
 
-	writeTool, err := c.AsTool(writerInfo,
+	writeTool, err := writer.AsTool(
 		"writer",
 		"Write a clear, engaging 300-500 word article from the supplied research notes.",
 	)
@@ -111,7 +111,7 @@ func main() {
 		log.Fatalf("build writer tool: %v", err)
 	}
 
-	editTool, err := c.AsTool(editorInfo,
+	editTool, err := editor.AsTool(
 		"editor",
 		"Edit and polish an article draft for grammar, clarity, style, and consistency.",
 	)
@@ -169,18 +169,18 @@ Return the final polished article as your answer.`,
 
 // discoverOne discovers the first agent on the bus matching owner="newsroom"
 // and the given name, failing if none is found.
-func discoverOne(ctx context.Context, c *natsagent.Client, agentName string) (*natsagent.AgentInfo, error) {
-	infos, err := c.Discover(ctx,
+func discoverOne(ctx context.Context, c *natsagent.Client, agentName string) (*natsagent.AgentHandle, error) {
+	handles, err := c.Discover(ctx,
 		natsagent.FilterByOwner("newsroom"),
 		natsagent.FilterByName(agentName),
 	)
 	if err != nil {
 		return nil, err
 	}
-	return infos[0], nil
+	return handles[0], nil
 }
 
-func printInfo(label string, info *natsagent.AgentInfo) {
+func printInfo(label string, info *natsagent.AgentHandle) {
 	fmt.Printf("%-12s agent=%-8s owner=%-10s name=%-12s protocol=%s\n",
 		label,
 		info.Agent,

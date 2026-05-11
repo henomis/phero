@@ -103,7 +103,7 @@ func main() {
 		}
 
 		turnCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		stream, err := c.Prompt(turnCtx, target, line)
+		stream, err := target.Prompt(turnCtx, line)
 		if err != nil {
 			cancel()
 			fmt.Printf("Error: %v\n\n", err)

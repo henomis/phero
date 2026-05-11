@@ -27,8 +27,6 @@ import (
 )
 
 // AgentInfo holds the parsed discovery record for a single agent instance.
-// It is returned by [Client.Discover] and passed to [Client.Prompt] and
-// [Client.AsTool].
 type AgentInfo struct {
 	// InstanceID is the framework-assigned per-instance identifier (§3.4).
 	InstanceID string
@@ -50,6 +48,25 @@ type AgentInfo struct {
 	MaxPayloadBytes int64
 	// AttachmentsOk mirrors the attachments_ok endpoint metadata flag (§2.1).
 	AttachmentsOk bool
+}
+
+// AgentHandle is the live handle returned by [Client.Discover]. It bundles the
+// discovery data ([AgentInfo]) with the [Client] that found it, so callers can
+// call Prompt and AsTool without threading the client separately.
+type AgentHandle struct {
+	AgentInfo
+	client *Client
+}
+
+// Prompt sends a plain-text prompt to this agent and returns a [Stream] for
+// consuming the streamed response. It delegates to [Client.Prompt].
+func (h *AgentHandle) Prompt(ctx context.Context, text string) (*Stream, error) {
+	return h.client.Prompt(ctx, &h.AgentInfo, text)
+}
+
+// AsTool wraps this agent as an [llm.Tool]. It delegates to [Client.AsTool].
+func (h *AgentHandle) AsTool(toolName, toolDesc string) (*llm.Tool, error) {
+	return h.client.AsTool(&h.AgentInfo, toolName, toolDesc)
 }
 
 // Client discovers and prompts NATS Agent Protocol agents.
@@ -77,7 +94,7 @@ func NewClient(nc *natsclient.Conn, opts ...ClientOption) *Client {
 // [WithDiscoveryTimeout]). Any DiscoverOption filters are applied client-side.
 //
 // Returns [ErrNoAgentsFound] if the filtered result set is empty.
-func (c *Client) Discover(ctx context.Context, opts ...DiscoverOption) ([]*AgentInfo, error) {
+func (c *Client) Discover(ctx context.Context, opts ...DiscoverOption) ([]*AgentHandle, error) {
 	filter := &discoverFilter{}
 	for _, opt := range opts {
 		if opt != nil {
@@ -98,7 +115,7 @@ func (c *Client) Discover(ctx context.Context, opts ...DiscoverOption) ([]*Agent
 
 	deadline := time.Now().Add(c.cfg.discoveryTimeout)
 
-	var infos []*AgentInfo
+	var infos []*AgentHandle
 	for {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
@@ -118,7 +135,7 @@ func (c *Client) Discover(ctx context.Context, opts ...DiscoverOption) ([]*Agent
 		if !matchFilter(info, filter) {
 			continue
 		}
-		infos = append(infos, info)
+		infos = append(infos, &AgentHandle{AgentInfo: *info, client: c})
 	}
 
 	if len(infos) == 0 {
