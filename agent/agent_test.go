@@ -561,8 +561,8 @@ func multiToolCallResult(calls ...llm.ToolCall) *llm.Result {
 
 func toolCall(toolName, callID, arguments string) llm.ToolCall {
 	return llm.ToolCall{
-		ID:   callID,
-		Type: llm.ToolTypeFunction,
+		ID:       callID,
+		Type:     llm.ToolTypeFunction,
 		Function: llm.FunctionCall{Name: toolName, Arguments: arguments},
 	}
 }

@@ -211,7 +211,6 @@ func (c *Client) AsTool() (*llm.Tool, error) {
 	return llm.NewTool(agent.SanitizeToolName(c.card.Name), c.card.Description, handler)
 }
 
-
 // extractStatusMessage returns the first text part from a task status message,
 // or an empty string if the message is nil or contains no text parts.
 func extractStatusMessage(msg *sdka2a.Message) string {
