@@ -24,6 +24,8 @@ import (
 	"testing"
 	"time"
 
+	sdka2a "github.com/a2aproject/a2a-go/v2/a2a"
+
 	"github.com/henomis/phero/a2a"
 	"github.com/henomis/phero/agent"
 	"github.com/henomis/phero/llm"
@@ -55,6 +57,67 @@ func newA2ATestServer(t *testing.T) string {
 	mux.Handle("/", srv.JSONRPCHandler())
 
 	return ts.URL
+}
+
+// newA2ARESTTestServer builds an httptest.Server with both JSONRPCHandler and
+// RESTHandler mounted, and returns the base URL.
+func newA2ARESTTestServer(t *testing.T) string {
+	t.Helper()
+
+	llmClient := buildOpenAILLM()
+	greeter, err := agent.New(
+		llmClient,
+		"greeter",
+		"You are a friendly greeter. When given a name, respond with a short greeting containing that name.",
+	)
+	if err != nil {
+		t.Fatalf("agent.New: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	srv, err := a2a.New(greeter, ts.URL, a2a.WithRESTTransport())
+	if err != nil {
+		t.Fatalf("a2a.New: %v", err)
+	}
+
+	srv.Mount(mux)
+
+	return ts.URL
+}
+
+// TestA2A_RESTTransport verifies that the A2A server's HTTP+JSON/SSE transport
+// can be discovered and used via the client with the REST protocol preference.
+func TestA2A_RESTTransport(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	baseURL := newA2ARESTTestServer(t)
+
+	client, err := a2a.NewClient(ctx, baseURL,
+		a2a.WithPreferredTransports(sdka2a.TransportProtocolHTTPJSON),
+	)
+	if err != nil {
+		t.Fatalf("a2a.NewClient: %v", err)
+	}
+
+	tool, err := client.AsTool()
+	if err != nil {
+		t.Fatalf("client.AsTool: %v", err)
+	}
+
+	result, err := tool.Handle(ctx, `{"input":"Greet Bob via REST"}`)
+	if err != nil {
+		t.Fatalf("tool.Handle: %v", err)
+	}
+
+	if result == nil {
+		t.Fatal("expected non-nil tool result")
+	}
+
+	t.Logf("REST transport result: %#v", result)
 }
 
 // TestA2AServer_AgentCard verifies that the A2A server exposes the agent card.

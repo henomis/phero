@@ -26,6 +26,7 @@ import (
 	"github.com/henomis/phero/vectorstore"
 	vspsql "github.com/henomis/phero/vectorstore/psql"
 	vsqdrant "github.com/henomis/phero/vectorstore/qdrant"
+	vsweaviate "github.com/henomis/phero/vectorstore/weaviate"
 )
 
 // ---- Qdrant ----------------------------------------------------------------
@@ -309,3 +310,161 @@ func TestVectorStorePSQL_Delete(t *testing.T) {
 		}
 	}
 }
+
+// ---- Weaviate --------------------------------------------------------------
+
+func newWeaviateStore(t *testing.T, class string) *vsweaviate.Store {
+	t.Helper()
+
+	wc := requireWeaviate(t)
+
+	store, err := vsweaviate.New(wc, class, vsweaviate.WithVectorSize(4))
+	if err != nil {
+		t.Fatalf("vsweaviate.New: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := store.EnsureCollection(ctx); err != nil {
+		t.Fatalf("EnsureCollection: %v", err)
+	}
+
+	t.Cleanup(func() {
+		cleanCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		if err := store.Clear(cleanCtx); err != nil {
+			t.Logf("cleanup Clear: %v", err)
+		}
+	})
+
+	return store
+}
+
+// newWeaviateClass returns a unique Weaviate class name to avoid collisions
+// across parallel test runs.
+func newWeaviateClass() string {
+	return "E2eTest" + uuid.New().String()[:8]
+}
+
+// TestVectorStoreWeaviate_UpsertQuery exercises Weaviate upsert + similarity query.
+// Requires a running Weaviate instance (skipped otherwise).
+func TestVectorStoreWeaviate_UpsertQuery(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	store := newWeaviateStore(t, newWeaviateClass())
+
+	points := []vectorstore.Point{
+		{ID: "alpha", Vector: []float32{1, 0, 0, 0}, Payload: map[string]any{"label": "alpha"}},
+		{ID: "beta", Vector: []float32{0, 1, 0, 0}, Payload: map[string]any{"label": "beta"}},
+		{ID: "gamma", Vector: []float32{0, 0, 1, 0}, Payload: map[string]any{"label": "gamma"}},
+	}
+
+	if err := store.Upsert(ctx, points); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	results, err := store.Query(ctx, []float32{1, 0, 0, 0}, 1)
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+
+	if len(results) == 0 {
+		t.Fatal("expected at least one result")
+	}
+
+	if results[0].ID != "alpha" {
+		t.Errorf("expected top result 'alpha', got %q", results[0].ID)
+	}
+
+	if results[0].Score <= 0 {
+		t.Errorf("expected positive score, got %f", results[0].Score)
+	}
+
+	t.Logf("top result: id=%s score=%f", results[0].ID, results[0].Score)
+}
+
+// TestVectorStoreWeaviate_Delete verifies that a deleted point no longer appears
+// in query results.
+func TestVectorStoreWeaviate_Delete(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	store := newWeaviateStore(t, newWeaviateClass())
+
+	points := []vectorstore.Point{
+		{ID: "keep", Vector: []float32{1, 0, 0, 0}, Payload: map[string]any{"label": "keep"}},
+		{ID: "drop", Vector: []float32{1, 0, 0, 0}, Payload: map[string]any{"label": "drop"}},
+	}
+
+	if err := store.Upsert(ctx, points); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	if err := store.Delete(ctx, []string{"drop"}); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	results, err := store.Query(ctx, []float32{1, 0, 0, 0}, 10)
+	if err != nil {
+		t.Fatalf("Query after Delete: %v", err)
+	}
+
+	for _, r := range results {
+		if r.ID == "drop" {
+			t.Error("deleted point 'drop' still appears in results")
+		}
+	}
+}
+
+// TestVectorStoreWeaviate_Clear verifies that Clear removes all points from the
+// collection and subsequent queries return empty results.
+func TestVectorStoreWeaviate_Clear(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Build the client directly so we control class re-creation after Clear.
+	wc := requireWeaviate(t)
+	class := newWeaviateClass()
+
+	store, err := vsweaviate.New(wc, class, vsweaviate.WithVectorSize(4))
+	if err != nil {
+		t.Fatalf("vsweaviate.New: %v", err)
+	}
+
+	if err := store.EnsureCollection(ctx); err != nil {
+		t.Fatalf("EnsureCollection: %v", err)
+	}
+
+	t.Cleanup(func() {
+		cleanCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		_ = store.Clear(cleanCtx)
+	})
+
+	points := []vectorstore.Point{
+		{ID: "p1", Vector: []float32{1, 0, 0, 0}, Payload: map[string]any{}},
+		{ID: "p2", Vector: []float32{0, 1, 0, 0}, Payload: map[string]any{}},
+	}
+
+	if err := store.Upsert(ctx, points); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	if err := store.Clear(ctx); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+
+	results, err := store.Query(ctx, []float32{1, 0, 0, 0}, 10)
+	if err != nil {
+		t.Fatalf("Query after Clear: %v", err)
+	}
+
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results after Clear, got %d", len(results))
+	}
+}
+
