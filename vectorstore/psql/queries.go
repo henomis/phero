@@ -69,3 +69,7 @@ const deleteByIDsSQLTemplate = `DELETE FROM %s WHERE collection = $1 AND id IN (
 // clearSQLTemplate expects:
 //   - %s: quoted table name
 const clearSQLTemplate = `DELETE FROM %s WHERE collection = $1`
+
+// countSQLTemplate expects:
+//   - %s: quoted table name
+const countSQLTemplate = `SELECT COUNT(*) FROM %s WHERE collection = $1`

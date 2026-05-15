@@ -318,6 +318,17 @@ func (s *Store) Delete(ctx context.Context, ids []string) error {
 	return err
 }
 
+// Count returns the number of points in the configured collection.
+func (s *Store) Count(ctx context.Context) (uint64, error) {
+	table, err := sqlutil.QuoteQualifiedIdent(s.tableName)
+	if err != nil {
+		return 0, ErrInvalidTableName
+	}
+	var count uint64
+	err = s.db.QueryRowContext(ctx, fmt.Sprintf(countSQLTemplate, table), s.collection).Scan(&count)
+	return count, err
+}
+
 // Clear deletes all points in the configured table.
 func (s *Store) Clear(ctx context.Context) error {
 	table, err := sqlutil.QuoteQualifiedIdent(s.tableName)

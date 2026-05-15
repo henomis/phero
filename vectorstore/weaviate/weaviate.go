@@ -334,6 +334,38 @@ func (s *Store) Clear(ctx context.Context) error {
 	return s.EnsureCollection(ctx)
 }
 
+// Count returns the number of objects currently stored in the class.
+func (s *Store) Count(ctx context.Context) (uint64, error) {
+	result, err := s.client.GraphQL().Aggregate().
+		WithClassName(s.class).
+		WithFields(graphql.Field{Name: "meta { count }"}).
+		Do(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("aggregate count: %w", err)
+	}
+	if len(result.Errors) > 0 {
+		return 0, fmt.Errorf("aggregate count errors: %v", result.Errors)
+	}
+	agg, ok := result.Data["Aggregate"].(map[string]any)
+	if !ok {
+		return 0, nil
+	}
+	items, ok := agg[s.class].([]any)
+	if !ok || len(items) == 0 {
+		return 0, nil
+	}
+	item, ok := items[0].(map[string]any)
+	if !ok {
+		return 0, nil
+	}
+	meta, ok := item["meta"].(map[string]any)
+	if !ok {
+		return 0, nil
+	}
+	count, _ := meta["count"].(float64)
+	return uint64(count), nil
+}
+
 // idToUUID converts an arbitrary string ID to a deterministic UUID v5 using
 // the package-level idNamespace.
 func idToUUID(id string) strfmt.UUID {

@@ -123,7 +123,7 @@ func main() {
 		return
 	}
 
-	if err := ragEngine.Ingest(bootstrapCtx, splitter); err != nil {
+	if err := ragEngine.IngestOnce(bootstrapCtx, splitter); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to ingest file: %v\n", err)
 		return
 	}

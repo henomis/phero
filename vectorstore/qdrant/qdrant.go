@@ -316,6 +316,14 @@ func (s *Store) Clear(ctx context.Context) error {
 	return err
 }
 
+// Count returns the number of points currently in the collection.
+func (s *Store) Count(ctx context.Context) (uint64, error) {
+	return s.client.Count(ctx, &qdrantapi.CountPoints{
+		CollectionName: s.collection,
+		Exact:          qdrantapi.PtrOf(true),
+	})
+}
+
 func idToPointID(id string) *qdrantapi.PointId {
 	if n, err := strconv.ParseUint(id, 10, 64); err == nil {
 		return qdrantapi.NewIDNum(n)
