@@ -243,7 +243,7 @@ func TestAgent_Handoff(t *testing.T) {
 		t.Fatalf("orchestrator.Run: %v", err)
 	}
 
-	t.Logf("Final response: %q (handoff=%v)", result.TextContent(), result.HandoffAgent != nil)
+	t.Logf("Final response: %q (handoff=%v)", result.TextContent(), len(result.HandoffAgents) > 0)
 }
 
 // TestAgent_MaxIterationsReached verifies that the agent respects the max

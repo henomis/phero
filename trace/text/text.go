@@ -115,8 +115,8 @@ func (t *Tracer) format(event trace.Event) string {
 			tools = strings.Join(parts, ", ")
 		}
 		handoff := ""
-		if summary.HandoffAgent != "" {
-			handoff = fmt.Sprintf(" handoff=%s", summary.HandoffAgent)
+		if len(summary.HandoffAgents) > 0 {
+			handoff = fmt.Sprintf(" handoff=%s", strings.Join(summary.HandoffAgents, ","))
 		}
 		errText := ""
 		if summary.Error != "" {

@@ -262,8 +262,8 @@ func TestRun_Simple(t *testing.T) {
 	if result.TextContent() != "Hello, world!" {
 		t.Fatalf("expected %q, got %q", "Hello, world!", result.TextContent())
 	}
-	if result.HandoffAgent != nil {
-		t.Fatalf("expected no handoff agent, got %v", result.HandoffAgent)
+	if len(result.HandoffAgents) != 0 {
+		t.Fatalf("expected no handoff agents, got %v", result.HandoffAgents)
 	}
 }
 
@@ -436,11 +436,11 @@ func TestRun_Handoff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
-	if result.HandoffAgent == nil {
-		t.Fatal("expected HandoffAgent to be set")
+	if len(result.HandoffAgents) == 0 {
+		t.Fatal("expected HandoffAgents to be set")
 	}
-	if result.HandoffAgent.Name() != "worker" {
-		t.Fatalf("expected handoff to %q, got %q", "worker", result.HandoffAgent.Name())
+	if result.HandoffAgents[0].Name() != "worker" {
+		t.Fatalf("expected handoff to %q, got %q", "worker", result.HandoffAgents[0].Name())
 	}
 }
 
@@ -676,10 +676,10 @@ func TestRun_HandoffWithPrecedingToolCall(t *testing.T) {
 	if !regularInvoked {
 		t.Error("regular_tool was not invoked; expected it to run even when a handoff is in the same batch")
 	}
-	if result.HandoffAgent == nil {
-		t.Fatal("expected HandoffAgent to be set")
+	if len(result.HandoffAgents) == 0 {
+		t.Fatal("expected HandoffAgents to be set")
 	}
-	if result.HandoffAgent.Name() != "worker" {
-		t.Errorf("HandoffAgent = %q, want %q", result.HandoffAgent.Name(), "worker")
+	if result.HandoffAgents[0].Name() != "worker" {
+		t.Errorf("HandoffAgents[0] = %q, want %q", result.HandoffAgents[0].Name(), "worker")
 	}
 }
