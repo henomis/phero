@@ -20,8 +20,8 @@ var (
 	// ErrNilConn is returned when a nil *nats.Conn is passed to New or NewClient.
 	ErrNilConn = errors.New("nats: NATS connection must not be nil")
 
-	// ErrNilAgent is returned when a nil *agent.Agent is passed to New.
-	ErrNilAgent = errors.New("nats: agent must not be nil")
+	// ErrNilHandler is returned when a nil Handler is passed to New.
+	ErrNilHandler = errors.New("nats: handler must not be nil")
 
 	// ErrEmptyOwner is returned when the owner field is empty.
 	ErrEmptyOwner = errors.New("nats: owner must not be empty")
