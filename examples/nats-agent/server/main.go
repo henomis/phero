@@ -30,6 +30,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 
 	"github.com/henomis/phero/agent"
@@ -66,7 +67,7 @@ func main() {
 
 	srv, err := natsagent.New(nc, a, *owner, *name,
 		natsagent.WithAgentID("phero"),
-		natsagent.WithSession(*name),
+		natsagent.WithSession(uuid.NewString()),
 		natsagent.WithHeartbeatInterval(10*time.Second),
 	)
 	if err != nil {

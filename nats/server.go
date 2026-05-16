@@ -77,6 +77,11 @@ func New(nc *natsclient.Conn, h Handler, owner, name string, opts ...ServerOptio
 		}
 	}
 
+	if cfg.session != "" {
+		name = name + "-" + cfg.session
+		cfg.session = name
+	}
+
 	return &Server{
 		nc:      nc,
 		handler: h,
