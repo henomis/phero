@@ -26,7 +26,9 @@ import (
 	"testing"
 	"time"
 
+	natsio "github.com/nats-io/nats.go"
 	qdrantapi "github.com/qdrant/go-client/qdrant"
+	weaviateclient "github.com/weaviate/weaviate-go-client/v4/weaviate"
 
 	embeddingOpenAI "github.com/henomis/phero/embedding/openai"
 
@@ -50,6 +52,8 @@ const (
 	defaultPostgresDSN    = "postgres://phero:phero@localhost:5432/phero?sslmode=disable"
 	defaultQdrantHost     = "localhost"
 	defaultQdrantPort     = 6334
+	defaultNATSURL        = "nats://localhost:4222"
+	defaultWeaviateHost   = "localhost:8080"
 )
 
 // ---- env helpers -------------------------------------------------------
@@ -73,6 +77,9 @@ func anthropicModel() string   { return envOr("ANTHROPIC_MODEL", defaultAnthropi
 func embedModel() string { return envOr("EMBEDDING_MODEL", defaultEmbedModel) }
 
 func postgresDSN() string { return envOr("POSTGRES_DSN", defaultPostgresDSN) }
+
+func natsURL() string      { return envOr("NATS_URL", defaultNATSURL) }
+func weaviateHost() string { return envOr("WEAVIATE_HOST", defaultWeaviateHost) }
 
 func qdrantHostEnv() string { return envOr("QDRANT_HOST", defaultQdrantHost) }
 
@@ -162,6 +169,49 @@ func requireQdrant(t *testing.T) *qdrantapi.Client {
 	})
 	if err != nil {
 		t.Skipf("qdrant: cannot create client: %v", err)
+	}
+
+	return c
+}
+
+// requireNATS skips the test if a NATS server is not reachable and returns a
+// connected *natsio.Conn on success. The connection is drained via t.Cleanup.
+func requireNATS(t *testing.T) *natsio.Conn {
+	t.Helper()
+
+	conn, err := net.DialTimeout("tcp", "localhost:4222", 2*time.Second)
+	if err != nil {
+		t.Skipf("nats not reachable at %s: %v", natsURL(), err)
+	}
+	conn.Close()
+
+	nc, err := natsio.Connect(natsURL())
+	if err != nil {
+		t.Skipf("nats: cannot connect to %s: %v", natsURL(), err)
+	}
+
+	t.Cleanup(func() { _ = nc.Drain() })
+
+	return nc
+}
+
+// requireWeaviate skips the test if Weaviate is not reachable and returns a
+// *weaviateclient.Client on success.
+func requireWeaviate(t *testing.T) *weaviateclient.Client {
+	t.Helper()
+
+	conn, err := net.DialTimeout("tcp", weaviateHost(), 2*time.Second)
+	if err != nil {
+		t.Skipf("weaviate not reachable at %s: %v", weaviateHost(), err)
+	}
+	conn.Close()
+
+	c, err := weaviateclient.NewClient(weaviateclient.Config{
+		Host:   weaviateHost(),
+		Scheme: "http",
+	})
+	if err != nil {
+		t.Skipf("weaviate: cannot create client: %v", err)
 	}
 
 	return c

@@ -64,7 +64,9 @@ func New(store vectorstore.Store, embedder embedding.Embedder, options ...Option
 	rag := &RAG{store: store, embedder: embedder, topk: defaultTopK, embedderBatchSize: defaultEmbedderBatchSize}
 
 	for _, option := range options {
-		option(rag)
+		if option != nil {
+			option(rag)
+		}
 	}
 
 	return rag, nil
@@ -192,6 +194,25 @@ func (s *RAG) Ingest(ctx context.Context, splitter textsplitter.Splitter) error 
 		return s.ingestBatch(ctx, batch, offset)
 	}
 	return nil
+}
+
+// IngestOnce ingests using the provided splitter only when the backing
+// collection is empty (Count() == 0). Returns ErrNoSplitter if splitter is nil.
+func (s *RAG) IngestOnce(ctx context.Context, splitter textsplitter.Splitter) error {
+	if splitter == nil {
+		return ErrNoSplitter
+	}
+	if err := s.ensureCollection(ctx); err != nil {
+		return err
+	}
+	count, err := s.store.Count(ctx)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	return s.Ingest(ctx, splitter)
 }
 
 // Query embeds the provided query text and performs a similarity search.

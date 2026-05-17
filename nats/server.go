@@ -21,13 +21,20 @@ import (
 	"time"
 
 	"github.com/henomis/phero/agent"
+	"github.com/henomis/phero/llm"
 	natsclient "github.com/nats-io/nats.go"
 	natsio "github.com/nats-io/nats.go/micro"
 )
 
 const protocolVersion = "0.3"
 
-// Server registers a Phero agent as a NATS micro service implementing the
+// Handler is implemented by anything that can process a prompt — *agent.Agent
+// and workflow executors both satisfy it.
+type Handler interface {
+	Run(ctx context.Context, parts ...llm.ContentPart) (*agent.Result, error)
+}
+
+// Server registers a Handler as a NATS micro service implementing the
 // NATS Agent Protocol v0.3. It handles:
 //
 //   - Service registration and discovery via $SRV.PING/INFO.agents (§3, §4).
@@ -35,26 +42,26 @@ const protocolVersion = "0.3"
 //   - Heartbeat publication on agents.hb.{agent}.{owner}.{name} (§8).
 //   - On-demand status replies on the status endpoint (§8.7).
 type Server struct {
-	nc    *natsclient.Conn
-	agent *agent.Agent
-	cfg   *serverConfig
-	owner string
-	name  string
+	nc      *natsclient.Conn
+	handler Handler
+	cfg     *serverConfig
+	owner   string
+	name    string
 
 	svc natsio.Service
 	wg  sync.WaitGroup
 }
 
-// New creates a Server that wraps a ready to serve on NATS.
+// New creates a Server that wraps h and serves it on NATS.
 // owner and name are required positional arguments (§3.2):
 //   - owner identifies the operator or account.
 //   - name is the per-instance label (the 5th token in the subject hierarchy).
-func New(nc *natsclient.Conn, a *agent.Agent, owner, name string, opts ...ServerOption) (*Server, error) {
+func New(nc *natsclient.Conn, h Handler, owner, name string, opts ...ServerOption) (*Server, error) {
 	if nc == nil {
 		return nil, ErrNilConn
 	}
-	if a == nil {
-		return nil, ErrNilAgent
+	if h == nil {
+		return nil, ErrNilHandler
 	}
 	if owner == "" {
 		return nil, ErrEmptyOwner
@@ -70,12 +77,17 @@ func New(nc *natsclient.Conn, a *agent.Agent, owner, name string, opts ...Server
 		}
 	}
 
+	if cfg.session != "" {
+		name = name + "-" + cfg.session
+		cfg.session = name
+	}
+
 	return &Server{
-		nc:    nc,
-		agent: a,
-		cfg:   cfg,
-		owner: owner,
-		name:  name,
+		nc:      nc,
+		handler: h,
+		cfg:     cfg,
+		owner:   owner,
+		name:    name,
 	}, nil
 }
 
@@ -186,6 +198,9 @@ func (s *Server) processPrompt(ctx context.Context, req natsio.Request) {
 		return
 	}
 
+	// Mandatory first message: ack before any latency-inducing work (§6.4).
+	_ = req.Respond(encodeStatusChunk("ack"))
+
 	// Keepalive: emit periodic ack chunks so the caller's inactivity timeout
 	// does not fire during long-running agent work (§6.4).
 	kaCtx, kaCancel := context.WithCancel(ctx)
@@ -203,7 +218,7 @@ func (s *Server) processPrompt(ctx context.Context, req natsio.Request) {
 		}
 	})
 
-	result, runErr := s.agent.Run(ctx, parts...)
+	result, runErr := s.handler.Run(ctx, parts...)
 
 	// Stop keepalive before emitting the response/terminator so ack chunks
 	// never race the terminator or the response chunk.

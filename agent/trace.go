@@ -94,7 +94,7 @@ func (s *runStats) recordMemorySave(count int, duration time.Duration) {
 	s.memorySaved += count
 }
 
-func (s *runStats) summary(iterations int, handoffAgent string, err error) *trace.RunSummary {
+func (s *runStats) summary(iterations int, handoffAgents []string, err error) *trace.RunSummary {
 	tools := make([]trace.ToolCallSummary, 0, len(s.toolSummaries))
 	toolNames := make([]string, 0, len(s.toolSummaries))
 	for toolName := range s.toolSummaries {
@@ -129,7 +129,7 @@ func (s *runStats) summary(iterations int, handoffAgent string, err error) *trac
 			Memory: s.memoryDuration,
 		},
 		Tools:        tools,
-		HandoffAgent: handoffAgent,
+		HandoffAgents: handoffAgents,
 	}
 
 	if err != nil {

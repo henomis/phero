@@ -72,8 +72,8 @@ type RunSummary struct {
 	Latency LatencySummary
 	// Tools contains per-tool call totals for the run.
 	Tools []ToolCallSummary
-	// HandoffAgent is set when the run ended by handing work to another agent.
-	HandoffAgent string
+	// HandoffAgents lists the agents that the run handed work to; more than one means fan-out.
+	HandoffAgents []string
 	// Error is the final run error message, when the run did not complete cleanly.
 	Error string
 }

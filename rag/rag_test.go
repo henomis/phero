@@ -85,6 +85,10 @@ func (s *stubStore) Clear(_ context.Context) error {
 	return nil
 }
 
+func (s *stubStore) Count(_ context.Context) (uint64, error) {
+	return 0, nil
+}
+
 func (s *stubStore) EnsureCalls() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -183,5 +187,52 @@ func TestRAGEnsureCollectionConcurrentCallersShareSuccess(t *testing.T) {
 
 	if got := store.EnsureCalls(); got != 1 {
 		t.Fatalf("EnsureCollection() calls = %d, want 1", got)
+	}
+}
+
+type countingStore struct {
+	stubStore
+	count       uint64
+	upsertCalls int
+}
+
+func (s *countingStore) Count(_ context.Context) (uint64, error) {
+	return s.count, nil
+}
+
+func (s *countingStore) Upsert(_ context.Context, _ []vectorstore.Point) error {
+	s.upsertCalls++
+	return nil
+}
+
+func TestRAG_IngestOnce_SkipsWhenNonEmpty(t *testing.T) {
+	store := &countingStore{count: 5}
+	splitter := &stubSplitter{chunks: []string{"chunk"}}
+	r, err := New(store, stubEmbedder{})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	if err := r.IngestOnce(context.Background(), splitter); err != nil {
+		t.Fatalf("IngestOnce() error = %v", err)
+	}
+	if store.upsertCalls != 0 {
+		t.Fatalf("Upsert called %d times, want 0 (collection was non-empty)", store.upsertCalls)
+	}
+}
+
+func TestRAG_IngestOnce_IngestsWhenEmpty(t *testing.T) {
+	store := &countingStore{count: 0}
+	splitter := &stubSplitter{chunks: []string{"chunk1", "chunk2"}}
+	r, err := New(store, stubEmbedder{})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	if err := r.IngestOnce(context.Background(), splitter); err != nil {
+		t.Fatalf("IngestOnce() error = %v", err)
+	}
+	if store.upsertCalls == 0 {
+		t.Fatal("Upsert not called, want at least one call (collection was empty)")
 	}
 }

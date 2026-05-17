@@ -44,9 +44,10 @@ type Agent struct {
 // Result represents the final output of an agent after processing user input and executing any tool calls.
 type Result struct {
 	// Parts holds the multimodal content of the final assistant message.
-	Parts        []llm.ContentPart
-	HandoffAgent *Agent
-	Summary      *trace.RunSummary
+	Parts         []llm.ContentPart
+	// HandoffAgents lists the agents that were handed work; more than one means fan-out.
+	HandoffAgents []*Agent
+	Summary       *trace.RunSummary
 }
 
 // TextContent returns the concatenation of all text parts in the result.
@@ -185,7 +186,7 @@ func (a *Agent) Run(ctx context.Context, parts ...llm.ContentPart) (result *Resu
 	ctx = trace.WithTracer(ctx, a.tracer)
 	ctx = trace.WithAgentName(ctx, a.name)
 	stats := newRunStats(a.name)
-	handoffAgentName := ""
+	var handoffAgentNames []string
 
 	session, sessionIndex, err := a.prepareSession(ctx, parts, stats)
 	if err != nil {
@@ -218,7 +219,7 @@ func (a *Agent) Run(ctx context.Context, parts ...llm.ContentPart) (result *Resu
 			Timestamp:  time.Now(),
 		})
 
-		summary := stats.summary(iteration, handoffAgentName, err)
+		summary := stats.summary(iteration, handoffAgentNames, err)
 		if result != nil {
 			result.Summary = summary
 		}
@@ -249,13 +250,15 @@ func (a *Agent) Run(ctx context.Context, parts ...llm.ContentPart) (result *Resu
 		}
 
 		session = iterationResult.session
-		if iterationResult.handoffAgent != nil {
-			handoffAgentName = iterationResult.handoffAgent.Name()
+		if len(iterationResult.handoffAgents) > 0 {
+			for _, ha := range iterationResult.handoffAgents {
+				handoffAgentNames = append(handoffAgentNames, ha.Name())
+			}
 		}
 
 		// If finalMessage is nil, it means the agent executed tool calls and needs to call the LLM again.
 		if iterationResult.lastMessage != nil {
-			return &Result{Parts: iterationResult.lastMessage.Parts, HandoffAgent: iterationResult.handoffAgent}, nil
+			return &Result{Parts: iterationResult.lastMessage.Parts, HandoffAgents: iterationResult.handoffAgents}, nil
 		}
 	}
 }
@@ -307,9 +310,9 @@ func (a *Agent) saveSession(ctx context.Context, messages []llm.Message, session
 
 // agentIteration represents the result of one iteration of the agent loop.
 type agentIteration struct {
-	session      []llm.Message
-	lastMessage  *llm.Message
-	handoffAgent *Agent
+	session       []llm.Message
+	lastMessage   *llm.Message
+	handoffAgents []*Agent
 }
 
 // handleAgentIteration executes one iteration of the agent loop: it calls the LLM with the current messages,
@@ -345,26 +348,23 @@ func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message,
 	}
 	wg.Wait()
 
-	// Append results in order; find the first handoff, if any.
-	var handoffAgent *Agent
+	// Append results in order; collect all handoffs (fan-out when more than one).
+	var handoffAgents []*Agent
+	var handoffMsg *llm.Message
 	for i, result := range results {
 		session = append(session, *result)
-		if hAgent, ok := a.handoffs[toolCalls[i].Function.Name]; ok && handoffAgent == nil {
-			handoffAgent = hAgent
+		if hAgent, ok := a.handoffs[toolCalls[i].Function.Name]; ok {
+			handoffAgents = append(handoffAgents, hAgent)
+			if handoffMsg == nil {
+				handoffMsg = result
+			}
 		}
 	}
 
-	if handoffAgent != nil {
-		// All tool results are preserved in session. Return the handoff tool's
+	if len(handoffAgents) > 0 {
+		// All tool results are preserved in session. Return the first handoff tool's
 		// result as lastMessage so callers receive it in Result.Parts.
-		var handoffMsg *llm.Message
-		for i, toolCall := range toolCalls {
-			if _, ok := a.handoffs[toolCall.Function.Name]; ok {
-				handoffMsg = results[i]
-				break
-			}
-		}
-		return agentIteration{session: session, lastMessage: handoffMsg, handoffAgent: handoffAgent}, nil
+		return agentIteration{session: session, lastMessage: handoffMsg, handoffAgents: handoffAgents}, nil
 	}
 
 	return agentIteration{session: session}, nil

@@ -23,127 +23,93 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/henomis/phero/agent"
 	"github.com/henomis/phero/llm"
+	skillpkg "github.com/henomis/phero/skill"
 	toolfile "github.com/henomis/phero/tool/file"
+	toolskill "github.com/henomis/phero/tool/skill"
 )
 
+const skillsRoot = "../../examples/skills/skills"
+
 // TestSkillParser_ListAndParse verifies that skills can be discovered and parsed.
-// func TestSkillParser_ListAndParse(t *testing.T) {
-// 	root := filepath.Join("..", "examples", "skills", "skills")
-// 	parser := skill.New(root)
+func TestSkillParser_ListAndParse(t *testing.T) {
+	parser := skillpkg.New(skillsRoot)
 
-// 	list, err := parser.List()
-// 	if err != nil {
-// 		t.Fatalf("Parser.List: %v", err)
-// 	}
+	list, err := parser.List()
+	if err != nil {
+		t.Fatalf("Parser.List: %v", err)
+	}
+	if len(list) == 0 {
+		t.Fatal("expected at least one skill")
+	}
 
-// 	if len(list) == 0 {
-// 		t.Fatal("expected at least one skill")
-// 	}
+	t.Logf("Discovered skills: %v", list)
 
-// 	t.Logf("Discovered skills: %v", list)
+	skillItem, err := parser.Parse(list[0])
+	if err != nil {
+		t.Fatalf("Parser.Parse: %v", err)
+	}
 
-// 	skillItem, err := parser.Parse(list[0])
-// 	if err != nil {
-// 		t.Fatalf("Parser.Parse: %v", err)
-// 	}
+	if strings.TrimSpace(skillItem.Name) == "" {
+		t.Fatal("expected parsed skill to have a name")
+	}
+	if strings.TrimSpace(skillItem.Description) == "" {
+		t.Fatal("expected parsed skill to have a description")
+	}
+}
 
-// 	if strings.TrimSpace(skillItem.Name) == "" {
-// 		t.Fatal("expected parsed skill to have a name")
-// 	}
-// 	if strings.TrimSpace(skillItem.Description) == "" {
-// 		t.Fatal("expected parsed skill to have a description")
-// 	}
-// }
+// TestSkill_AsTool verifies that a skill dispatcher tool can be constructed and
+// exposes a non-empty tool name.
+func TestSkill_AsTool(t *testing.T) {
+	st, err := toolskill.New(skillsRoot)
+	if err != nil {
+		t.Fatalf("toolskill.New: %v", err)
+	}
 
-// TestSkill_AsTool verifies that a skill can be turned into a tool.
-// func TestSkill_AsTool(t *testing.T) {
-// 	root := filepath.Join("..", "examples", "skills", "skills")
-// 	parser := skill.New(root)
+	tool := st.Tool()
+	if strings.TrimSpace(tool.Name()) == "" {
+		t.Fatal("expected tool to have a name")
+	}
 
-// 	list, err := parser.List()
-// 	if err != nil {
-// 		t.Fatalf("Parser.List: %v", err)
-// 	}
-// 	if len(list) == 0 {
-// 		t.Fatal("expected at least one skill")
-// 	}
-
-// 	skillItem, err := parser.Parse(list[0])
-// 	if err != nil {
-// 		t.Fatalf("Parser.Parse: %v", err)
-// 	}
-
-// 	history, err := memoryjsonfile.New(t.TempDir() + "/memory.json")
-// 	if err != nil {
-// 		t.Fatalf("memoryjsonfile.New: %v", err)
-// 	}
-
-// 	llmClient := buildOpenAILLM()
-
-// 	tool, err := skillItem.AsTool(llmClient, skill.WithMemory(history))
-// 	if err != nil {
-// 		t.Fatalf("Skill.AsTool: %v", err)
-// 	}
-
-// 	if strings.TrimSpace(tool.Name()) == "" {
-// 		t.Fatal("expected tool to have a name")
-// 	}
-
-// 	t.Logf("Skill tool: %s", tool.Name())
-// }
+	t.Logf("Skill tool name: %s", tool.Name())
+}
 
 // TestSkill_AgentIntegration verifies that a parsed skill tool can be added to
 // an agent and used in a real run.
-// func TestSkill_AgentIntegration(t *testing.T) {
-// 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
-// 	defer cancel()
+func TestSkill_AgentIntegration(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
 
-// 	root := filepath.Join("..", "examples", "skills", "skills")
-// 	parser := skill.New(root)
+	st, err := toolskill.New(skillsRoot)
+	if err != nil {
+		t.Fatalf("toolskill.New: %v", err)
+	}
 
-// 	list, err := parser.List()
-// 	if err != nil {
-// 		t.Fatalf("Parser.List: %v", err)
-// 	}
-// 	if len(list) == 0 {
-// 		t.Fatal("expected at least one skill")
-// 	}
+	llmClient := buildOpenAILLM()
 
-// 	skillItem, err := parser.Parse(list[0])
-// 	if err != nil {
-// 		t.Fatalf("Parser.Parse: %v", err)
-// 	}
+	a, err := agent.New(llmClient, "skill-agent", "Use your available tools when appropriate.")
+	if err != nil {
+		t.Fatalf("agent.New: %v", err)
+	}
 
-// 	history, err := memoryjsonfile.New(t.TempDir() + "/memory.json")
-// 	if err != nil {
-// 		t.Fatalf("memoryjsonfile.New: %v", err)
-// 	}
+	if err := a.AddTool(st.Tool()); err != nil {
+		t.Fatalf("AddTool skill: %v", err)
+	}
 
-// 	llmClient := buildOpenAILLM()
+	result, err := a.Run(ctx, llm.Text("Load the get-random-quote skill and tell me what it does."))
+	if err != nil {
+		t.Fatalf("agent.Run: %v", err)
+	}
 
-// 	skillTool, err := skillItem.AsTool(llmClient, skill.WithMemory(history))
-// 	if err != nil {
-// 		t.Fatalf("Skill.AsTool: %v", err)
-// 	}
+	if strings.TrimSpace(result.TextContent()) == "" {
+		t.Fatal("expected non-empty agent response")
+	}
 
-// 	a, err := agent.New(llmClient, "skill-agent", "Use your available tools when appropriate.")
-// 	if err != nil {
-// 		t.Fatalf("agent.New: %v", err)
-// 	}
-
-// 	if err := a.AddTool(skillTool); err != nil {
-// 		t.Fatalf("AddTool skill: %v", err)
-// 	}
-
-// 	result, err := a.Run(ctx, llm.Text("Give me a random quote."))
-// 	if err != nil {
-// 		t.Fatalf("agent.Run: %v", err)
-// 	}
-
-// 	t.Logf("Skill agent response: %q", result.TextContent())
-// }
+	t.Logf("Skill agent response: %q", result.TextContent())
+}
 
 // TestSkill_FileToolComposition verifies the pattern used in the example where
 // a file tool is wrapped with custom middleware.

@@ -53,4 +53,7 @@ type Store interface {
 
 	// Clear deletes all points in the collection.
 	Clear(ctx context.Context) error
+
+	// Count returns the number of points currently in the collection.
+	Count(ctx context.Context) (uint64, error)
 }

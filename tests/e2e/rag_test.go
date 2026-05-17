@@ -85,8 +85,8 @@ Mount Everest is Earth's highest mountain above sea level, located in Nepal.`
 
 	splitter := textsplitterrecursive.New(tmpFile, 300, 30)
 
-	if err := r.Ingest(ctx, splitter); err != nil {
-		t.Fatalf("Ingest: %v", err)
+	if err := r.IngestOnce(ctx, splitter); err != nil {
+		t.Fatalf("IngestOnce: %v", err)
 	}
 
 	results, err := r.Query(ctx, "How tall is the Eiffel Tower?")
@@ -148,8 +148,8 @@ Water boils at 100 degrees Celsius at sea level atmospheric pressure.`
 
 	splitter := textsplitterrecursive.New(tmpFile, 200, 20)
 
-	if err := r.Ingest(ctx, splitter); err != nil {
-		t.Fatalf("Ingest: %v", err)
+	if err := r.IngestOnce(ctx, splitter); err != nil {
+		t.Fatalf("IngestOnce: %v", err)
 	}
 
 	ragTool, err := r.AsTool("search_knowledge", "Searches the knowledge base for relevant information")
