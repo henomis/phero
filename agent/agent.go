@@ -44,7 +44,7 @@ type Agent struct {
 // Result represents the final output of an agent after processing user input and executing any tool calls.
 type Result struct {
 	// Parts holds the multimodal content of the final assistant message.
-	Parts         []llm.ContentPart
+	Parts []llm.ContentPart
 	// HandoffAgents lists the agents that were handed work; more than one means fan-out.
 	HandoffAgents []*Agent
 	Summary       *trace.RunSummary

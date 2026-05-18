@@ -128,7 +128,7 @@ func (s *runStats) summary(iterations int, handoffAgents []string, err error) *t
 			Tool:   s.toolDuration,
 			Memory: s.memoryDuration,
 		},
-		Tools:        tools,
+		Tools:         tools,
 		HandoffAgents: handoffAgents,
 	}
 

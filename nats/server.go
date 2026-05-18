@@ -20,10 +20,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
 	natsclient "github.com/nats-io/nats.go"
 	natsio "github.com/nats-io/nats.go/micro"
+
+	"github.com/henomis/phero/agent"
+	"github.com/henomis/phero/llm"
 )
 
 const protocolVersion = "0.3"

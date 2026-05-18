@@ -26,15 +26,13 @@ import (
 	"testing"
 	"time"
 
+	// PostgreSQL driver registered as "pgx".
+	_ "github.com/jackc/pgx/v5/stdlib"
 	natsio "github.com/nats-io/nats.go"
 	qdrantapi "github.com/qdrant/go-client/qdrant"
 	weaviateclient "github.com/weaviate/weaviate-go-client/v4/weaviate"
 
 	embeddingOpenAI "github.com/henomis/phero/embedding/openai"
-
-	// PostgreSQL driver registered as "pgx".
-	_ "github.com/jackc/pgx/v5/stdlib"
-
 	llmanthropic "github.com/henomis/phero/llm/anthropic"
 	llmopenai "github.com/henomis/phero/llm/openai"
 )

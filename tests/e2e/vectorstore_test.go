@@ -467,4 +467,3 @@ func TestVectorStoreWeaviate_Clear(t *testing.T) {
 		t.Fatalf("expected 0 results after Clear, got %d", len(results))
 	}
 }
-
