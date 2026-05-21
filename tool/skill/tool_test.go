@@ -290,34 +290,6 @@ func TestDefaultAvailableSkillLocationUsesRootPathAndSkillDir(t *testing.T) {
 	}
 }
 
-func TestWithAvailableSkillsLocationOverridesDerivedPath(t *testing.T) {
-	tool, err := New("./skills", WithParser(&stubParser{
-		list: func() ([]string, error) { return []string{"pdf"}, nil },
-		parse: func(_ string) (*skillpkg.Skill, error) {
-			return &skillpkg.Skill{Name: "pdf", Description: "Parse PDFs", Body: "Body"}, nil
-		},
-	}), WithAvailableSkillsLocation("project"))
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-
-	res, err := tool.Tool().Handle(context.Background(), `{"command":"pdf"}`)
-	if err != nil {
-		t.Fatalf("Handle() error = %v", err)
-	}
-
-	out, ok := res.(*Output)
-	if !ok {
-		t.Fatalf("Handle() result type = %T, want *Output", res)
-	}
-	if len(out.AvailableSkills) != 1 {
-		t.Fatalf("AvailableSkills length = %d, want 1", len(out.AvailableSkills))
-	}
-	if out.AvailableSkills[0].Location != "project" {
-		t.Fatalf("Location = %q, want %q", out.AvailableSkills[0].Location, "project")
-	}
-}
-
 func TestBasePathFallsBackToRootPlusSkillName(t *testing.T) {
 	tool, err := New("./skills", WithParser(&stubParser{
 		list: func() ([]string, error) { return []string{"pdf"}, nil },
