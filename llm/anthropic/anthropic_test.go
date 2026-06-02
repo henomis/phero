@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -240,6 +241,190 @@ func TestExecute_ToolMessage_MissingToolCallID_ReturnsError(t *testing.T) {
 	if !errors.Is(err, anthropic.ErrToolMessageMissingToolCallID) {
 		t.Fatalf("expected ErrToolMessageMissingToolCallID, got %v", err)
 	}
+}
+
+// capturingServer records the raw request body of the last POST it receives and
+// replies with a minimal valid assistant message.
+func capturingServer(t *testing.T, body *[]byte) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		*body = b
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"x","type":"message","role":"assistant","model":"m",` +
+			`"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn",` +
+			`"usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+}
+
+// wireMessage is a minimal view of an Anthropic Messages API message used to
+// assert the shape of the converted request payload.
+type wireMessage struct {
+	Role    string `json:"role"`
+	Content []struct {
+		Type      string `json:"type"`
+		ToolUseID string `json:"tool_use_id"`
+		IsError   *bool  `json:"is_error"`
+	} `json:"content"`
+}
+
+type wireRequest struct {
+	Messages []wireMessage `json:"messages"`
+}
+
+// TestExecute_ParallelToolResults_MergedIntoSingleUserMessage verifies that when
+// the assistant issues parallel tool calls — and the framework appends one
+// RoleTool message per call — the conversion groups all tool_result blocks into a
+// single user turn, as Anthropic requires.
+func TestExecute_ParallelToolResults_MergedIntoSingleUserMessage(t *testing.T) {
+	var body []byte
+	srv := capturingServer(t, &body)
+	defer srv.Close()
+
+	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
+	msgs := []llm.Message{
+		llm.UserMessage(llm.Text("weather in Paris and London?")),
+		llm.AssistantMessage(nil,
+			llm.ToolCall{ID: "call_a", Type: llm.ToolTypeFunction, Function: llm.FunctionCall{Name: "w", Arguments: `{"city":"Paris"}`}},
+			llm.ToolCall{ID: "call_b", Type: llm.ToolTypeFunction, Function: llm.FunctionCall{Name: "w", Arguments: `{"city":"London"}`}},
+		),
+		llm.ToolResultMessage("call_a", llm.Text("sunny")),
+		llm.ToolResultMessage("call_b", llm.Text("rainy")),
+	}
+
+	if _, err := c.Execute(context.Background(), msgs, nil); err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+
+	var req wireRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("unmarshal request body: %v", err)
+	}
+
+	// Expect exactly 3 turns: user, assistant(tool_use x2), user(tool_result x2).
+	if len(req.Messages) != 3 {
+		t.Fatalf("expected 3 messages, got %d: %s", len(req.Messages), body)
+	}
+
+	last := req.Messages[2]
+	if last.Role != "user" {
+		t.Fatalf("expected final turn to be a user message, got %q", last.Role)
+	}
+	if len(last.Content) != 2 {
+		t.Fatalf("expected 2 tool_result blocks in the final user message, got %d: %s", len(last.Content), body)
+	}
+	for i, want := range []string{"call_a", "call_b"} {
+		if last.Content[i].Type != "tool_result" {
+			t.Fatalf("block %d: expected tool_result, got %q", i, last.Content[i].Type)
+		}
+		if last.Content[i].ToolUseID != want {
+			t.Fatalf("block %d: expected tool_use_id %q, got %q", i, want, last.Content[i].ToolUseID)
+		}
+	}
+}
+
+// TestExecute_ToolError_MapsToIsError verifies that a tool-result message
+// flagged as an error sets is_error on the Anthropic tool_result block, while a
+// successful result omits it.
+func TestExecute_ToolError_MapsToIsError(t *testing.T) {
+	var body []byte
+	srv := capturingServer(t, &body)
+	defer srv.Close()
+
+	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
+
+	errResult := llm.ToolResultMessage("call_err", llm.Text("boom"))
+	errResult.ToolError = true
+
+	msgs := []llm.Message{
+		llm.UserMessage(llm.Text("do two things")),
+		llm.AssistantMessage(nil,
+			llm.ToolCall{ID: "call_ok", Type: llm.ToolTypeFunction, Function: llm.FunctionCall{Name: "t", Arguments: `{}`}},
+			llm.ToolCall{ID: "call_err", Type: llm.ToolTypeFunction, Function: llm.FunctionCall{Name: "t", Arguments: `{}`}},
+		),
+		llm.ToolResultMessage("call_ok", llm.Text("fine")),
+		errResult,
+	}
+
+	if _, err := c.Execute(context.Background(), msgs, nil); err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+
+	var req wireRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("unmarshal request body: %v", err)
+	}
+
+	last := req.Messages[len(req.Messages)-1]
+	if len(last.Content) != 2 {
+		t.Fatalf("expected 2 tool_result blocks, got %d: %s", len(last.Content), body)
+	}
+
+	byID := map[string]*bool{}
+	for _, b := range last.Content {
+		byID[b.ToolUseID] = b.IsError
+	}
+
+	if got := byID["call_ok"]; got != nil {
+		t.Fatalf("expected is_error omitted for successful result, got %v", *got)
+	}
+	if got := byID["call_err"]; got == nil || !*got {
+		t.Fatalf("expected is_error=true for failed result, got %v (body: %s)", got, body)
+	}
+}
+
+// TestExecute_DefaultTemperature_MatchesAnthropicSpec verifies that an
+// unconfigured client sends the Anthropic default temperature, and that
+// WithTemperature overrides it.
+func TestExecute_DefaultTemperature_MatchesAnthropicSpec(t *testing.T) {
+	type wireTempRequest struct {
+		Temperature *float64 `json:"temperature"`
+	}
+
+	t.Run("default", func(t *testing.T) {
+		var body []byte
+		srv := capturingServer(t, &body)
+		defer srv.Close()
+
+		c := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
+		if _, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))}, nil); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+
+		var req wireTempRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if req.Temperature == nil {
+			t.Fatalf("expected temperature to be sent, body: %s", body)
+		}
+		if *req.Temperature != float64(anthropic.DefaultTemperature) {
+			t.Fatalf("expected default temperature %v, got %v", anthropic.DefaultTemperature, *req.Temperature)
+		}
+	})
+
+	t.Run("override", func(t *testing.T) {
+		var body []byte
+		srv := capturingServer(t, &body)
+		defer srv.Close()
+
+		c := anthropic.New("key", anthropic.WithBaseURL(srv.URL), anthropic.WithTemperature(0.2))
+		if _, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))}, nil); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+
+		var req wireTempRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if req.Temperature == nil || *req.Temperature != float64(float32(0.2)) {
+			t.Fatalf("expected temperature 0.2, got %v (body: %s)", req.Temperature, body)
+		}
+	})
 }
 
 func TestExecute_APIError_ReturnsError(t *testing.T) {

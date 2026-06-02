@@ -408,6 +408,7 @@ func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, itera
 		Role:       llm.RoleTool,
 		Parts:      resultParts,
 		ToolCallID: toolCall.ID,
+		ToolError:  err != nil,
 	}
 }
 

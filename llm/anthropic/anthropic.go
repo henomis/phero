@@ -39,6 +39,12 @@ const (
 
 	// DefaultMaxTokens is the default max_tokens value used for requests.
 	DefaultMaxTokens int64 = 2048
+
+	// DefaultTemperature is the default sampling temperature used for requests.
+	//
+	// It matches the Anthropic Messages API default so that an unconfigured client
+	// behaves identically to omitting the parameter.
+	DefaultTemperature float32 = 1.0
 )
 
 // Client is an llm.LLM implementation that uses github.com/anthropics/anthropic-sdk-go.
@@ -61,9 +67,10 @@ type Option func(*Client)
 // (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN) as per anthropic-sdk-go behavior.
 func New(apiKey string, opts ...Option) *Client {
 	c := &Client{
-		apiKey:    strings.TrimSpace(apiKey),
-		model:     DefaultModel,
-		maxTokens: DefaultMaxTokens,
+		apiKey:      strings.TrimSpace(apiKey),
+		model:       DefaultModel,
+		maxTokens:   DefaultMaxTokens,
+		temperature: DefaultTemperature,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -129,9 +136,50 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*l
 // messagesToAnthropic converts Phero messages to Anthropic wire types.
 //
 // System messages are collected and returned separately as required by the Anthropic API.
+//
+// Consecutive messages that map to the same Anthropic role are merged into a
+// single turn. This is required for correctness: Phero (like OpenAI) models each
+// tool result as its own RoleTool message, but Anthropic requires that all
+// tool_result blocks answering a parallel-tool-call turn be delivered together in
+// a single user message — and that no other message sit between the assistant's
+// tool_use turn and that user turn. Without merging, parallel tool calls produce
+// separate consecutive user messages, which Anthropic rejects (or which silently
+// degrades future parallel tool use).
 func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam, []anthropicapi.MessageParam, error) {
 	var systemParts []string
 	out := make([]anthropicapi.MessageParam, 0, len(messages))
+
+	// pending accumulates content blocks for consecutive messages that share the
+	// same Anthropic role (user or assistant); flush emits the merged turn.
+	var pendingRole string
+	var pending []anthropicapi.ContentBlockParamUnion
+
+	flush := func() {
+		if len(pending) == 0 {
+			return
+		}
+		switch pendingRole {
+		case llm.RoleAssistant:
+			out = append(out, anthropicapi.NewAssistantMessage(pending...))
+		default:
+			out = append(out, anthropicapi.NewUserMessage(pending...))
+		}
+		pending = nil
+		pendingRole = ""
+	}
+
+	// add appends blocks under the given Anthropic role, flushing first if the
+	// role changes so each emitted turn holds a single role's blocks.
+	add := func(role string, blocks ...anthropicapi.ContentBlockParamUnion) {
+		if len(blocks) == 0 {
+			return
+		}
+		if pendingRole != "" && pendingRole != role {
+			flush()
+		}
+		pendingRole = role
+		pending = append(pending, blocks...)
+	}
 
 	for _, m := range messages {
 		switch m.Role {
@@ -146,9 +194,7 @@ func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam,
 			if err != nil {
 				return nil, nil, err
 			}
-			if len(blocks) > 0 {
-				out = append(out, anthropicapi.NewUserMessage(blocks...))
-			}
+			add(llm.RoleUser, blocks...)
 
 		case llm.RoleAssistant:
 			blocks := make([]anthropicapi.ContentBlockParamUnion, 0, len(m.Parts)+len(m.ToolCalls))
@@ -174,27 +220,30 @@ func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam,
 				}
 				blocks = append(blocks, anthropicapi.NewToolUseBlock(id, input, tc.Function.Name))
 			}
-			out = append(out, anthropicapi.NewAssistantMessage(blocks...))
+			add(llm.RoleAssistant, blocks...)
 
 		case llm.RoleTool:
 			toolUseID := strings.TrimSpace(m.ToolCallID)
 			if toolUseID == "" {
 				return nil, nil, ErrToolMessageMissingToolCallID
 			}
-			// Build tool result content blocks from parts.
+			// Build tool result content blocks from parts. Tool results map to the
+			// user role and are merged with adjacent tool results into one turn.
 			content := toolResultContentToAnthropic(m.Parts)
 			toolBlock := anthropicapi.ToolResultBlockParam{
 				ToolUseID: toolUseID,
 				Content:   content,
 			}
-			out = append(out, anthropicapi.NewUserMessage(
-				anthropicapi.ContentBlockParamUnion{OfToolResult: &toolBlock},
-			))
+			if m.ToolError {
+				toolBlock.IsError = param.NewOpt(true)
+			}
+			add(llm.RoleUser, anthropicapi.ContentBlockParamUnion{OfToolResult: &toolBlock})
 
 		default:
 			return nil, nil, &UnsupportedRoleError{Role: m.Role}
 		}
 	}
+	flush()
 
 	joined := strings.TrimSpace(strings.Join(systemParts, "\n\n"))
 	var system []anthropicapi.TextBlockParam
@@ -394,6 +443,10 @@ func WithMaxTokens(maxTokens int64) Option {
 	}
 }
 
+// WithTemperature sets the sampling temperature used for Anthropic requests.
+//
+// When unset, the client uses DefaultTemperature, which matches the Anthropic
+// Messages API default.
 func WithTemperature(temp float32) Option {
 	return func(c *Client) {
 		c.temperature = temp

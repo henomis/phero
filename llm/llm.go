@@ -152,6 +152,11 @@ type Message struct {
 	// ToolCallID is the ID of the ToolCall this message is a response to.
 	// Only set on tool-result messages (Role == RoleTool).
 	ToolCallID string
+	// ToolError reports that the tool call this message answers failed.
+	// Only meaningful on tool-result messages (Role == RoleTool). Providers that
+	// model tool errors natively (e.g. Anthropic's tool_result is_error) use it;
+	// others convey the failure through the message's text content.
+	ToolError bool
 	// Name is an optional participant name, used by some providers.
 	Name string
 }
