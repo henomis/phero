@@ -78,5 +78,16 @@ func (tl *tracedLLM) Execute(ctx context.Context, messages []llm.Message, tools 
 		Timestamp: time.Now(),
 	})
 
+	if msg != nil {
+		if reasoning := msg.ReasoningContent(); reasoning != "" {
+			tl.tracer.Trace(ReasoningEvent{
+				AgentName: agentName,
+				Content:   reasoning,
+				Iteration: iteration,
+				Timestamp: time.Now(),
+			})
+		}
+	}
+
 	return result, err
 }

@@ -35,6 +35,14 @@ const (
 	// ContentTypeImageBase64 is an image provided as raw base64-encoded bytes.
 	// Use ImageBase64 or ImageFile to create parts of this type.
 	ContentTypeImageBase64 ContentType = "image_base64"
+	// ContentTypeReasoning is an extended-thinking / reasoning block returned by
+	// models that expose their chain of thought (e.g. Anthropic extended thinking).
+	// The Text holds the reasoning content and Signature holds the provider's
+	// verification signature, which must be preserved and sent back on later turns.
+	ContentTypeReasoning ContentType = "reasoning"
+	// ContentTypeRedactedReasoning is an opaque, provider-encrypted reasoning block.
+	// The Text holds the redacted payload verbatim; it must be sent back unchanged.
+	ContentTypeRedactedReasoning ContentType = "redacted_reasoning"
 )
 
 // ContentPart is a single piece of content within a message — either text or an image.
@@ -49,6 +57,10 @@ type ContentPart struct {
 	ImageBase64 string
 	// MIMEType is the MIME type of the image (e.g. "image/png") when Type is ContentTypeImageBase64.
 	MIMEType string
+	// Signature holds the provider verification signature for a reasoning part
+	// (Type ContentTypeReasoning). It must be round-tripped unchanged so the
+	// provider accepts the thinking block on subsequent turns.
+	Signature string
 }
 
 // Text returns a ContentPart containing the given plain text.
@@ -59,6 +71,18 @@ func Text(s string) ContentPart {
 // ImageURL returns a ContentPart referencing an image at the given URL.
 func ImageURL(url string) ContentPart {
 	return ContentPart{Type: ContentTypeImageURL, ImageURL: url}
+}
+
+// Reasoning returns a ContentPart carrying an extended-thinking block with its
+// provider verification signature.
+func Reasoning(text, signature string) ContentPart {
+	return ContentPart{Type: ContentTypeReasoning, Text: text, Signature: signature}
+}
+
+// RedactedReasoning returns a ContentPart carrying an opaque, provider-encrypted
+// reasoning block. data is stored verbatim and must be sent back unchanged.
+func RedactedReasoning(data string) ContentPart {
+	return ContentPart{Type: ContentTypeRedactedReasoning, Text: data}
 }
 
 // ImageBase64 returns a ContentPart carrying a base64-encoded image.
@@ -164,6 +188,21 @@ type Message struct {
 // TextContent returns the concatenation of all text parts in the message.
 func (m Message) TextContent() string {
 	return TextContent(m.Parts...)
+}
+
+// ReasoningContent returns the concatenation of all reasoning (extended-thinking)
+// text parts in the message. Redacted reasoning is opaque and is not included.
+func (m Message) ReasoningContent() string {
+	var sb strings.Builder
+	for _, p := range m.Parts {
+		if p.Type == ContentTypeReasoning && p.Text != "" {
+			if sb.Len() > 0 {
+				sb.WriteByte('\n')
+			}
+			sb.WriteString(p.Text)
+		}
+	}
+	return sb.String()
 }
 
 // TextContent returns the concatenation of all text parts across the given ContentParts.

@@ -183,6 +183,21 @@ type LLMResponseEvent struct {
 
 func (LLMResponseEvent) traceEvent() {}
 
+// ReasoningEvent is emitted after an LLM response that contains extended-thinking
+// (reasoning) content, carrying the model's reasoning text.
+type ReasoningEvent struct {
+	// AgentName is the originating agent's name. Empty when used standalone.
+	AgentName string
+	// Content is the model's reasoning text.
+	Content string
+	// Iteration is the agent loop iteration this reasoning belongs to. Zero when used standalone.
+	Iteration int
+	// Timestamp is when the event occurred.
+	Timestamp time.Time
+}
+
+func (ReasoningEvent) traceEvent() {}
+
 // ToolCallEvent is emitted just before a tool is invoked.
 type ToolCallEvent struct {
 	// AgentName is the name of the agent invoking the tool.

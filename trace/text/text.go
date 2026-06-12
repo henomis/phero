@@ -167,6 +167,15 @@ func (t *Tracer) format(event trace.Event) string {
 			ansiBold, ansiReset, iter, tokens,
 			toolCalls, content)
 
+	case trace.ReasoningEvent:
+		ts := e.Timestamp.Format("15:04:05.000")
+		agent := agentLabel(e.AgentName)
+		iter := iterLabel(e.Iteration)
+		return fmt.Sprintf("%s%s%s %s🧠 Reasoning%s%s  %q",
+			ansiMagenta, ts, agent,
+			ansiBold, ansiReset, iter,
+			truncate(e.Content, 200))
+
 	case trace.ToolCallEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
 		return fmt.Sprintf("%s%s %s[%s]%s %s⚙  ToolCall%s  iter=%d tool=%s args=%s",

@@ -88,7 +88,24 @@ llmClient := anthropic.New(
         <li><code>WithMaxTokens(n)</code>: maximum completion tokens</li>
         <li><code>WithTemperature(t)</code>: sampling temperature (0&ndash;1)</li>
         <li><code>WithBaseURL(url)</code>: override the API endpoint (useful for proxies or tests)</li>
+        <li><code>WithPromptCaching()</code>: mark the system prompt and tool list as cacheable, so repeated requests
+          reuse them at the cheaper cache-read rate. Cache token counts appear on <code>Result.Usage</code>
+          (<code>CacheReadTokens</code> / <code>CacheWriteTokens</code>).</li>
+        <li><code>WithThinking(budget)</code>: enable extended thinking with the given token budget. Reasoning is
+          returned as <code>ContentTypeReasoning</code> parts (read it with <code>Message.ReasoningContent()</code>)
+          and replayed on later turns so tool use keeps working. Reasoning never leaks into <code>TextContent()</code>.</li>
       </ul>
+
+      <pre><code class="language-go">llmClient := anthropic.New(
+    os.Getenv("ANTHROPIC_API_KEY"),
+    anthropic.WithModel("claude-sonnet-4-6"),
+    anthropic.WithPromptCaching(),
+    anthropic.WithThinking(2048),
+)
+
+result, _ := llmClient.Execute(ctx, messages, tools)
+fmt.Println("reasoning:", result.Message.ReasoningContent())
+fmt.Println("answer:", result.Message.TextContent())</code></pre>
     </section>
 
     <section>

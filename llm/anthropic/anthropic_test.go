@@ -42,11 +42,14 @@ type anthropicResponse struct {
 }
 
 type contentBlock struct {
-	Type  string          `json:"type"`
-	Text  string          `json:"text,omitempty"`
-	ID    string          `json:"id,omitempty"`
-	Name  string          `json:"name,omitempty"`
-	Input json.RawMessage `json:"input,omitempty"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	Thinking  string          `json:"thinking,omitempty"`
+	Signature string          `json:"signature,omitempty"`
+	Data      string          `json:"data,omitempty"`
 }
 
 type anthropicUsage struct {
@@ -441,5 +444,182 @@ func TestExecute_APIError_ReturnsError(t *testing.T) {
 	_, err := c.Execute(context.Background(), msgs, nil)
 	if err == nil {
 		t.Fatal("expected error from 401 response, got nil")
+	}
+}
+
+// -- extended thinking & prompt caching --------------------------------------
+
+func TestExecute_ThinkingResponse_ParsedAsReasoning(t *testing.T) {
+	srv := newTestServer(t, anthropicResponse{
+		ID:    "msg-think",
+		Type:  "message",
+		Role:  "assistant",
+		Model: "claude-sonnet-4-6",
+		Content: []contentBlock{
+			{Type: "thinking", Thinking: "let me reason", Signature: "sig-123"},
+			{Type: "text", Text: "the answer is 42"},
+		},
+		StopReason: "end_turn",
+		Usage:      anthropicUsage{InputTokens: 5, OutputTokens: 7},
+	}, http.StatusOK)
+	defer srv.Close()
+
+	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL), anthropic.WithThinking(1024))
+	res, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("q"))}, nil)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if got := res.Message.ReasoningContent(); got != "let me reason" {
+		t.Fatalf("ReasoningContent = %q, want %q", got, "let me reason")
+	}
+	if got := res.Message.TextContent(); got != "the answer is 42" {
+		t.Fatalf("TextContent = %q, want %q (reasoning must not leak into text)", got, "the answer is 42")
+	}
+
+	var sig string
+	for _, p := range res.Message.Parts {
+		if p.Type == llm.ContentTypeReasoning {
+			sig = p.Signature
+		}
+	}
+	if sig != "sig-123" {
+		t.Fatalf("reasoning signature = %q, want %q", sig, "sig-123")
+	}
+}
+
+func TestExecute_WithThinking_SetsConfigAndOmitsTemperature(t *testing.T) {
+	var body []byte
+	srv := capturingServer(t, &body)
+	defer srv.Close()
+
+	c := anthropic.New("key",
+		anthropic.WithBaseURL(srv.URL),
+		anthropic.WithMaxTokens(512),
+		anthropic.WithThinking(2048),
+	)
+	if _, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))}, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var req struct {
+		MaxTokens   int64    `json:"max_tokens"`
+		Temperature *float64 `json:"temperature"`
+		Thinking    *struct {
+			Type         string `json:"type"`
+			BudgetTokens int64  `json:"budget_tokens"`
+		} `json:"thinking"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+
+	if req.Thinking == nil || req.Thinking.Type != "enabled" || req.Thinking.BudgetTokens != 2048 {
+		t.Fatalf("thinking config = %+v, want enabled/2048", req.Thinking)
+	}
+	if req.Temperature != nil {
+		t.Fatalf("temperature = %v, want omitted under extended thinking", *req.Temperature)
+	}
+	// max_tokens (512) must be raised above the budget (2048).
+	if req.MaxTokens <= 2048 {
+		t.Fatalf("max_tokens = %d, want > 2048 (budget headroom)", req.MaxTokens)
+	}
+}
+
+func TestExecute_ReasoningRoundTrip_EmitsThinkingBlockFirst(t *testing.T) {
+	var body []byte
+	srv := capturingServer(t, &body)
+	defer srv.Close()
+
+	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL), anthropic.WithThinking(1024))
+	msgs := []llm.Message{
+		llm.UserMessage(llm.Text("q")),
+		llm.AssistantMessage([]llm.ContentPart{
+			llm.Reasoning("prior thought", "sig-xyz"),
+			llm.Text("prior answer"),
+		}),
+		llm.UserMessage(llm.Text("follow up")),
+	}
+	if _, err := c.Execute(context.Background(), msgs, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var req struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content []struct {
+				Type      string `json:"type"`
+				Signature string `json:"signature"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+
+	var assistant *struct {
+		Role    string `json:"role"`
+		Content []struct {
+			Type      string `json:"type"`
+			Signature string `json:"signature"`
+		} `json:"content"`
+	}
+	for i := range req.Messages {
+		if req.Messages[i].Role == "assistant" {
+			assistant = &req.Messages[i]
+			break
+		}
+	}
+	if assistant == nil || len(assistant.Content) == 0 {
+		t.Fatalf("no assistant message with content: %s", body)
+	}
+	if assistant.Content[0].Type != "thinking" {
+		t.Fatalf("first assistant block = %q, want thinking: %s", assistant.Content[0].Type, body)
+	}
+	if assistant.Content[0].Signature != "sig-xyz" {
+		t.Fatalf("thinking signature = %q, want sig-xyz", assistant.Content[0].Signature)
+	}
+}
+
+func TestExecute_WithPromptCaching_MarksSystemAndLastTool(t *testing.T) {
+	var body []byte
+	srv := capturingServer(t, &body)
+	defer srv.Close()
+
+	tool, err := llm.NewTool("t", "desc", func(_ context.Context, _ *struct{}) (string, error) { return "", nil })
+	if err != nil {
+		t.Fatalf("NewTool: %v", err)
+	}
+
+	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL), anthropic.WithPromptCaching())
+	msgs := []llm.Message{
+		llm.SystemMessage("you are helpful"),
+		llm.UserMessage(llm.Text("hi")),
+	}
+	if _, err := c.Execute(context.Background(), msgs, []*llm.Tool{tool}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var req struct {
+		System []struct {
+			CacheControl *struct {
+				Type string `json:"type"`
+			} `json:"cache_control"`
+		} `json:"system"`
+		Tools []struct {
+			CacheControl *struct {
+				Type string `json:"type"`
+			} `json:"cache_control"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+
+	if len(req.System) == 0 || req.System[len(req.System)-1].CacheControl == nil {
+		t.Fatalf("expected cache_control on system block: %s", body)
+	}
+	if len(req.Tools) == 0 || req.Tools[len(req.Tools)-1].CacheControl == nil {
+		t.Fatalf("expected cache_control on last tool: %s", body)
 	}
 }
