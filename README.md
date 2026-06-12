@@ -37,7 +37,7 @@ Phero is a modern Go framework for building multi-agent AI systems. Like ants in
 - **🧠 Skills system** Define reusable agent capabilities in `SKILL.md` files
 - **🔌 MCP support** Integrate Model Context Protocol servers as agent tools
 - **🧾 Memory management** Conversational context storage for agents
-- **🔍 Tracing** Typed lifecycle events with a colorized text tracer (`trace/text`) and an NDJSON file tracer (`trace/jsonfile`); per-run summary with token usage and latency breakdowns
+- **🔍 Tracing** Typed lifecycle events with a colorized text tracer (`trace/text`), an NDJSON file tracer (`trace/jsonfile`), and an OpenTelemetry tracer (`trace/otel`); per-run summary with token usage and latency breakdowns
 - **🛡️ Tool guardrails** Bash tool blocklist, allowlist, timeout, and safe-mode options
 - **✂️ Text splitting** Recursive and Markdown-aware chunkers under `textsplitter/recursive` and `textsplitter/markdown`
 - **🧬 Embeddings** Semantic search capabilities via OpenAI embeddings
@@ -105,7 +105,7 @@ Phero is organized into focused packages, each solving a specific problem:
 - **`mcp`** Model Context Protocol adapter for external tool integration
 - **`a2a`** Agent-to-Agent (A2A) protocol — expose agents as HTTP servers or call remote agents as tools
 - **`nats`** NATS Agent Protocol v0.3 — register agents as NATS micro services; discover and call them over pub/sub
-- **`trace`** Typed observability events; `trace/text` for human-readable colorized output; `trace/jsonfile` for NDJSON file logging; `trace.NewLLM` for raw LLM call wrapping
+- **`trace`** Typed observability events; `trace/text` for human-readable colorized output; `trace/jsonfile` for NDJSON file logging; `trace/otel` for OpenTelemetry spans; `trace.NewLLM` for raw LLM call wrapping
 - **`tool/agent`** Create and run a sub-agent at runtime as a delegated tool
 - **`tool/file`** Filesystem tools (`read`, `write`, `edit`, `glob`, `grep`)
 - **`tool/bash`** Bash command execution with guardrails (blocklist, allowlist, timeout, safe mode) and background execution (`RunInBackground`, `bash_output`, `kill_shell`)

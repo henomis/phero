@@ -49,8 +49,43 @@
         <li><code>trace.Noop</code>: default zero-cost tracer that discards all events (top-level <code>trace</code> package)</li>
         <li><code>text.New(w)</code> / <code>text.NewDefault()</code>: writes human-readable, colorized trace lines to any <code>io.Writer</code>; <code>NewDefault()</code> targets <code>os.Stderr</code></li>
         <li><code>jsonfile.New(filePath)</code>: appends one JSON record per line (NDJSON) to a file; call <code>Close()</code> when done</li>
+        <li><code>otel.New(tracer)</code> / <code>otel.NewDefault()</code>: maps events to OpenTelemetry spans for export to any OTLP backend (Jaeger, Tempo, Honeycomb, …)</li>
       </ul>
-      <p>Import paths: <code>github.com/henomis/phero/trace/text</code> and <code>github.com/henomis/phero/trace/jsonfile</code>.</p>
+      <p>Import paths: <code>github.com/henomis/phero/trace/text</code>, <code>github.com/henomis/phero/trace/jsonfile</code>, and <code>github.com/henomis/phero/trace/otel</code>.</p>
+    </section>
+
+    <section>
+      <h2>OpenTelemetry tracer</h2>
+      <p>
+        <code>trace/otel</code> turns an agent run into a tree of OpenTelemetry spans: the run is a root span, and each LLM
+        call and tool call become child spans. Token usage, cost, model name, and tool arguments are attached as span
+        attributes (using the OpenTelemetry GenAI semantic-convention names where applicable).
+      </p>
+      <p>
+        The package depends only on the OpenTelemetry <em>API</em>. Your application owns the SDK wiring — a
+        <code>TracerProvider</code> and an exporter — so phero never pulls in a specific exporter. Install a global provider
+        and use <code>otel.NewDefault()</code>, or pass an explicit tracer to <code>otel.New(tracer)</code>.
+      </p>
+
+      <pre><code class="language-go">import (
+    "go.opentelemetry.io/otel"
+    "go.opentelemetry.io/otel/sdk/trace"
+
+    pherotel "github.com/henomis/phero/trace/otel"
+)
+
+// Application wires the SDK + exporter (done once at startup).
+tp := trace.NewTracerProvider(trace.WithBatcher(exporter))
+otel.SetTracerProvider(tp)
+defer tp.Shutdown(context.Background())
+
+// Attach the OpenTelemetry tracer to an agent.
+a.SetTracer(pherotel.NewDefault())</code></pre>
+
+      <p>
+        A single tracer instance correlates events by agent name (plus iteration or tool call ID), so sequential runs and
+        handoffs to differently named agents are fully supported.
+      </p>
     </section>
 
     <section>
