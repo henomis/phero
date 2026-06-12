@@ -232,6 +232,40 @@ wrapped := llm.Use(base, loggingMiddleware)</code></pre>
         Middlewares are applied in declaration order: <code>llm.Use(base, m1, m2)</code> means <code>m1</code> is outermost and runs first.
         See <a href="https://github.com/henomis/phero/tree/main/examples/llm-middleware">examples/llm-middleware</a> for a full example.
       </p>
+
+      <p>
+        The <code>llm/middleware</code> package ships ready-made middlewares: <code>NewRetry</code> (exponential back-off),
+        <code>NewRateLimit</code>, <code>NewGuardrails</code>, and <code>NewSemanticCache</code>.
+      </p>
+    </section>
+
+    <section>
+      <h2>Semantic response caching</h2>
+      <p>
+        <code>middleware.NewSemanticCache</code> wraps any backend with a cache keyed by the <em>semantic similarity</em>
+        of the conversation rather than an exact string match. Each request is embedded with an
+        <a href="embedding.html"><code>embedding.Embedder</code></a> and looked up in a
+        <a href="vectorstore.html"><code>vectorstore.Store</code></a>; when the nearest neighbour's cosine similarity meets
+        the configured threshold, the stored response is returned without calling the model. Cache failures degrade
+        gracefully to a normal, uncached call.
+      </p>
+
+      <pre><code class="language-go">cacheMW, err := middleware.NewSemanticCache(
+    embedder, // embedding.Embedder
+    store,    // vectorstore.Store
+    middleware.WithSimilarityThreshold(0.97),
+)
+if err != nil {
+    panic(err)
+}
+
+client := llm.Use(base, cacheMW)</code></pre>
+
+      <p>
+        By default a cache hit reports zero token usage (no model call was made), keeping cost accounting truthful, and
+        requests that carry tools bypass the cache so cached tool calls are never silently replayed. Both behaviors are
+        configurable via <code>WithReportCachedUsage</code> and <code>WithSkipToolCalls</code>.
+      </p>
     </section>
 
     <section>

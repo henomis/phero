@@ -31,7 +31,7 @@ Phero is a modern Go framework for building multi-agent AI systems. Like ants in
 - **🧩 LLM abstraction** Work with OpenAI-compatible endpoints (OpenAI, Ollama, etc.) and Anthropic
 - **🖼️ Multimodal input** Mix text and images with typed content parts (`llm.Text`, `llm.ImageURL`, `llm.ImageFile`)
 - **🔊 Audio I/O** OpenAI backend supports speech-to-text and text-to-speech via `llm.Transcriber` and `llm.SpeechSynthesizer`
-- **🧱 LLM middleware** Compose reusable cross-cutting behaviors around any backend with `llm.Use(...)`
+- **🧱 LLM middleware** Compose reusable cross-cutting behaviors around any backend with `llm.Use(...)` (retry, rate-limit, guardrails, and semantic response caching)
 - **🛠️ Function tools** Expose Go functions as callable tools with automatic JSON Schema generation
 - **📚 RAG (Retrieval-Augmented Generation)** Built-in vector storage and semantic search
 - **🧠 Skills system** Define reusable agent capabilities in `SKILL.md` files
