@@ -122,7 +122,6 @@ Comprehensive examples are included in the [`examples/`](examples/) directory:
 |---|---|
 | [Simple Agent](examples/simple-agent/) | **Start here!** Minimal example showing one agent with one custom tool perfect for learning the basics |
 | [Streaming](examples/streaming/) | Stream an agent's response token-by-token with `Agent.RunStream`, including tool call/result events |
-| [Structured Output](examples/structured-output/) | Get the agent's final answer decoded into a typed Go struct with `agent.RunTyped` |
 | [Multimodal](examples/multimodal/) | Send text + image inputs to a vision-capable model using typed content parts |
 | [Audio](examples/audio/) | End-to-end speech-to-text and text-to-speech using the OpenAI backend |
 | [LLM Middleware](examples/llm-middleware/) | Wrap an LLM with composable middleware for logging and other cross-cutting concerns |
