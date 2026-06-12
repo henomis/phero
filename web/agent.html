@@ -200,6 +200,31 @@ if result.Summary != nil {
     </section>
 
     <section>
+      <h2>Typed (structured) output</h2>
+      <p>
+        Use <code>agent.RunTyped[T]</code> when you want the agent's final answer decoded into a Go struct
+        instead of free-form text. It works on any <code>llm.LLM</code> backend: a synthetic
+        <code>final_answer</code> tool is added whose JSON schema is derived from <code>T</code>, and the agent is
+        instructed to call it to finish. The call's arguments are decoded into <code>T</code>. The original agent is
+        not mutated. If the agent finishes without producing structured output, it returns
+        <code>ErrNoStructuredOutput</code>.
+      </p>
+
+      <pre><code class="language-go">type Recipe struct {
+    Name        string   `json:"name"`
+    Servings    int      `json:"servings"`
+    Ingredients []string `json:"ingredients"`
+}
+
+recipe, result, err := agent.RunTyped[Recipe](ctx, a, llm.Text("Give me a recipe for pancakes."))
+if err != nil {
+    panic(err)
+}
+fmt.Printf("%s serves %d\n", recipe.Name, recipe.Servings)</code></pre>
+      <p><code>T</code> should be a struct so a top-level object schema is generated.</p>
+    </section>
+
+    <section>
       <h2>Tracing</h2>
       <p>
         Agents support opt-in observability via <code>SetTracer</code>. When a tracer is attached, the agent emits typed events for

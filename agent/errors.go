@@ -31,6 +31,9 @@ var (
 	ErrMaxIterationsReached = errors.New("maximum iterations reached")
 	// ErrSessionSaveFailed is returned when the memory save after a successful run fails.
 	ErrSessionSaveFailed = errors.New("session save failed")
+	// ErrNoStructuredOutput is returned by RunTyped when the agent finished without
+	// producing a structured result (it never called the final_answer tool).
+	ErrNoStructuredOutput = errors.New("agent did not produce structured output")
 )
 
 // ToolAlreadyExistsError is returned when a tool with the same name is already registered.
