@@ -88,9 +88,15 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*l
 		return nil, ErrEmptyResponse
 	}
 
+	model := response.Model
+	if model == "" {
+		model = c.model
+	}
+
 	msg := messageFromOpenAI(response.Choices[0].Message)
 	return &llm.Result{
 		Message: &msg,
+		Model:   model,
 		Usage: &llm.Usage{
 			InputTokens:  response.Usage.PromptTokens,
 			OutputTokens: response.Usage.CompletionTokens,

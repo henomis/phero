@@ -138,7 +138,7 @@ a.SetTracer(t)</code></pre>
         containing aggregated metrics. The same summary is also available on the <code>Result</code> returned by <code>Run()</code>.
       </p>
       <ul>
-        <li><code>RunSummary.Usage</code> &mdash; <code>UsageSummary{InputTokens, OutputTokens}</code></li>
+        <li><code>RunSummary.Usage</code> &mdash; <code>UsageSummary{InputTokens, OutputTokens, CostUSD}</code> &mdash; <code>CostUSD</code> is the best-effort total cost from per-model pricing (see <code>llm.RegisterPricing</code>)</li>
         <li><code>RunSummary.Latency</code> &mdash; <code>LatencySummary{Total, LLM, Tool, Memory}</code></li>
         <li><code>RunSummary.Tools</code> &mdash; <code>[]ToolCallSummary{ToolName, Calls, Errors}</code></li>
         <li><code>RunSummary.Iterations</code>, <code>LLMCalls</code>, <code>ToolCalls</code>, <code>ToolErrors</code></li>
@@ -150,9 +150,9 @@ if err != nil {
     panic(err)
 }
 if s := result.Summary; s != nil {
-    fmt.Printf("iterations=%d llmCalls=%d tokens=%d+%d\n",
+    fmt.Printf("iterations=%d llmCalls=%d tokens=%d+%d cost=$%.4f\n",
         s.Iterations, s.LLMCalls,
-        s.Usage.InputTokens, s.Usage.OutputTokens)
+        s.Usage.InputTokens, s.Usage.OutputTokens, s.Usage.CostUSD)
     fmt.Printf("total=%s  llm=%s  tool=%s\n",
         s.Latency.Total, s.Latency.LLM, s.Latency.Tool)
 }</code></pre>

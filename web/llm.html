@@ -325,6 +325,25 @@ result, err := traced.Execute(ctx, messages, tools)</code></pre>
     </section>
 
     <section>
+      <h2>Token usage and cost</h2>
+      <p>
+        Every <code>Result</code> carries <code>Usage{InputTokens, OutputTokens, CacheReadTokens, CacheWriteTokens}</code>
+        and the resolved <code>Model</code> name. Call <code>usage.Cost(model)</code> for a best-effort US-dollar
+        estimate using a built-in per-model pricing table; unknown models return <code>0</code>. Override or add rates
+        with <code>llm.RegisterPricing</code>. Agents aggregate this into <code>RunSummary.Usage.CostUSD</code>.
+      </p>
+
+      <pre><code class="language-go">// Override or add pricing (USD per 1M tokens).
+llm.RegisterPricing("my-local-model", llm.Pricing{
+    InputPer1M:  0.50,
+    OutputPer1M: 1.50,
+})
+
+cost := result.Usage.Cost(result.Model)
+fmt.Printf("this call cost $%.4f\n", cost)</code></pre>
+    </section>
+
+    <section>
       <h2>Putting it together</h2>
       <p>
         The minimal loop is: create an LLM client, register one or more tools, then run an agent.

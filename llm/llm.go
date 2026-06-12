@@ -220,6 +220,14 @@ type Usage struct {
 	InputTokens int
 	// OutputTokens is the number of tokens produced by the model.
 	OutputTokens int
+	// CacheReadTokens is the number of input tokens served from a prompt cache.
+	// Only populated by providers that report it (e.g. Anthropic prompt caching);
+	// zero otherwise. These tokens are billed at the cache-read rate.
+	CacheReadTokens int
+	// CacheWriteTokens is the number of input tokens written to a prompt cache.
+	// Only populated by providers that report it; zero otherwise. These tokens
+	// are billed at the cache-write rate.
+	CacheWriteTokens int
 }
 
 // Result represents the output of an LLM execution, including the assistant message and any tool calls.
@@ -228,6 +236,10 @@ type Result struct {
 	// Usage holds token counts for this call. May be nil when the provider does
 	// not return usage information.
 	Usage *Usage
+	// Model is the model that produced this result, as reported by the provider
+	// (which may be more specific than the requested name, e.g. a dated version).
+	// Used for best-effort cost estimation; may be empty.
+	Model string
 }
 
 // LLM is the minimal interface implemented by chat-model backends.

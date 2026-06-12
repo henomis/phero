@@ -124,11 +124,19 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*l
 		return nil, err
 	}
 
+	model := string(res.Model)
+	if model == "" {
+		model = strings.TrimSpace(c.model)
+	}
+
 	return &llm.Result{
 		Message: msg,
+		Model:   model,
 		Usage: &llm.Usage{
-			InputTokens:  int(res.Usage.InputTokens),
-			OutputTokens: int(res.Usage.OutputTokens),
+			InputTokens:      int(res.Usage.InputTokens),
+			OutputTokens:     int(res.Usage.OutputTokens),
+			CacheReadTokens:  int(res.Usage.CacheReadInputTokens),
+			CacheWriteTokens: int(res.Usage.CacheCreationInputTokens),
 		},
 	}, nil
 }

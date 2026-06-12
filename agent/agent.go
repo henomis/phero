@@ -323,10 +323,10 @@ func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message,
 	msg, err := tracedLLM.Execute(ctx, session, a.tools)
 	duration := time.Since(start)
 	if err != nil {
-		stats.recordLLM(duration, nil)
+		stats.recordLLM(duration, "", nil)
 		return agentIteration{session: session}, err
 	}
-	stats.recordLLM(duration, msg.Usage)
+	stats.recordLLM(duration, msg.Model, msg.Usage)
 
 	session = append(session, *msg.Message)
 
