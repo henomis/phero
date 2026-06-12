@@ -34,6 +34,9 @@ var (
 	// ErrNoStructuredOutput is returned by RunTyped when the agent finished without
 	// producing a structured result (it never called the final_answer tool).
 	ErrNoStructuredOutput = errors.New("agent did not produce structured output")
+	// ErrIncompleteStream is returned by RunStream when the LLM stream ended without
+	// a terminal chunk carrying the assembled message.
+	ErrIncompleteStream = errors.New("llm stream ended without a complete message")
 )
 
 // ToolAlreadyExistsError is returned when a tool with the same name is already registered.

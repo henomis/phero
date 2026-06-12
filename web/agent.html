@@ -225,6 +225,31 @@ fmt.Printf("%s serves %d\n", recipe.Name, recipe.Servings)</code></pre>
     </section>
 
     <section>
+      <h2>Streaming output</h2>
+      <p>
+        <code>Agent.RunStream</code> runs the agent like <code>Run</code> but yields progress as a sequence of
+        <code>AgentEvent</code>s over a Go 1.23 iterator: text and reasoning deltas as the model produces them, a
+        <code>ToolCall</code> and <code>ToolResult</code> event around each tool invocation, and a final
+        <code>AgentEventDone</code> whose <code>Result</code> mirrors <code>Run</code>. It uses the underlying LLM's
+        streaming API when available and otherwise falls back to a single buffered response.
+      </p>
+
+      <pre><code class="language-go">for ev, err := range a.RunStream(ctx, llm.Text("Tell me a story.")) {
+    if err != nil {
+        panic(err)
+    }
+    switch ev.Type {
+    case agent.AgentEventTextDelta:
+        fmt.Print(ev.TextDelta)
+    case agent.AgentEventToolCall:
+        fmt.Printf("\n[tool %s]\n", ev.ToolName)
+    case agent.AgentEventDone:
+        fmt.Println("\n", ev.Result.TextContent())
+    }
+}</code></pre>
+    </section>
+
+    <section>
       <h2>Tracing</h2>
       <p>
         Agents support opt-in observability via <code>SetTracer</code>. When a tracer is attached, the agent emits typed events for

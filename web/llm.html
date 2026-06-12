@@ -361,6 +361,28 @@ fmt.Printf("this call cost $%.4f\n", cost)</code></pre>
     </section>
 
     <section>
+      <h2>Streaming</h2>
+      <p>
+        Backends that support incremental responses implement <code>llm.StreamingLLM</code> (both the OpenAI and
+        Anthropic clients do). Use <code>llm.StreamOrBuffer</code> to consume any backend uniformly: it streams when
+        the client supports it and otherwise falls back to a single buffered chunk. Each <code>StreamChunk</code>
+        carries a <code>TextDelta</code> (or <code>ReasoningDelta</code>); the terminal chunk (<code>Done</code>) holds
+        the complete <code>Message</code>, <code>Usage</code>, and <code>Model</code>.
+      </p>
+
+      <pre><code class="language-go">for chunk, err := range llm.StreamOrBuffer(ctx, llmClient, messages, tools) {
+    if err != nil {
+        panic(err)
+    }
+    fmt.Print(chunk.TextDelta) // print tokens as they arrive
+    if chunk.Done {
+        fmt.Printf("\n[tokens in=%d out=%d]\n", chunk.Usage.InputTokens, chunk.Usage.OutputTokens)
+    }
+}</code></pre>
+      <p>At the agent level, use <code>Agent.RunStream</code> (see the agent docs) for streamed text and tool events.</p>
+    </section>
+
+    <section>
       <h2>Putting it together</h2>
       <p>
         The minimal loop is: create an LLM client, register one or more tools, then run an agent.

@@ -96,40 +96,9 @@ func New(apiKey string, opts ...Option) *Client {
 //
 // It converts the response to a Phero assistant message, including any tool calls.
 func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
-	system, anthropicMessages, err := messagesToAnthropic(messages)
+	params, err := c.buildParams(messages, tools)
 	if err != nil {
 		return nil, err
-	}
-
-	maxTokens := c.maxTokens
-
-	params := anthropicapi.MessageNewParams{
-		Model:    anthropicapi.Model(strings.TrimSpace(c.model)),
-		Messages: anthropicMessages,
-		System:   system,
-	}
-
-	if c.thinkingbudget > 0 {
-		// Extended thinking requires max_tokens > budget and disallows a custom
-		// temperature, so we omit temperature and ensure headroom above the budget.
-		if maxTokens <= c.thinkingbudget {
-			maxTokens = c.thinkingbudget + c.maxTokens
-		}
-		params.Thinking = anthropicapi.ThinkingConfigParamOfEnabled(c.thinkingbudget)
-	} else {
-		params.Temperature = param.NewOpt(float64(c.temperature))
-	}
-	params.MaxTokens = maxTokens
-
-	if len(tools) > 0 {
-		params.Tools, err = anthropicTools(tools)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if c.promptCaching {
-		applyPromptCaching(&params)
 	}
 
 	res, err := c.client.Messages.New(ctx, params)
@@ -157,6 +126,48 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*l
 			CacheWriteTokens: int(res.Usage.CacheCreationInputTokens),
 		},
 	}, nil
+}
+
+// buildParams converts Phero messages and tools into Anthropic request params,
+// applying the thinking, temperature, max-tokens, and prompt-caching options.
+// It is shared by the buffered Execute and the streaming ExecuteStream.
+func (c *Client) buildParams(messages []llm.Message, tools []*llm.Tool) (anthropicapi.MessageNewParams, error) {
+	system, anthropicMessages, err := messagesToAnthropic(messages)
+	if err != nil {
+		return anthropicapi.MessageNewParams{}, err
+	}
+
+	maxTokens := c.maxTokens
+	params := anthropicapi.MessageNewParams{
+		Model:    anthropicapi.Model(strings.TrimSpace(c.model)),
+		Messages: anthropicMessages,
+		System:   system,
+	}
+
+	if c.thinkingbudget > 0 {
+		// Extended thinking requires max_tokens > budget and disallows a custom
+		// temperature, so we omit temperature and ensure headroom above the budget.
+		if maxTokens <= c.thinkingbudget {
+			maxTokens = c.thinkingbudget + c.maxTokens
+		}
+		params.Thinking = anthropicapi.ThinkingConfigParamOfEnabled(c.thinkingbudget)
+	} else {
+		params.Temperature = param.NewOpt(float64(c.temperature))
+	}
+	params.MaxTokens = maxTokens
+
+	if len(tools) > 0 {
+		params.Tools, err = anthropicTools(tools)
+		if err != nil {
+			return anthropicapi.MessageNewParams{}, err
+		}
+	}
+
+	if c.promptCaching {
+		applyPromptCaching(&params)
+	}
+
+	return params, nil
 }
 
 // applyPromptCaching marks the high-value, stable prefix of the request as
