@@ -223,7 +223,11 @@ func (s *Store) Upsert(ctx context.Context, points []vectorstore.Point) error {
 }
 
 // Query returns the top-k nearest points to the query vector.
-func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint64) ([]vectorstore.ScoredPoint, error) {
+//
+// A vectorstore.Filter passed via vectorstore.WithFilter is translated to
+// parameterized JSONB predicates over the payload column and evaluated by
+// PostgreSQL.
+func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint64, opts ...vectorstore.QueryOption) ([]vectorstore.ScoredPoint, error) {
 	if len(query) == 0 {
 		return nil, vectorstore.ErrEmptyQuery
 	}
@@ -249,9 +253,16 @@ func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint6
 		return nil, err
 	}
 
-	stmt := fmt.Sprintf(querySQLTemplate, scoreExpr, table, op)
+	cfg := vectorstore.ApplyQueryOptions(opts)
+	filterClause, filterArgs, err := filterSQL(cfg.Filter, 4)
+	if err != nil {
+		return nil, err
+	}
 
-	rows, err := s.db.QueryContext(ctx, stmt, vecLit, s.collection, limit)
+	stmt := fmt.Sprintf(querySQLTemplate, scoreExpr, table, filterClause, op)
+
+	args := append([]any{vecLit, s.collection, limit}, filterArgs...)
+	rows, err := s.db.QueryContext(ctx, stmt, args...)
 	if err != nil {
 		return nil, err
 	}

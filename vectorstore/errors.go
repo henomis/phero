@@ -24,3 +24,11 @@ var ErrEmptyIDs = errors.New("empty ids")
 
 // ErrEmptyQuery is returned when a query operation receives an empty query vector.
 var ErrEmptyQuery = errors.New("empty query")
+
+// ErrInvalidFilter is returned when a filter condition is malformed (empty
+// key, missing operand, or non-numeric operand for a range operator).
+var ErrInvalidFilter = errors.New("invalid filter")
+
+// ErrUnsupportedFilterOp is returned when a filter condition uses an operator
+// unknown to the store.
+var ErrUnsupportedFilterOp = errors.New("unsupported filter operator")

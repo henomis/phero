@@ -47,6 +47,7 @@ type RAG struct {
 
 	topk              uint64
 	embedderBatchSize int
+	filter            *vectorstore.Filter
 
 	ensureMu   sync.Mutex
 	ensureDone bool
@@ -76,6 +77,17 @@ func New(store vectorstore.Store, embedder embedding.Embedder, options ...Option
 func WithTopK(topk uint64) Option {
 	return func(r *RAG) {
 		r.topk = topk
+	}
+}
+
+// WithFilter sets a default metadata filter applied to every query, including
+// queries issued through AsTool.
+//
+// Per-call options passed to Query take precedence: when the caller supplies
+// any vectorstore.QueryOption, the default filter is not applied.
+func WithFilter(filter *vectorstore.Filter) Option {
+	return func(r *RAG) {
+		r.filter = filter
 	}
 }
 
@@ -216,7 +228,11 @@ func (s *RAG) IngestOnce(ctx context.Context, splitter textsplitter.Splitter) er
 }
 
 // Query embeds the provided query text and performs a similarity search.
-func (s *RAG) Query(ctx context.Context, queryText string) ([]vectorstore.ScoredPoint, error) {
+//
+// Options are forwarded to the backing store, e.g. vectorstore.WithFilter to
+// restrict results by payload metadata. When no options are provided, the
+// default filter configured via WithFilter (if any) is applied.
+func (s *RAG) Query(ctx context.Context, queryText string, opts ...vectorstore.QueryOption) ([]vectorstore.ScoredPoint, error) {
 	if strings.TrimSpace(queryText) == "" {
 		return nil, ErrEmptyQueryText
 	}
@@ -232,7 +248,11 @@ func (s *RAG) Query(ctx context.Context, queryText string) ([]vectorstore.Scored
 		return nil, &EmbedderVectorCountMismatchError{Got: len(vectors), Want: 1, SingleQuery: true}
 	}
 
-	results, err := s.store.Query(ctx, vectors[0], s.topk)
+	if len(opts) == 0 && s.filter != nil {
+		opts = []vectorstore.QueryOption{vectorstore.WithFilter(s.filter)}
+	}
+
+	results, err := s.store.Query(ctx, vectors[0], s.topk, opts...)
 	if err != nil {
 		return nil, &QueryError{Op: "store query", Cause: err}
 	}

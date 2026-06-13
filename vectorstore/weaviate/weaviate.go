@@ -220,12 +220,25 @@ func (s *Store) upsertBatch(ctx context.Context, points []vectorstore.Point) err
 	return nil
 }
 
+// overfetchFactor and overfetchCap bound how many candidates are requested
+// from Weaviate when a payload filter must be applied client-side.
+const (
+	overfetchFactor = 4
+	overfetchCap    = 1000
+)
+
 // Query returns the top-k nearest points to query using nearVector search.
 //
 // Score convention: higher values indicate greater similarity. For cosine
 // distance the score is 1−distance; for all other metrics the score is
 // −distance.
-func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint64) ([]vectorstore.ScoredPoint, error) {
+//
+// Payload filters (vectorstore.WithFilter) are applied client-side: the
+// payload is stored as a single JSON text property, which Weaviate's native
+// `where` filters cannot address. Query over-fetches candidates (limit×4,
+// capped at 1000) and post-filters them, so heavily filtered collections may
+// return fewer than limit points even when more matches exist.
+func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint64, opts ...vectorstore.QueryOption) ([]vectorstore.ScoredPoint, error) {
 	if len(query) == 0 {
 		return nil, vectorstore.ErrEmptyQuery
 	}
@@ -236,12 +249,23 @@ func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint6
 		return nil, &VectorSizeMismatchError{Expected: s.vectorSize, Got: len(query)}
 	}
 
+	cfg := vectorstore.ApplyQueryOptions(opts)
+	if err := cfg.Filter.Validate(); err != nil {
+		return nil, err
+	}
+
+	fetchLimit := limit
+	filtered := cfg.Filter != nil && len(cfg.Filter.Conditions) > 0
+	if filtered {
+		fetchLimit = min(limit*overfetchFactor, overfetchCap)
+	}
+
 	nearVec := s.client.GraphQL().NearVectorArgBuilder().WithVector(query)
 
 	result, err := s.client.GraphQL().Get().
 		WithClassName(s.class).
 		WithNearVector(nearVec).
-		WithLimit(int(limit)).
+		WithLimit(int(fetchLimit)).
 		WithFields(
 			graphql.Field{Name: "_additional { id distance }"},
 			graphql.Field{Name: propID},
@@ -255,7 +279,25 @@ func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint6
 		return nil, fmt.Errorf("graphql errors: %v", result.Errors)
 	}
 
-	return s.parseQueryResult(result)
+	scored, err := s.parseQueryResult(result)
+	if err != nil {
+		return nil, err
+	}
+	if !filtered {
+		return scored, nil
+	}
+
+	out := make([]vectorstore.ScoredPoint, 0, limit)
+	for _, sp := range scored {
+		if !vectorstore.MatchPayload(cfg.Filter, sp.Payload) {
+			continue
+		}
+		out = append(out, sp)
+		if uint64(len(out)) >= limit {
+			break
+		}
+	}
+	return out, nil
 }
 
 func (s *Store) parseQueryResult(result *models.GraphQLResponse) ([]vectorstore.ScoredPoint, error) {

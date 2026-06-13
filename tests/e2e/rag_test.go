@@ -28,6 +28,7 @@ import (
 	"github.com/henomis/phero/llm"
 	"github.com/henomis/phero/rag"
 	textsplitterrecursive "github.com/henomis/phero/textsplitter/recursive"
+	"github.com/henomis/phero/vectorstore"
 	vsqdrant "github.com/henomis/phero/vectorstore/qdrant"
 )
 
@@ -99,6 +100,27 @@ Mount Everest is Earth's highest mountain above sea level, located in Nepal.`
 	}
 
 	t.Logf("Top result score=%.4f payload=%v", results[0].Score, results[0].Payload)
+
+	// Per-query metadata filter: the recursive splitter stores the source path
+	// in payload["source"], so filtering on it must keep results, while a
+	// bogus source must return none.
+	filtered, err := r.Query(ctx, "How tall is the Eiffel Tower?",
+		vectorstore.WithFilter(vectorstore.NewFilter(vectorstore.Eq("source", tmpFile))))
+	if err != nil {
+		t.Fatalf("Query with filter: %v", err)
+	}
+	if len(filtered) == 0 {
+		t.Fatal("expected results when filtering on the ingested source")
+	}
+
+	none, err := r.Query(ctx, "How tall is the Eiffel Tower?",
+		vectorstore.WithFilter(vectorstore.NewFilter(vectorstore.Eq("source", "no-such-source"))))
+	if err != nil {
+		t.Fatalf("Query with non-matching filter: %v", err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("expected 0 results for non-matching filter, got %d", len(none))
+	}
 }
 
 // TestRAG_AsTool verifies that RAG can be wrapped as an llm.Tool and used

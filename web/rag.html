@@ -15,11 +15,13 @@
       <li><a href="llm.html">LLM</a></li>
       <li><a href="agent.html">Agent</a></li>
       <li><a href="trace.html">Trace</a></li>
+      <li><a href="eval.html">Eval</a></li>
       <li><a href="tool.html">Tool</a></li>
       <li><a href="mcp.html">MCP</a></li>
       <li><a href="a2a.html">A2A</a></li>
       <li><a href="nats.html">NATS</a></li>
       <li><a href="embedding.html">Embedding</a></li>
+      <li><a href="loader.html">Loader</a></li>
       <li><a href="textsplitter.html">Textsplitter</a></li>
       <li><a href="vectorstore.html">Vectorstore</a></li>
       <li><a href="rag.html">RAG</a></li>
@@ -117,6 +119,29 @@ fmt.Println(out.TextContent())</code></pre>
     </section>
 
     <section>
+      <h2>Metadata filtering</h2>
+      <p>
+        Queries can be restricted by chunk metadata (every payload contains the chunk text plus the metadata produced
+        during ingestion, e.g. <code>source</code>). Set a default filter for all queries — including queries issued
+        through <code>AsTool</code> — with <code>rag.WithFilter</code>, or pass a per-call filter to <code>Query</code>:
+      </p>
+
+      <pre><code class="language-go">// Default filter, applied to every query and to AsTool calls.
+ragEngine, _ := rag.New(store, embedder,
+    rag.WithFilter(vectorstore.NewFilter(vectorstore.Eq("source", "docs/manual.md"))),
+)
+
+// Per-call filter (takes precedence over the default).
+results, _ := ragEngine.Query(ctx, "How tall is the Eiffel Tower?",
+    vectorstore.WithFilter(vectorstore.NewFilter(vectorstore.Gte("year", 2024))),
+)</code></pre>
+
+      <p>
+        See <a href="vectorstore.html">vectorstore</a> for the available filter operators and per-backend behavior.
+      </p>
+    </section>
+
+    <section>
       <h2>Example: semantic memory (RAG-backed)</h2>
       <p>
         The <a href="https://github.com/henomis/phero/tree/main/examples/long-term-memory">examples/long-term-memory</a> program uses RAG
@@ -159,6 +184,7 @@ go run ./examples/long-term-memory</code></pre>
       <ul>
         <li><a href="embedding.html">embedding</a>: generate vectors for chunks and queries</li>
         <li><a href="vectorstore.html">vectorstore</a>: persist and query vectors</li>
+        <li><a href="loader.html">loader</a>: load files, directories, URLs, and PDFs as documents</li>
         <li><a href="textsplitter.html">textsplitter</a>: chunk documents prior to ingestion</li>
         <li><a href="memory.html">memory</a>: wire RAG into agent memory via <code>memory/rag</code></li>
         <li><a href="agent.html">agent</a>: orchestrates tool calls and uses memory</li>

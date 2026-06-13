@@ -55,7 +55,7 @@ func (s *memStore) Upsert(_ context.Context, points []vectorstore.Point) error {
 	return nil
 }
 
-func (s *memStore) Query(_ context.Context, query vectorstore.Vector, limit uint64) ([]vectorstore.ScoredPoint, error) {
+func (s *memStore) Query(_ context.Context, query vectorstore.Vector, limit uint64, _ ...vectorstore.QueryOption) ([]vectorstore.ScoredPoint, error) {
 	var best *vectorstore.ScoredPoint
 	for i := range s.points {
 		score := cosine(query, s.points[i].Vector)

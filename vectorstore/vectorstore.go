@@ -46,7 +46,10 @@ type Store interface {
 	Upsert(ctx context.Context, points []Point) error
 
 	// Query returns the top-k nearest points to query.
-	Query(ctx context.Context, query Vector, limit uint64) ([]ScoredPoint, error)
+	//
+	// Options can restrict the search, e.g. WithFilter to match only points
+	// whose payload satisfies a Filter.
+	Query(ctx context.Context, query Vector, limit uint64, opts ...QueryOption) ([]ScoredPoint, error)
 
 	// Delete deletes points by ID.
 	Delete(ctx context.Context, ids []string) error
