@@ -170,6 +170,16 @@ llm.AssistantMessage([]llm.ContentPart{llm.Text("Hi!")})
 llm.ToolResultMessage(toolCallID, llm.Text("42"))</code></pre>
 
       <p>
+        When a tool fails, set <code>ToolError</code> on its result message so the model is told the call errored
+        rather than succeeded. The agent loop does this automatically — a handler returning an error yields a tool-result
+        message with <code>ToolError: true</code> carrying the error text — but you can set the field yourself when
+        constructing messages by hand.
+      </p>
+
+      <pre><code class="language-go">msg := llm.ToolResultMessage(toolCallID, llm.Text("division by zero"))
+msg.ToolError = true</code></pre>
+
+      <p>
         To extract the plain text from a message or from loose parts, use <code>TextContent</code>:
       </p>
 
