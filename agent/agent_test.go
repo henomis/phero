@@ -17,6 +17,7 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -533,6 +534,36 @@ func TestRun_PopulatesRunSummary(t *testing.T) {
 	}
 	if eventSummary.ToolCalls != summary.ToolCalls {
 		t.Fatalf("event summary tool calls = %d, want %d", eventSummary.ToolCalls, summary.ToolCalls)
+	}
+}
+
+func TestRun_AggregatesCostFromModelPricing(t *testing.T) {
+	// One tool call then a final answer, both on gpt-4o-mini (in $0.15/1M, out $0.60/1M).
+	toolRes := toolCallResultWithUsage("echo_tool", "call-1", "{}", &llm.Usage{InputTokens: 1_000_000})
+	toolRes.Model = "gpt-4o-mini"
+	finalRes := textResult("done")
+	finalRes.Model = "gpt-4o-mini"
+	finalRes.Usage = &llm.Usage{OutputTokens: 1_000_000}
+
+	stub := &stubLLM{
+		responses: []*llm.Result{toolRes, finalRes},
+		errs:      []error{nil, nil},
+	}
+	a := mustNew(t, stub, "agent", "desc")
+	if err := a.AddTool(mustTool(t, "echo_tool", func(_ context.Context, _ *struct{}) (string, error) {
+		return "ok", nil
+	})); err != nil {
+		t.Fatalf("AddTool: %v", err)
+	}
+
+	result, err := a.Run(context.Background(), llm.Text("go"))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// 1M input tokens * $0.15/1M + 1M output tokens * $0.60/1M.
+	want := 0.15 + 0.60
+	if got := result.Summary.Usage.CostUSD; math.Abs(got-want) > 1e-9 {
+		t.Fatalf("summary.Usage.CostUSD = %v, want %v", got, want)
 	}
 }
 

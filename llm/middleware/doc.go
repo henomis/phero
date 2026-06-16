@@ -25,4 +25,8 @@
 //	guardrailsMW := middleware.NewGuardrails()
 //
 //	client := llm.Use(openaiClient, retryMW, rateLimitMW, guardrailsMW)
+//
+// NewSemanticCache adds a similarity-based response cache backed by an
+// embedding.Embedder and a vectorstore.Store, short-circuiting the model when a
+// sufficiently similar conversation has already been answered.
 package middleware

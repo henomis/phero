@@ -22,8 +22,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/henomis/phero/llm"
 	natsclient "github.com/nats-io/nats.go"
+
+	"github.com/henomis/phero/llm"
 )
 
 // AgentInfo holds the parsed discovery record for a single agent instance.

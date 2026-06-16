@@ -103,12 +103,13 @@ func printRunSummary(summary *trace.RunSummary) {
 	}
 
 	fmt.Printf(
-		"Run summary: iterations=%d llm_calls=%d tool_calls=%d tokens=%d/%d latency=%s\n",
+		"Run summary: iterations=%d llm_calls=%d tool_calls=%d tokens=%d/%d cost=$%.4f latency=%s\n",
 		summary.Iterations,
 		summary.LLMCalls,
 		summary.ToolCalls,
 		summary.Usage.InputTokens,
 		summary.Usage.OutputTokens,
+		summary.Usage.CostUSD,
 		summary.Latency.Total.Round(time.Millisecond),
 	)
 }

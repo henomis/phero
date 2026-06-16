@@ -109,6 +109,30 @@ ragEngine, _ := rag.New(store, embedder, rag.WithTopK(topK))</code></pre>
     </section>
 
     <section>
+      <h2>Metadata filtering</h2>
+      <p>
+        <code>Query</code> accepts options; <code>vectorstore.WithFilter</code> restricts results to points whose
+        payload matches a portable <code>Filter</code>. Conditions are combined with AND semantics and support
+        <code>Eq</code>, <code>Ne</code>, <code>In</code> and the numeric range operators
+        <code>Gt</code>, <code>Gte</code>, <code>Lt</code>, <code>Lte</code>.
+      </p>
+
+      <pre><code class="language-go">filter := vectorstore.NewFilter(
+    vectorstore.Eq("category", "news"),
+    vectorstore.Gte("year", 2024),
+)
+
+results, err := store.Query(ctx, queryVector, 5, vectorstore.WithFilter(filter))</code></pre>
+
+      <p>
+        A condition on a key missing from the payload never matches, including <code>Ne</code>.
+        Qdrant and PostgreSQL evaluate filters natively (Qdrant filter conditions, parameterized JSONB predicates);
+        Weaviate stores the payload as opaque JSON, so it over-fetches candidates and post-filters client-side —
+        heavily filtered Weaviate collections may return fewer than <code>limit</code> points even when more matches exist.
+      </p>
+    </section>
+
+    <section>
       <h2>Example: Qdrant-backed store (semantic memory)</h2>
       <p>
         The <a href="https://github.com/henomis/phero/tree/main/examples/long-term-memory">examples/long-term-memory</a> program uses the

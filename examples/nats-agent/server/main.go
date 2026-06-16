@@ -35,10 +35,9 @@ import (
 
 	"github.com/henomis/phero/agent"
 	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/llm/openai"
 	natsagent "github.com/henomis/phero/nats"
 	"github.com/henomis/phero/trace/text"
-
-	"github.com/henomis/phero/llm/openai"
 )
 
 func main() {

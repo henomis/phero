@@ -58,23 +58,36 @@ func (tl *tracedLLM) Execute(ctx context.Context, messages []llm.Message, tools 
 
 	result, err := tl.inner.Execute(ctx, messages, tools)
 
-	var msg *llm.Message
+	var (
+		msg   *llm.Message
+		usage *llm.Usage
+		model string
+	)
 	if result != nil {
 		msg = result.Message
-	}
-
-	var usage *llm.Usage
-	if result != nil {
 		usage = result.Usage
+		model = result.Model
 	}
 
 	tl.tracer.Trace(LLMResponseEvent{
 		AgentName: agentName,
 		Message:   msg,
 		Usage:     usage,
+		Model:     model,
 		Iteration: iteration,
 		Timestamp: time.Now(),
 	})
+
+	if msg != nil {
+		if reasoning := msg.ReasoningContent(); reasoning != "" {
+			tl.tracer.Trace(ReasoningEvent{
+				AgentName: agentName,
+				Content:   reasoning,
+				Iteration: iteration,
+				Timestamp: time.Now(),
+			})
+		}
+	}
 
 	return result, err
 }

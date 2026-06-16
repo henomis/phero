@@ -50,13 +50,14 @@ DO UPDATE SET
 // querySQLTemplate expects:
 //   - %s: score expression
 //   - %s: quoted table name
+//   - %s: additional filter predicates (empty or " AND ..." clauses)
 //   - %s: pgvector operator
 const querySQLTemplate = `
 SELECT id,
        %s AS score,
        COALESCE(payload, '{}'::jsonb) AS payload
 FROM %s
-WHERE collection = $2
+WHERE collection = $2%s
 ORDER BY embedding %s $1::vector
 LIMIT $3
 `

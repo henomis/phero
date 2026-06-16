@@ -10,10 +10,10 @@ GOLANGCI_LINT := golangci-lint
 DOCKER_COMPOSE := docker compose
 E2E_OPENAI_BASE_URL ?= http://localhost:11434/v1
 E2E_OPENAI_API_KEY ?= ollama
-E2E_OPENAI_MODEL ?= deepseek-v3.1:671b-cloud
+E2E_OPENAI_MODEL ?= llama3.2:latest
 E2E_ANTHROPIC_BASE_URL ?= http://localhost:11434
 E2E_ANTHROPIC_AUTH_TOKEN ?= ollama
-E2E_ANTHROPIC_MODEL ?= deepseek-v3.1:671b-cloud
+E2E_ANTHROPIC_MODEL ?= llama3.2:latest
 E2E_EMBEDDING_MODEL ?= nomic-embed-text
 
 # Default target

@@ -26,6 +26,9 @@ type UsageSummary struct {
 	InputTokens int
 	// OutputTokens is the total number of completion tokens produced by the model.
 	OutputTokens int
+	// CostUSD is the best-effort total cost of the run in US dollars, computed
+	// from per-model pricing. Zero when no pricing is known for the models used.
+	CostUSD float64
 }
 
 // LatencySummary aggregates time spent in each major phase of an agent run.
@@ -169,6 +172,9 @@ type LLMResponseEvent struct {
 	Message *llm.Message
 	// Usage holds token counts for this call. Nil when the provider does not return usage.
 	Usage *llm.Usage
+	// Model is the model that produced this response, as reported by the provider.
+	// May be empty. Used together with Usage for cost estimation.
+	Model string
 	// Iteration is the agent loop iteration this response belongs to. Zero when used standalone.
 	Iteration int
 	// Timestamp is when the event occurred.
@@ -176,6 +182,21 @@ type LLMResponseEvent struct {
 }
 
 func (LLMResponseEvent) traceEvent() {}
+
+// ReasoningEvent is emitted after an LLM response that contains extended-thinking
+// (reasoning) content, carrying the model's reasoning text.
+type ReasoningEvent struct {
+	// AgentName is the originating agent's name. Empty when used standalone.
+	AgentName string
+	// Content is the model's reasoning text.
+	Content string
+	// Iteration is the agent loop iteration this reasoning belongs to. Zero when used standalone.
+	Iteration int
+	// Timestamp is when the event occurred.
+	Timestamp time.Time
+}
+
+func (ReasoningEvent) traceEvent() {}
 
 // ToolCallEvent is emitted just before a tool is invoked.
 type ToolCallEvent struct {

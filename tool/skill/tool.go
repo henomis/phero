@@ -65,7 +65,6 @@ type Output struct {
 type Tool struct {
 	tool     *llm.Tool
 	parser   Parser
-	location string
 	catalog  []catalogEntry
 	commands map[string]catalogEntry
 }
@@ -80,13 +79,6 @@ type catalogEntry struct {
 func WithParser(parser Parser) Option {
 	return func(t *Tool) {
 		t.parser = parser
-	}
-}
-
-// WithAvailableSkillsLocation sets the location metadata value exposed in the catalog.
-func WithAvailableSkillsLocation(location string) Option {
-	return func(t *Tool) {
-		t.location = strings.TrimSpace(location)
 	}
 }
 
@@ -161,7 +153,7 @@ func (t *Tool) buildCatalog(skillsRootPath string) ([]catalogEntry, map[string]c
 			skill: AvailableSkill{
 				Name:        name,
 				Description: description,
-				Location:    t.skillLocation(skillPath),
+				Location:    skillPath,
 			},
 		}
 
@@ -186,14 +178,6 @@ func (t *Tool) buildCatalog(skillsRootPath string) ([]catalogEntry, map[string]c
 	})
 
 	return entries, commands, nil
-}
-
-func (t *Tool) skillLocation(skillPath string) string {
-	if strings.TrimSpace(t.location) != "" {
-		return t.location
-	}
-
-	return skillPath
 }
 
 func (t *Tool) buildDescription() string {

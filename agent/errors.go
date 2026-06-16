@@ -31,6 +31,9 @@ var (
 	ErrMaxIterationsReached = errors.New("maximum iterations reached")
 	// ErrSessionSaveFailed is returned when the memory save after a successful run fails.
 	ErrSessionSaveFailed = errors.New("session save failed")
+	// ErrIncompleteStream is returned by RunStream when the LLM stream ended without
+	// a terminal chunk carrying the assembled message.
+	ErrIncompleteStream = errors.New("llm stream ended without a complete message")
 )
 
 // ToolAlreadyExistsError is returned when a tool with the same name is already registered.

@@ -73,7 +73,7 @@ func (s *stubStore) Upsert(_ context.Context, _ []vectorstore.Point) error {
 	return nil
 }
 
-func (s *stubStore) Query(_ context.Context, _ vectorstore.Vector, _ uint64) ([]vectorstore.ScoredPoint, error) {
+func (s *stubStore) Query(_ context.Context, _ vectorstore.Vector, _ uint64, _ ...vectorstore.QueryOption) ([]vectorstore.ScoredPoint, error) {
 	return []vectorstore.ScoredPoint{}, nil
 }
 

@@ -31,13 +31,13 @@ Phero is a modern Go framework for building multi-agent AI systems. Like ants in
 - **🧩 LLM abstraction** Work with OpenAI-compatible endpoints (OpenAI, Ollama, etc.) and Anthropic
 - **🖼️ Multimodal input** Mix text and images with typed content parts (`llm.Text`, `llm.ImageURL`, `llm.ImageFile`)
 - **🔊 Audio I/O** OpenAI backend supports speech-to-text and text-to-speech via `llm.Transcriber` and `llm.SpeechSynthesizer`
-- **🧱 LLM middleware** Compose reusable cross-cutting behaviors around any backend with `llm.Use(...)`
+- **🧱 LLM middleware** Compose reusable cross-cutting behaviors around any backend with `llm.Use(...)` (retry, rate-limit, guardrails, and semantic response caching)
 - **🛠️ Function tools** Expose Go functions as callable tools with automatic JSON Schema generation
 - **📚 RAG (Retrieval-Augmented Generation)** Built-in vector storage and semantic search
 - **🧠 Skills system** Define reusable agent capabilities in `SKILL.md` files
 - **🔌 MCP support** Integrate Model Context Protocol servers as agent tools
 - **🧾 Memory management** Conversational context storage for agents
-- **🔍 Tracing** Typed lifecycle events with a colorized text tracer (`trace/text`) and an NDJSON file tracer (`trace/jsonfile`); per-run summary with token usage and latency breakdowns
+- **🔍 Tracing** Typed lifecycle events with a colorized text tracer (`trace/text`), an NDJSON file tracer (`trace/jsonfile`), and an OpenTelemetry tracer (`trace/otel`); per-run summary with token usage and latency breakdowns
 - **🛡️ Tool guardrails** Bash tool blocklist, allowlist, timeout, and safe-mode options
 - **✂️ Text splitting** Recursive and Markdown-aware chunkers under `textsplitter/recursive` and `textsplitter/markdown`
 - **🧬 Embeddings** Semantic search capabilities via OpenAI embeddings
@@ -105,7 +105,7 @@ Phero is organized into focused packages, each solving a specific problem:
 - **`mcp`** Model Context Protocol adapter for external tool integration
 - **`a2a`** Agent-to-Agent (A2A) protocol — expose agents as HTTP servers or call remote agents as tools
 - **`nats`** NATS Agent Protocol v0.3 — register agents as NATS micro services; discover and call them over pub/sub
-- **`trace`** Typed observability events; `trace/text` for human-readable colorized output; `trace/jsonfile` for NDJSON file logging; `trace.NewLLM` for raw LLM call wrapping
+- **`trace`** Typed observability events; `trace/text` for human-readable colorized output; `trace/jsonfile` for NDJSON file logging; `trace/otel` for OpenTelemetry spans; `trace.NewLLM` for raw LLM call wrapping
 - **`tool/agent`** Create and run a sub-agent at runtime as a delegated tool
 - **`tool/file`** Filesystem tools (`read`, `write`, `edit`, `glob`, `grep`)
 - **`tool/bash`** Bash command execution with guardrails (blocklist, allowlist, timeout, safe mode) and background execution (`RunInBackground`, `bash_output`, `kill_shell`)
@@ -121,6 +121,7 @@ Comprehensive examples are included in the [`examples/`](examples/) directory:
 | Example | Description |
 |---|---|
 | [Simple Agent](examples/simple-agent/) | **Start here!** Minimal example showing one agent with one custom tool perfect for learning the basics |
+| [Streaming](examples/streaming/) | Stream an agent's response token-by-token with `Agent.RunStream`, including tool call/result events |
 | [Multimodal](examples/multimodal/) | Send text + image inputs to a vision-capable model using typed content parts |
 | [Audio](examples/audio/) | End-to-end speech-to-text and text-to-speech using the OpenAI backend |
 | [LLM Middleware](examples/llm-middleware/) | Wrap an LLM with composable middleware for logging and other cross-cutting concerns |

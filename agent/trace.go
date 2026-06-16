@@ -31,6 +31,7 @@ type runStats struct {
 	llmCalls        int
 	llmInputTokens  int
 	llmOutputTokens int
+	llmCostUSD      float64
 	llmDuration     time.Duration
 	toolCalls       int
 	toolErrors      int
@@ -54,7 +55,7 @@ func newRunStats(agentName string) *runStats {
 	}
 }
 
-func (s *runStats) recordLLM(duration time.Duration, usage *llm.Usage) {
+func (s *runStats) recordLLM(duration time.Duration, model string, usage *llm.Usage) {
 	s.llmCalls++
 	s.llmDuration += duration
 	if usage == nil {
@@ -62,6 +63,7 @@ func (s *runStats) recordLLM(duration time.Duration, usage *llm.Usage) {
 	}
 	s.llmInputTokens += usage.InputTokens
 	s.llmOutputTokens += usage.OutputTokens
+	s.llmCostUSD += usage.Cost(model)
 }
 
 func (s *runStats) recordTool(toolName string, err error, duration time.Duration) {
@@ -121,6 +123,7 @@ func (s *runStats) summary(iterations int, handoffAgents []string, err error) *t
 		Usage: trace.UsageSummary{
 			InputTokens:  s.llmInputTokens,
 			OutputTokens: s.llmOutputTokens,
+			CostUSD:      s.llmCostUSD,
 		},
 		Latency: trace.LatencySummary{
 			Total:  time.Since(s.startedAt),
@@ -128,7 +131,7 @@ func (s *runStats) summary(iterations int, handoffAgents []string, err error) *t
 			Tool:   s.toolDuration,
 			Memory: s.memoryDuration,
 		},
-		Tools:        tools,
+		Tools:         tools,
 		HandoffAgents: handoffAgents,
 	}
 

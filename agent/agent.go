@@ -44,7 +44,7 @@ type Agent struct {
 // Result represents the final output of an agent after processing user input and executing any tool calls.
 type Result struct {
 	// Parts holds the multimodal content of the final assistant message.
-	Parts         []llm.ContentPart
+	Parts []llm.ContentPart
 	// HandoffAgents lists the agents that were handed work; more than one means fan-out.
 	HandoffAgents []*Agent
 	Summary       *trace.RunSummary
@@ -182,7 +182,16 @@ func (a *Agent) SetTracer(t trace.Tracer) {
 //
 // If the run succeeds but saving the session to memory fails, the result is
 // still returned together with the save error joined via errors.Join.
-func (a *Agent) Run(ctx context.Context, parts ...llm.ContentPart) (result *Result, err error) {
+func (a *Agent) Run(ctx context.Context, parts ...llm.ContentPart) (*Result, error) {
+	return a.run(ctx, nil, parts...)
+}
+
+// run executes the agent loop, optionally emitting streaming AgentEvents.
+//
+// When emit is nil the agent runs in buffered mode (identical to the original
+// Run). When emit is non-nil, each LLM call is streamed and text/reasoning deltas
+// and tool call/result events are pushed through emit as they happen.
+func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart) (result *Result, err error) {
 	ctx = trace.WithTracer(ctx, a.tracer)
 	ctx = trace.WithAgentName(ctx, a.name)
 	stats := newRunStats(a.name)
@@ -244,7 +253,7 @@ func (a *Agent) Run(ctx context.Context, parts ...llm.ContentPart) (result *Resu
 
 		iterCtx := trace.WithIteration(ctx, iteration)
 
-		iterationResult, err := a.handleAgentIteration(iterCtx, session, iteration, stats)
+		iterationResult, err := a.handleAgentIteration(iterCtx, session, iteration, stats, emit)
 		if err != nil {
 			return nil, err
 		}
@@ -317,27 +326,57 @@ type agentIteration struct {
 
 // handleAgentIteration executes one iteration of the agent loop: it calls the LLM with the current messages,
 // adds the response to the messages and memory, and executes any tool calls in the response.
-func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message, iteration int, stats *runStats) (agentIteration, error) {
-	tracedLLM := trace.NewLLM(a.llm, a.tracer)
-	start := time.Now()
-	msg, err := tracedLLM.Execute(ctx, session, a.tools)
-	duration := time.Since(start)
-	if err != nil {
-		stats.recordLLM(duration, nil)
-		return agentIteration{session: session}, err
+//
+// When emit is non-nil the LLM call is streamed and tool call/result events are emitted.
+func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message, iteration int, stats *runStats, emit emitFunc) (agentIteration, error) {
+	var (
+		msg *llm.Result
+		err error
+	)
+	if emit == nil {
+		tracedLLM := trace.NewLLM(a.llm, a.tracer)
+		start := time.Now()
+		msg, err = tracedLLM.Execute(ctx, session, a.tools)
+		duration := time.Since(start)
+		if err != nil {
+			stats.recordLLM(duration, "", nil)
+			return agentIteration{session: session}, err
+		}
+		stats.recordLLM(duration, msg.Model, msg.Usage)
+	} else {
+		msg, err = a.streamIteration(ctx, session, iteration, stats, emit)
+		if err != nil {
+			return agentIteration{session: session}, err
+		}
 	}
-	stats.recordLLM(duration, msg.Usage)
 
 	session = append(session, *msg.Message)
+	return a.processToolCalls(ctx, session, msg.Message, iteration, stats, emit)
+}
 
-	if len(msg.Message.ToolCalls) == 0 {
-		return agentIteration{session: session, lastMessage: msg.Message}, nil
+// processToolCalls executes the tool calls in message (if any) concurrently,
+// preserving order, and appends their results to the session. When emit is
+// non-nil it pushes a ToolCall event before execution and a ToolResult event
+// after, both in call order, on the single calling goroutine.
+func (a *Agent) processToolCalls(ctx context.Context, session []llm.Message, message *llm.Message, iteration int, stats *runStats, emit emitFunc) (agentIteration, error) {
+	toolCalls := message.ToolCalls
+	if len(toolCalls) == 0 {
+		return agentIteration{session: session, lastMessage: message}, nil
+	}
+
+	if emit != nil {
+		for _, toolCall := range toolCalls {
+			emit(AgentEvent{
+				Type:      AgentEventToolCall,
+				ToolName:  toolCall.Function.Name,
+				ToolArgs:  toolCall.Function.Arguments,
+				Iteration: iteration,
+			})
+		}
 	}
 
 	// Execute all tool calls concurrently, preserving order.
-	toolCalls := msg.Message.ToolCalls
 	results := make([]*llm.Message, len(toolCalls))
-
 	var wg sync.WaitGroup
 	wg.Add(len(toolCalls))
 	for i, toolCall := range toolCalls {
@@ -347,6 +386,18 @@ func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message,
 		}()
 	}
 	wg.Wait()
+
+	if emit != nil {
+		for i, result := range results {
+			emit(AgentEvent{
+				Type:       AgentEventToolResult,
+				ToolName:   toolCalls[i].Function.Name,
+				ToolResult: llm.TextContent(result.Parts...),
+				ToolError:  result.ToolError,
+				Iteration:  iteration,
+			})
+		}
+	}
 
 	// Append results in order; collect all handoffs (fan-out when more than one).
 	var handoffAgents []*Agent
@@ -408,6 +459,7 @@ func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, itera
 		Role:       llm.RoleTool,
 		Parts:      resultParts,
 		ToolCallID: toolCall.ID,
+		ToolError:  err != nil,
 	}
 }
 

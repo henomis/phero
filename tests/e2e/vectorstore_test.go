@@ -468,3 +468,130 @@ func TestVectorStoreWeaviate_Clear(t *testing.T) {
 	}
 }
 
+// ---- Metadata filtering (all backends) --------------------------------------
+
+// runFilterSuite exercises vectorstore.WithFilter against a live backend.
+// IDs are remapped via the ids map so backends with ID format constraints can
+// supply their own identifiers.
+func runFilterSuite(ctx context.Context, t *testing.T, store vectorstore.Store, ids map[string]string) {
+	t.Helper()
+
+	points := []vectorstore.Point{
+		{ID: ids["a"], Vector: []float32{1, 0, 0, 0}, Payload: map[string]any{"category": "news", "year": 2020}},
+		{ID: ids["b"], Vector: []float32{1, 0, 0, 0}, Payload: map[string]any{"category": "news", "year": 2024}},
+		{ID: ids["c"], Vector: []float32{1, 0, 0, 0}, Payload: map[string]any{"category": "sports", "year": 2024}},
+		{ID: ids["d"], Vector: []float32{1, 0, 0, 0}, Payload: map[string]any{"year": 2022}},
+	}
+
+	if err := store.Upsert(ctx, points); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	query := []float32{1, 0, 0, 0}
+
+	assertIDs := func(name string, filter *vectorstore.Filter, want ...string) {
+		t.Helper()
+
+		results, err := store.Query(ctx, query, 10, vectorstore.WithFilter(filter))
+		if err != nil {
+			t.Fatalf("%s: Query: %v", name, err)
+		}
+
+		got := make(map[string]bool, len(results))
+		for _, r := range results {
+			got[r.ID] = true
+		}
+		if len(results) != len(want) {
+			t.Errorf("%s: got %d results (%v), want %d", name, len(results), got, len(want))
+			return
+		}
+		for _, key := range want {
+			if !got[ids[key]] {
+				t.Errorf("%s: missing expected point %q in %v", name, key, got)
+			}
+		}
+	}
+
+	assertIDs("eq-string", vectorstore.NewFilter(vectorstore.Eq("category", "news")), "a", "b")
+	assertIDs("eq-number", vectorstore.NewFilter(vectorstore.Eq("year", 2022)), "d")
+	assertIDs("ne-requires-key", vectorstore.NewFilter(vectorstore.Ne("category", "news")), "c")
+	assertIDs("in", vectorstore.NewFilter(vectorstore.In("category", "news", "sports")), "a", "b", "c")
+	assertIDs("gt", vectorstore.NewFilter(vectorstore.Gt("year", 2021)), "b", "c", "d")
+	assertIDs("gte-and-eq", vectorstore.NewFilter(
+		vectorstore.Gte("year", 2024),
+		vectorstore.Eq("category", "news"),
+	), "b")
+	assertIDs("lt", vectorstore.NewFilter(vectorstore.Lt("year", 2021)), "a")
+	assertIDs("no-match", vectorstore.NewFilter(vectorstore.Eq("category", "missing")))
+}
+
+// TestVectorStoreQdrant_QueryWithFilter verifies server-side payload filtering.
+func TestVectorStoreQdrant_QueryWithFilter(t *testing.T) {
+	qc := requireQdrant(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	collection := "e2e-flt-" + uuid.New().String()
+
+	store, err := vsqdrant.New(qc, collection, vsqdrant.WithVectorSize(4), vsqdrant.WithWait(true))
+	if err != nil {
+		t.Fatalf("vsqdrant.New: %v", err)
+	}
+	if err := store.EnsureCollection(ctx); err != nil {
+		t.Fatalf("EnsureCollection: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_ = store.Clear(cleanCtx)
+	})
+
+	ids := map[string]string{
+		"a": uuid.New().String(),
+		"b": uuid.New().String(),
+		"c": uuid.New().String(),
+		"d": uuid.New().String(),
+	}
+	runFilterSuite(ctx, t, store, ids)
+}
+
+// TestVectorStorePSQL_QueryWithFilter verifies JSONB payload filtering.
+func TestVectorStorePSQL_QueryWithFilter(t *testing.T) {
+	db := requirePostgres(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	collection := "e2e_flt_" + uuid.New().String()[:8]
+
+	store, err := vspsql.New(db, collection,
+		vspsql.WithVectorSize(4),
+		vspsql.WithEnsureExtension(true),
+	)
+	if err != nil {
+		t.Fatalf("vspsql.New: %v", err)
+	}
+	if err := store.EnsureCollection(ctx); err != nil {
+		t.Fatalf("EnsureCollection: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_ = store.Clear(cleanCtx)
+	})
+
+	ids := map[string]string{"a": "fa", "b": "fb", "c": "fc", "d": "fd"}
+	runFilterSuite(ctx, t, store, ids)
+}
+
+// TestVectorStoreWeaviate_QueryWithFilter verifies client-side post-filtering.
+func TestVectorStoreWeaviate_QueryWithFilter(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	store := newWeaviateStore(t, newWeaviateClass())
+
+	ids := map[string]string{"a": "fa", "b": "fb", "c": "fc", "d": "fd"}
+	runFilterSuite(ctx, t, store, ids)
+}

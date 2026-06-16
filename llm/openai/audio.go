@@ -24,8 +24,10 @@ import (
 	"github.com/henomis/phero/llm"
 )
 
-var _ llm.Transcriber = (*Client)(nil)
-var _ llm.SpeechSynthesizer = (*Client)(nil)
+var (
+	_ llm.Transcriber       = (*Client)(nil)
+	_ llm.SpeechSynthesizer = (*Client)(nil)
+)
 
 const (
 	// DefaultTranscriptionModel is the model used when no transcription model is specified.

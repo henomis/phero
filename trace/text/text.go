@@ -122,12 +122,16 @@ func (t *Tracer) format(event trace.Event) string {
 		if summary.Error != "" {
 			errText = fmt.Sprintf(" error=%q", truncate(summary.Error, 120))
 		}
-		return fmt.Sprintf("%s%s %s[%s]%s %s≡  RunSummary%s  iterations=%d llm_calls=%d tool_calls=%d tool_errors=%d memory=%d/%d tokens=%d/%d latency(total=%s llm=%s tool=%s memory=%s) tools=[%s]%s%s",
+		cost := ""
+		if summary.Usage.CostUSD > 0 {
+			cost = fmt.Sprintf(" cost=$%.4f", summary.Usage.CostUSD)
+		}
+		return fmt.Sprintf("%s%s %s[%s]%s %s≡  RunSummary%s  iterations=%d llm_calls=%d tool_calls=%d tool_errors=%d memory=%d/%d tokens=%d/%d%s latency(total=%s llm=%s tool=%s memory=%s) tools=[%s]%s%s",
 			ansiBoldWhite, ts, ansiDim, summary.AgentName, ansiReset,
 			ansiBoldWhite, ansiReset,
 			summary.Iterations, summary.LLMCalls, summary.ToolCalls, summary.ToolErrors,
 			summary.MemoryRetrieved, summary.MemorySaved,
-			summary.Usage.InputTokens, summary.Usage.OutputTokens,
+			summary.Usage.InputTokens, summary.Usage.OutputTokens, cost,
 			summary.Latency.Total, summary.Latency.LLM, summary.Latency.Tool, summary.Latency.Memory,
 			tools, handoff, errText)
 
@@ -162,6 +166,15 @@ func (t *Tracer) format(event trace.Event) string {
 			ansiCyan, ts, agent,
 			ansiBold, ansiReset, iter, tokens,
 			toolCalls, content)
+
+	case trace.ReasoningEvent:
+		ts := e.Timestamp.Format("15:04:05.000")
+		agent := agentLabel(e.AgentName)
+		iter := iterLabel(e.Iteration)
+		return fmt.Sprintf("%s%s%s %s🧠 Reasoning%s%s  %q",
+			ansiMagenta, ts, agent,
+			ansiBold, ansiReset, iter,
+			truncate(e.Content, 200))
 
 	case trace.ToolCallEvent:
 		ts := e.Timestamp.Format("15:04:05.000")

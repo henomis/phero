@@ -231,8 +231,11 @@ func (s *Store) upsertOnce(ctx context.Context, points []vectorstore.Point) erro
 // The query vector must be non-empty and match the Store's configured vector
 // size. If limit is 0, Query returns an empty slice and a nil error.
 //
+// A vectorstore.Filter passed via vectorstore.WithFilter is translated to a
+// native Qdrant filter and evaluated server-side.
+//
 // Returned points include the decoded payload if present.
-func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint64) ([]vectorstore.ScoredPoint, error) {
+func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint64, opts ...vectorstore.QueryOption) ([]vectorstore.ScoredPoint, error) {
 	if len(query) == 0 {
 		return nil, vectorstore.ErrEmptyQuery
 	}
@@ -243,11 +246,18 @@ func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint6
 		return nil, &VectorSizeMismatchError{Expected: s.vectorSize, Got: len(query)}
 	}
 
+	cfg := vectorstore.ApplyQueryOptions(opts)
+	filter, err := translateFilter(cfg.Filter)
+	if err != nil {
+		return nil, err
+	}
+
 	res, err := s.client.Query(ctx, &qdrantapi.QueryPoints{
 		CollectionName: s.collection,
 		Query:          qdrantapi.NewQuery(query...),
 		Limit:          qdrantapi.PtrOf(limit),
 		WithPayload:    qdrantapi.NewWithPayload(true),
+		Filter:         filter,
 	})
 	if err != nil {
 		return nil, err

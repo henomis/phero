@@ -34,6 +34,15 @@ var ErrInvalidMaxConcurrentRequests = errors.New("middleware: maxConcurrentReque
 // ErrInvalidMaxAttempts is returned when maxAttempts is less than 1.
 var ErrInvalidMaxAttempts = errors.New("middleware: maxAttempts must be at least 1")
 
+// ErrNilEmbedder is returned when NewSemanticCache is given a nil embedder.
+var ErrNilEmbedder = errors.New("middleware: embedder must not be nil")
+
+// ErrNilStore is returned when NewSemanticCache is given a nil vector store.
+var ErrNilStore = errors.New("middleware: vector store must not be nil")
+
+// ErrInvalidThreshold is returned when the similarity threshold is outside [0, 1].
+var ErrInvalidThreshold = errors.New("middleware: similarity threshold must be between 0 and 1")
+
 // MaxAttemptsExceededError is returned by the Retry middleware when all
 // attempts have been exhausted. Unwrapping it yields the last underlying error.
 type MaxAttemptsExceededError struct {
