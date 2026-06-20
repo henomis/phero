@@ -245,7 +245,9 @@ func (s *RAG) IngestOnce(ctx context.Context, splitter textsplitter.Splitter) er
 // Options are forwarded to the backing store, e.g. vectorstore.WithFilter to
 // restrict results by payload metadata. When no options are provided, the
 // default filter configured via WithFilter (if any) is applied.
-func (s *RAG) Query(ctx context.Context, queryText string, opts ...vectorstore.QueryOption) ([]vectorstore.ScoredPoint, error) {
+func (s *RAG) Query(
+	ctx context.Context, queryText string, opts ...vectorstore.QueryOption,
+) ([]vectorstore.ScoredPoint, error) {
 	if strings.TrimSpace(queryText) == "" {
 		return nil, ErrEmptyQueryText
 	}

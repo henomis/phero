@@ -34,7 +34,9 @@ var _ llm.StreamingLLM = (*Client)(nil)
 //
 // The terminal chunk (Done == true) carries the complete assistant message, the
 // model name, and — when the server reports it — token usage.
-func (c *Client) ExecuteStream(ctx context.Context, messages []llm.Message, tools []*llm.Tool) iter.Seq2[llm.StreamChunk, error] {
+func (c *Client) ExecuteStream(
+	ctx context.Context, messages []llm.Message, tools []*llm.Tool,
+) iter.Seq2[llm.StreamChunk, error] {
 	return func(yield func(llm.StreamChunk, error) bool) {
 		request := openai.ChatCompletionRequest{
 			Model:         c.model,

@@ -246,7 +246,9 @@ func (s *Store) upsertOnce(ctx context.Context, points []vectorstore.Point) erro
 // native Qdrant filter and evaluated server-side.
 //
 // Returned points include the decoded payload if present.
-func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint64, opts ...vectorstore.QueryOption) ([]vectorstore.ScoredPoint, error) {
+func (s *Store) Query(
+	ctx context.Context, query vectorstore.Vector, limit uint64, opts ...vectorstore.QueryOption,
+) ([]vectorstore.ScoredPoint, error) {
 	if len(query) == 0 {
 		return nil, vectorstore.ErrEmptyQuery
 	}

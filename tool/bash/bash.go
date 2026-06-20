@@ -36,9 +36,9 @@ import (
 // Command is the bash command to execute. Description provides context on why the command is being run.
 type Input struct {
 	Command         string `json:"command" jsonschema:"description=The command to execute."`
-	Description     string `json:"description,omitempty" jsonschema:"description=Clear, concise command description (5-10 words)."`
-	Timeout         int    `json:"timeout,omitempty" jsonschema:"description=Optional timeout in milliseconds (max 600000)."`
-	RunInBackground bool   `json:"run_in_background,omitempty" jsonschema:"description=Set true to run the command in background."`
+	Description     string `json:"description,omitempty" jsonschema:"description=Clear, concise command description (5-10 words)."` //nolint:lll
+	Timeout         int    `json:"timeout,omitempty" jsonschema:"description=Optional timeout in milliseconds (max 600000)."` //nolint:lll
+	RunInBackground bool   `json:"run_in_background,omitempty" jsonschema:"description=Set true to run the command in background."` //nolint:lll
 }
 
 // Output represents the output from bash_tool.
@@ -54,7 +54,7 @@ type Output struct {
 // BashOutputInput represents input for retrieving background shell output.
 type BashOutputInput struct {
 	BashID string `json:"bash_id" jsonschema:"description=ID of the background shell to read."`
-	Filter string `json:"filter,omitempty" jsonschema:"description=Optional regular expression to include only matching lines."`
+	Filter string `json:"filter,omitempty" jsonschema:"description=Optional regular expression to include only matching lines."` //nolint:lll
 }
 
 // BashOutputOutput represents incremental output from a background shell.
@@ -141,7 +141,7 @@ type Option func(*Tool)
 // New creates a new instance of the bash_tool.
 func New(options ...Option) (*Tool, error) {
 	name := "bash"
-	description := "Executes a given bash command in a persistent shell session with optional timeout and background execution."
+	description := "Executes a given bash command in a persistent shell session with optional timeout and background execution." //nolint:lll
 
 	bashTool := &Tool{
 		defaultTimeout: DefaultTimeout,

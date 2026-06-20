@@ -190,10 +190,12 @@ func (t *Tool) buildDescription() string {
 
 	b.WriteString("Execute a skill within the main conversation.\n\n")
 	b.WriteString("<skills_instructions>\n")
-	b.WriteString("When users ask you to perform tasks, check if any available skill can help complete the task more effectively.\n")
+	b.WriteString("When users ask you to perform tasks, check if any available skill " +
+		"can help complete the task more effectively.\n")
 	b.WriteString("Invoke this tool with the skill name only, using the command field.\n")
 	b.WriteString("Do not pass arguments inside command.\n")
-	b.WriteString("After invocation, use the returned base path and instructions to execute the task in the same conversation.\n")
+	b.WriteString("After invocation, use the returned base path and instructions " +
+		"to execute the task in the same conversation.\n")
 	b.WriteString("</skills_instructions>\n\n")
 
 	b.WriteString("<available_skills>\n")

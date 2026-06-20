@@ -48,5 +48,6 @@ type DuplicateSkillNameError struct {
 
 // Error returns the formatted error message.
 func (e *DuplicateSkillNameError) Error() string {
-	return "skill tool: duplicate skill name '" + e.Name + "' found in '" + e.ExistingDir + "' and '" + e.DuplicateDir + "'"
+	return "skill tool: duplicate skill name '" + e.Name +
+		"' found in '" + e.ExistingDir + "' and '" + e.DuplicateDir + "'"
 }

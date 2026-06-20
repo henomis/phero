@@ -139,7 +139,10 @@ func (t *Tracer) format(event trace.Event) string {
 			cost = fmt.Sprintf(" cost=$%.4f", summary.Usage.CostUSD)
 		}
 
-		return fmt.Sprintf("%s%s %s[%s]%s %s≡  RunSummary%s  iterations=%d llm_calls=%d tool_calls=%d tool_errors=%d memory=%d/%d tokens=%d/%d%s latency(total=%s llm=%s tool=%s memory=%s) tools=[%s]%s%s",
+		return fmt.Sprintf(
+			"%s%s %s[%s]%s %s≡  RunSummary%s  iterations=%d llm_calls=%d"+
+				" tool_calls=%d tool_errors=%d memory=%d/%d tokens=%d/%d%s"+
+				" latency(total=%s llm=%s tool=%s memory=%s) tools=[%s]%s%s",
 			ansiBoldWhite, ts, ansiDim, summary.AgentName, ansiReset,
 			ansiBoldWhite, ansiReset,
 			summary.Iterations, summary.LLMCalls, summary.ToolCalls, summary.ToolErrors,

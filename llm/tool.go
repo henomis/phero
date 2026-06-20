@@ -91,7 +91,8 @@ func (t *Tool) Use(middlewares ...ToolMiddleware) *Tool {
 //
 // The handler function must be of the form func(context.Context, T) (R, error) where T and R can be any types.
 // The input type T is used to generate a JSON schema for the tool's parameters, which is passed to the LLM.
-// When the tool is called, the LLM will provide the arguments as a JSON string, which will be unmarshaled into T and passed to the handler.
+// When the tool is called, the LLM will provide the arguments as a JSON string, which will be
+// unmarshaled into T and passed to the handler.
 // The handler's return value R will be returned as the result of the tool call.
 //
 // Example usage:

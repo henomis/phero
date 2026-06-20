@@ -35,9 +35,9 @@ const (
 
 // GrepInput is the input schema for the grep tool.
 type GrepInput struct {
-	Pattern    string `json:"pattern" jsonschema:"description=The regular expression pattern to search for in file contents"`
-	Path       string `json:"path,omitempty" jsonschema:"description=File or directory to search in. Defaults to current working directory"`
-	OutputMode string `json:"output_mode,omitempty" jsonschema:"description=Output mode: content, files_with_matches, count. Defaults to files_with_matches"`
+	Pattern    string `json:"pattern" jsonschema:"description=The regular expression pattern to search for in file contents"` //nolint:lll
+	Path       string `json:"path,omitempty" jsonschema:"description=File or directory to search in. Defaults to current working directory"` //nolint:lll
+	OutputMode string `json:"output_mode,omitempty" jsonschema:"description=Output mode: content, files_with_matches, count. Defaults to files_with_matches"` //nolint:lll
 	Glob       string `json:"glob,omitempty" jsonschema:"description=Glob pattern to filter files"`
 	Type       string `json:"type,omitempty" jsonschema:"description=File type to search (go, js, py, etc.)"`
 	I          bool   `json:"-i,omitempty" jsonschema:"description=Case insensitive search"`
@@ -255,7 +255,9 @@ func countMatches(re *regexp.Regexp, content string, multiline bool) int {
 	return count
 }
 
-func grepContentMatches(path, content string, re *regexp.Regexp, multiline, lineNumbers bool, after, before int) []string {
+func grepContentMatches(
+	path, content string, re *regexp.Regexp, multiline, lineNumbers bool, after, before int,
+) []string {
 	if multiline {
 		idxs := re.FindAllStringIndex(content, -1)
 

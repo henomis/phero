@@ -32,7 +32,9 @@ var _ llm.StreamingLLM = (*Client)(nil)
 //
 // The terminal chunk (Done == true) carries the complete assistant message, the
 // model name, and token usage (including cache token counts).
-func (c *Client) ExecuteStream(ctx context.Context, messages []llm.Message, tools []*llm.Tool) iter.Seq2[llm.StreamChunk, error] {
+func (c *Client) ExecuteStream(
+	ctx context.Context, messages []llm.Message, tools []*llm.Tool,
+) iter.Seq2[llm.StreamChunk, error] {
 	return func(yield func(llm.StreamChunk, error) bool) {
 		params, err := c.buildParams(messages, tools)
 		if err != nil {

@@ -79,7 +79,9 @@ func WithSkipToolCalls(skip bool) SemanticCacheOption {
 //	cacheMW, err := middleware.NewSemanticCache(embedder, store)
 //	if err != nil { ... }
 //	client := llm.Use(base, cacheMW)
-func NewSemanticCache(embedder embedding.Embedder, store vectorstore.Store, opts ...SemanticCacheOption) (llm.LLMMiddleware, error) {
+func NewSemanticCache(
+	embedder embedding.Embedder, store vectorstore.Store, opts ...SemanticCacheOption,
+) (llm.LLMMiddleware, error) {
 	if embedder == nil {
 		return nil, ErrNilEmbedder
 	}
@@ -126,7 +128,9 @@ type semanticCacheLLM struct {
 //
 // Cache failures (embedding, store) never block a call: they degrade to a
 // normal, uncached Execute.
-func (s *semanticCacheLLM) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
+func (s *semanticCacheLLM) Execute(
+	ctx context.Context, messages []llm.Message, tools []*llm.Tool,
+) (*llm.Result, error) {
 	if s.cfg.skipWithTools && len(tools) > 0 {
 		return s.inner.Execute(ctx, messages, tools)
 	}

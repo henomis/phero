@@ -111,7 +111,9 @@ func (a *Agent) RunStream(ctx context.Context, parts ...llm.ContentPart) iter.Se
 // streamIteration performs a single streaming LLM call, emitting text and
 // reasoning deltas, and returns the assembled result. It fires the same
 // LLMRequest/LLMResponse/Reasoning trace events as the buffered path.
-func (a *Agent) streamIteration(ctx context.Context, session []llm.Message, iteration int, stats *runStats, emit emitFunc) (*llm.Result, error) {
+func (a *Agent) streamIteration(
+	ctx context.Context, session []llm.Message, iteration int, stats *runStats, emit emitFunc,
+) (*llm.Result, error) {
 	toolNames := make([]string, len(a.tools))
 	for i, t := range a.tools {
 		toolNames[i] = t.Name()

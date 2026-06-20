@@ -243,7 +243,9 @@ func (s *Store) Upsert(ctx context.Context, points []vectorstore.Point) error {
 // A vectorstore.Filter passed via vectorstore.WithFilter is translated to
 // parameterized JSONB predicates over the payload column and evaluated by
 // PostgreSQL.
-func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint64, opts ...vectorstore.QueryOption) ([]vectorstore.ScoredPoint, error) {
+func (s *Store) Query(
+	ctx context.Context, query vectorstore.Vector, limit uint64, opts ...vectorstore.QueryOption,
+) ([]vectorstore.ScoredPoint, error) {
 	if len(query) == 0 {
 		return nil, vectorstore.ErrEmptyQuery
 	}

@@ -29,7 +29,7 @@ import (
 // GlobInput is the input schema for the glob tool.
 type GlobInput struct {
 	Pattern string `json:"pattern" jsonschema:"description=The glob pattern to match files against"`
-	Path    string `json:"path,omitempty" jsonschema:"description=The directory to search in. If omitted, the current working directory is used"`
+	Path    string `json:"path,omitempty" jsonschema:"description=The directory to search in. If omitted, the current working directory is used"` //nolint:lll
 }
 
 // GlobOutput is the output schema for the glob tool.

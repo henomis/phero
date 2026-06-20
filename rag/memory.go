@@ -110,7 +110,8 @@ func pointToContext(points []vectorstore.ScoredPoint) llm.Message {
 	return llm.SystemMessage(sb.String())
 }
 
-// formatSessionContent converts a slice of llm.Message into a single string, concatenating the role and content of each message in a readable format.
+// formatSessionContent converts a slice of llm.Message into a single string, concatenating
+// the role and content of each message in a readable format.
 func formatSessionContent(messages []llm.Message) string {
 	var b strings.Builder
 

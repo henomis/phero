@@ -50,11 +50,18 @@ func New(maxItems uint, options ...Option) *Memory {
 	return m
 }
 
-// WithSummarization enables automatic summarization of memory when the number of stored messages exceeds summarizeThreshold.
+// WithSummarization enables automatic summarization of memory when the number of stored
+// messages exceeds summarizeThreshold.
 //
-// When enabled, the Memory will use the provided summaryLLM to generate a summary of the conversation history once the number of stored messages exceeds summarizeThreshold. The summary will be stored as a system message in memory, and the most recent messages up to summarySize will be retained alongside the summary.
+// When enabled, the Memory will use the provided summaryLLM to generate a summary of the
+// conversation history once the number of stored messages exceeds summarizeThreshold. The
+// summary will be stored as a system message in memory, and the most recent messages up to
+// summarySize will be retained alongside the summary.
 //
-// If summarizeThreshold is set to 0 or greater than capacity, summarization will trigger when the buffer is full. If summarySize is set to 0, it will default to half of summarizeThreshold (rounded down). To avoid an infinite summarization loop, summarySize must be less than summarizeThreshold.
+// If summarizeThreshold is set to 0 or greater than capacity, summarization will trigger when
+// the buffer is full. If summarySize is set to 0, it will default to half of
+// summarizeThreshold (rounded down). To avoid an infinite summarization loop, summarySize
+// must be less than summarizeThreshold.
 func WithSummarization(summaryLLM llm.LLM, summarizeThreshold, summarySize uint) Option {
 	return func(m *Memory) {
 		m.llm = summaryLLM

@@ -122,7 +122,7 @@ func (a *Agent) getTool(toolName string) (*llm.Tool, bool) {
 
 // AgentHandoffInput is the structured argument passed to a handoff tool.
 type AgentHandoffInput struct {
-	Context string `json:"context" jsonschema:"The contextual data gathered by the source agent to be passed to the receiving agent."`
+	Context string `json:"context" jsonschema:"The contextual data gathered by the source agent to be passed to the receiving agent."` //nolint:lll
 }
 
 // AddTool registers a function tool.
@@ -340,7 +340,9 @@ type agentIteration struct {
 // adds the response to the messages and memory, and executes any tool calls in the response.
 //
 // When emit is non-nil the LLM call is streamed and tool call/result events are emitted.
-func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message, iteration int, stats *runStats, emit emitFunc) (agentIteration, error) {
+func (a *Agent) handleAgentIteration(
+	ctx context.Context, session []llm.Message, iteration int, stats *runStats, emit emitFunc,
+) (agentIteration, error) {
 	var (
 		msg *llm.Result
 		err error
@@ -374,7 +376,10 @@ func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message,
 // preserving order, and appends their results to the session. When emit is
 // non-nil it pushes a ToolCall event before execution and a ToolResult event
 // after, both in call order, on the single calling goroutine.
-func (a *Agent) processToolCalls(ctx context.Context, session []llm.Message, message *llm.Message, iteration int, stats *runStats, emit emitFunc) (agentIteration, error) {
+func (a *Agent) processToolCalls(
+	ctx context.Context, session []llm.Message, message *llm.Message,
+	iteration int, stats *runStats, emit emitFunc,
+) (agentIteration, error) {
 	toolCalls := message.ToolCalls
 	if len(toolCalls) == 0 {
 		return agentIteration{session: session, lastMessage: message}, nil
@@ -446,7 +451,9 @@ func (a *Agent) processToolCalls(ctx context.Context, session []llm.Message, mes
 }
 
 // handleToolCall executes a tool call and returns the result as a message to be added to the conversation.
-func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, iteration int, stats *runStats) *llm.Message {
+func (a *Agent) handleToolCall(
+	ctx context.Context, toolCall llm.ToolCall, iteration int, stats *runStats,
+) *llm.Message {
 	a.tracer.Trace(trace.ToolCallEvent{
 		AgentName: a.name,
 		ToolName:  toolCall.Function.Name,
@@ -489,7 +496,9 @@ func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, itera
 }
 
 // prepareSession prepares the messages for the LLM call, including the system prompt, memory messages, and user input.
-func (a *Agent) prepareSession(ctx context.Context, parts []llm.ContentPart, stats *runStats) ([]llm.Message, int, error) {
+func (a *Agent) prepareSession(
+	ctx context.Context, parts []llm.ContentPart, stats *runStats,
+) ([]llm.Message, int, error) {
 	messages := []llm.Message{llm.SystemMessage(a.description)}
 
 	// Use the text representation of the input parts for the memory query.
@@ -576,7 +585,7 @@ func anyToContentParts(v any) []llm.ContentPart {
 // Tool arguments schema: {"input": "..."}.
 func (a *Agent) AsTool(toolName, toolDescription string) (*llm.Tool, error) {
 	type ToolInput struct {
-		Input string `json:"input" jsonschema:"description=Instructions for the agent. Describe the task, question, or problem the agent should solve."`
+		Input string `json:"input" jsonschema:"description=Instructions for the agent. Describe the task, question, or problem the agent should solve."` //nolint:lll
 	}
 
 	type ToolOutput struct {

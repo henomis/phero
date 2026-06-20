@@ -249,7 +249,9 @@ const (
 // `where` filters cannot address. Query over-fetches candidates (limit×4,
 // capped at 1000) and post-filters them, so heavily filtered collections may
 // return fewer than limit points even when more matches exist.
-func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint64, opts ...vectorstore.QueryOption) ([]vectorstore.ScoredPoint, error) {
+func (s *Store) Query(
+	ctx context.Context, query vectorstore.Vector, limit uint64, opts ...vectorstore.QueryOption,
+) ([]vectorstore.ScoredPoint, error) {
 	if len(query) == 0 {
 		return nil, vectorstore.ErrEmptyQuery
 	}
