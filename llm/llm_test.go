@@ -54,7 +54,7 @@ func TestNewFunctionTool_PointerInput_SchemaIsStrictObject(t *testing.T) {
 		t.Fatalf("schema properties: expected map, got %#v", tool.InputSchema()["properties"])
 	}
 
-	if _, ok := props["name"]; !ok {
+	if _, hasName := props["name"]; !hasName {
 		t.Fatalf("schema properties: expected key %q, got %#v", "name", props)
 	}
 }
@@ -199,7 +199,7 @@ func TestNewRawTool_PreservesObjectSchema(t *testing.T) {
 		t.Fatalf("expected properties map, got %#v", tool.InputSchema()["properties"])
 	}
 
-	if _, ok := props["city"]; !ok {
+	if _, hasCity := props["city"]; !hasCity {
 		t.Fatalf("expected 'city' property, got %#v", props)
 	}
 }

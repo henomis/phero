@@ -181,8 +181,8 @@ func NewTool[T, R any](name, description string, handler func(ctx context.Contex
 		inputSchema: schemaMap,
 		handle: func(ctx context.Context, arguments string) (any, error) {
 			var args T
-			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
-				return nil, &ToolArgumentParseError{Err: err}
+			if parseErr := json.Unmarshal([]byte(arguments), &args); parseErr != nil {
+				return nil, &ToolArgumentParseError{Err: parseErr}
 			}
 
 			return handler(ctx, args)

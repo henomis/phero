@@ -205,21 +205,21 @@ func TestToolMiddlewareOrder(t *testing.T) {
 	m1 := func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
 		return func(ctx context.Context, arguments string) (any, error) {
 			steps = append(steps, "m1-before")
-			res, err := next(ctx, arguments)
+			res, nextErr := next(ctx, arguments)
 
 			steps = append(steps, "m1-after")
 
-			return res, err
+			return res, nextErr
 		}
 	}
 	m2 := func(_ *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
 		return func(ctx context.Context, arguments string) (any, error) {
 			steps = append(steps, "m2-before")
-			res, err := next(ctx, arguments)
+			res, nextErr := next(ctx, arguments)
 
 			steps = append(steps, "m2-after")
 
-			return res, err
+			return res, nextErr
 		}
 	}
 

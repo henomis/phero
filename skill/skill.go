@@ -79,7 +79,7 @@ func (p *Parser) List() ([]string, error) {
 	for _, entry := range entries {
 		if entry.IsDir() {
 			skillPath := filepath.Join(p.root, entry.Name(), skillFileName)
-			if _, err := os.Stat(skillPath); err == nil {
+			if _, statErr := os.Stat(skillPath); statErr == nil {
 				dirs = append(dirs, entry.Name())
 			}
 		}
@@ -142,8 +142,8 @@ func Parse(r io.Reader) (*Skill, error) {
 	body := strings.TrimSpace(parts[2])
 
 	var skill Skill
-	if err := yaml.Unmarshal([]byte(yamlPart), &skill); err != nil {
-		return nil, err
+	if unmarshalErr := yaml.Unmarshal([]byte(yamlPart), &skill); unmarshalErr != nil {
+		return nil, unmarshalErr
 	}
 
 	skill.Body = body

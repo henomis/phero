@@ -532,8 +532,8 @@ func (t *Tool) startBackground(command string, timeout time.Duration) (string, e
 	cmd.Stdout = writer
 	cmd.Stderr = writer
 
-	if err := cmd.Start(); err != nil {
-		return "", err
+	if startErr := cmd.Start(); startErr != nil {
+		return "", startErr
 	}
 
 	t.mu.Lock()

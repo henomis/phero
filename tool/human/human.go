@@ -136,8 +136,8 @@ func (h *Tool) ask(ctx context.Context, input *Input) (*Output, error) {
 		answers = map[string]Answer{}
 	}
 
-	if err := validateAnswers(input.Questions, answers); err != nil {
-		return nil, err
+	if validateErr := validateAnswers(input.Questions, answers); validateErr != nil {
+		return nil, validateErr
 	}
 
 	return &Output{Answers: answers}, nil

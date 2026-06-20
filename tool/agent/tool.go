@@ -104,9 +104,8 @@ func (t *Tool) handle(ctx context.Context, input *Input) (*Output, error) {
 	}
 
 	for _, tool := range t.tools {
-		err := subAgent.AddTool(tool)
-		if err != nil {
-			return nil, err
+		if addErr := subAgent.AddTool(tool); addErr != nil {
+			return nil, addErr
 		}
 	}
 

@@ -120,8 +120,8 @@ func (e *EditTool) edit(_ context.Context, input *EditInput) (*EditOutput, error
 	}
 
 	updated := bytes.Replace(content, needle, replacement, maxReplacements)
-	if err := atomicWriteFile(resolvedPath, updated, mode); err != nil {
-		return nil, err
+	if writeErr := atomicWriteFile(resolvedPath, updated, mode); writeErr != nil {
+		return nil, writeErr
 	}
 
 	if !input.ReplaceAll {

@@ -99,12 +99,12 @@ func (w *WriteTool) write(_ context.Context, input *WriteInput) (*WriteOutput, e
 		return nil, statErr
 	}
 
-	if err := os.MkdirAll(filepath.Dir(resolvedPath), 0o755); err != nil {
-		return nil, err
+	if mkdirErr := os.MkdirAll(filepath.Dir(resolvedPath), 0o755); mkdirErr != nil {
+		return nil, mkdirErr
 	}
 
-	if err := atomicWriteFile(resolvedPath, []byte(input.Content), perm); err != nil {
-		return nil, err
+	if writeErr := atomicWriteFile(resolvedPath, []byte(input.Content), perm); writeErr != nil {
+		return nil, writeErr
 	}
 
 	return &WriteOutput{BytesWritten: len(input.Content)}, nil
@@ -126,22 +126,22 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) (retErr error) 
 		}
 	}()
 
-	if _, err := tmp.Write(data); err != nil {
+	if _, writeErr := tmp.Write(data); writeErr != nil {
 		_ = tmp.Close()
-		return err
+		return writeErr
 	}
 
-	if err := tmp.Chmod(perm); err != nil {
+	if chmodErr := tmp.Chmod(perm); chmodErr != nil {
 		_ = tmp.Close()
-		return err
+		return chmodErr
 	}
 
-	if err := tmp.Close(); err != nil {
-		return err
+	if closeErr := tmp.Close(); closeErr != nil {
+		return closeErr
 	}
 
-	if err := os.Rename(tmpPath, path); err != nil {
-		return err
+	if renameErr := os.Rename(tmpPath, path); renameErr != nil {
+		return renameErr
 	}
 
 	return nil

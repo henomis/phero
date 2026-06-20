@@ -151,14 +151,14 @@ func (m *Memory) EnsureSchema(ctx context.Context) error {
 		return ErrInvalidTableName
 	}
 
-	if _, err := m.db.ExecContext(ctx, fmt.Sprintf(createTableSQLTemplate, table)); err != nil {
-		return err
+	if _, execErr := m.db.ExecContext(ctx, fmt.Sprintf(createTableSQLTemplate, table)); execErr != nil {
+		return execErr
 	}
 	// index name uses the table name string; quoted identifiers aren't accepted
 	// for index names. Use a deterministic safe name.
 	idxName := sqlutil.SafeIndexName(m.tableName) + "_session_seq_idx"
-	if _, err := m.db.ExecContext(ctx, fmt.Sprintf(createIndexSQLTemplate, idxName, table)); err != nil {
-		return err
+	if _, execErr := m.db.ExecContext(ctx, fmt.Sprintf(createIndexSQLTemplate, idxName, table)); execErr != nil {
+		return execErr
 	}
 
 	m.schemaDone = true
@@ -190,18 +190,18 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 	defer func() { _ = tx.Rollback() }()
 
 	for _, msg := range messages {
-		b, err := json.Marshal(msg)
-		if err != nil {
-			return err
+		b, marshalErr := json.Marshal(msg)
+		if marshalErr != nil {
+			return marshalErr
 		}
 
-		if _, err := tx.ExecContext(ctx, insertStmt, m.sessionID, string(b)); err != nil {
-			return err
+		if _, execErr := tx.ExecContext(ctx, insertStmt, m.sessionID, string(b)); execErr != nil {
+			return execErr
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
-		return err
+	if commitErr := tx.Commit(); commitErr != nil {
+		return commitErr
 	}
 
 	// Summarization is done outside of the write transaction to avoid holding a
@@ -235,20 +235,20 @@ func (m *Memory) Retrieve(ctx context.Context, _ string) ([]llm.Message, error) 
 
 	for rows.Next() {
 		var msgBytes []byte
-		if err := rows.Scan(&msgBytes); err != nil {
-			return nil, err
+		if scanErr := rows.Scan(&msgBytes); scanErr != nil {
+			return nil, scanErr
 		}
 
 		var msg llm.Message
-		if err := json.Unmarshal(msgBytes, &msg); err != nil {
-			return nil, err
+		if unmarshalErr := json.Unmarshal(msgBytes, &msg); unmarshalErr != nil {
+			return nil, unmarshalErr
 		}
 
 		out = append(out, msg)
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, err
+	if rowsErr := rows.Err(); rowsErr != nil {
+		return nil, rowsErr
 	}
 
 	return out, nil
@@ -280,8 +280,8 @@ func (m *Memory) count(ctx context.Context) (int, error) {
 	stmt := fmt.Sprintf(countMessagesSQLTemplate, table)
 
 	var n int
-	if err := m.db.QueryRowContext(ctx, stmt, m.sessionID).Scan(&n); err != nil {
-		return 0, err
+	if scanErr := m.db.QueryRowContext(ctx, stmt, m.sessionID).Scan(&n); scanErr != nil {
+		return 0, scanErr
 	}
 
 	return n, nil
@@ -341,20 +341,20 @@ func (m *Memory) maybeSummarize(ctx context.Context) error {
 	defer func() { _ = tx.Rollback() }()
 
 	clearStmt := fmt.Sprintf(clearSessionSQLTemplate, table)
-	if _, err := tx.ExecContext(ctx, clearStmt, m.sessionID); err != nil {
-		return err
+	if _, execErr := tx.ExecContext(ctx, clearStmt, m.sessionID); execErr != nil {
+		return execErr
 	}
 
 	insertStmt := fmt.Sprintf(insertMessageSQLTemplate, table)
 
 	for _, msg := range messagesToStore {
-		b, err := json.Marshal(msg)
-		if err != nil {
-			return err
+		b, marshalErr := json.Marshal(msg)
+		if marshalErr != nil {
+			return marshalErr
 		}
 
-		if _, err := tx.ExecContext(ctx, insertStmt, m.sessionID, string(b)); err != nil {
-			return err
+		if _, execErr := tx.ExecContext(ctx, insertStmt, m.sessionID, string(b)); execErr != nil {
+			return execErr
 		}
 	}
 

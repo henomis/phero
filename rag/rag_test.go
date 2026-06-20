@@ -123,12 +123,12 @@ func TestRAGEnsureCollectionCachedAfterSuccess(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := r.Ingest(ctx, splitter); err != nil {
-		t.Fatalf("IngestFile() error = %v", err)
+	if ingestErr := r.Ingest(ctx, splitter); ingestErr != nil {
+		t.Fatalf("IngestFile() error = %v", ingestErr)
 	}
 
-	if _, err := r.Query(ctx, "question"); err != nil {
-		t.Fatalf("Query() error = %v", err)
+	if _, queryErr := r.Query(ctx, "question"); queryErr != nil {
+		t.Fatalf("Query() error = %v", queryErr)
 	}
 
 	if got := store.EnsureCalls(); got != 1 {
@@ -146,12 +146,12 @@ func TestRAGEnsureCollectionRetriesAfterFailure(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := r.Ingest(ctx, splitter); err == nil {
+	if ingestErr := r.Ingest(ctx, splitter); ingestErr == nil {
 		t.Fatal("IngestFile() error = nil, want transient ensure error")
 	}
 
-	if err := r.Ingest(ctx, splitter); err != nil {
-		t.Fatalf("second IngestFile() error = %v", err)
+	if ingestErr := r.Ingest(ctx, splitter); ingestErr != nil {
+		t.Fatalf("second IngestFile() error = %v", ingestErr)
 	}
 
 	if got := store.EnsureCalls(); got != 2 {
@@ -182,8 +182,8 @@ func TestRAGEnsureCollectionConcurrentCallersShareSuccess(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			_, err := r.Query(ctx, "shared question")
-			errCh <- err
+			_, queryErr := r.Query(ctx, "shared question")
+			errCh <- queryErr
 		}()
 	}
 
@@ -228,8 +228,8 @@ func TestRAG_IngestOnce_SkipsWhenNonEmpty(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	if err := r.IngestOnce(context.Background(), splitter); err != nil {
-		t.Fatalf("IngestOnce() error = %v", err)
+	if ingestErr := r.IngestOnce(context.Background(), splitter); ingestErr != nil {
+		t.Fatalf("IngestOnce() error = %v", ingestErr)
 	}
 
 	if store.upsertCalls != 0 {
@@ -246,8 +246,8 @@ func TestRAG_IngestOnce_IngestsWhenEmpty(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	if err := r.IngestOnce(context.Background(), splitter); err != nil {
-		t.Fatalf("IngestOnce() error = %v", err)
+	if ingestErr := r.IngestOnce(context.Background(), splitter); ingestErr != nil {
+		t.Fatalf("IngestOnce() error = %v", ingestErr)
 	}
 
 	if store.upsertCalls == 0 {

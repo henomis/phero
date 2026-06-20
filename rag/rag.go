@@ -159,8 +159,8 @@ func (s *RAG) ingestBatch(ctx context.Context, docs []document.Document, offset 
 		})
 	}
 
-	if err := s.store.Upsert(ctx, points); err != nil {
-		return &IngestError{Op: "upsert", BatchStart: offset, BatchEnd: offset + len(docs), Cause: err}
+	if upsertErr := s.store.Upsert(ctx, points); upsertErr != nil {
+		return &IngestError{Op: "upsert", BatchStart: offset, BatchEnd: offset + len(docs), Cause: upsertErr}
 	}
 
 	return nil
@@ -201,8 +201,8 @@ func (s *RAG) Ingest(ctx context.Context, splitter textsplitter.Splitter) error 
 		batch = append(batch, doc)
 		if len(batch) >= batchSize {
 			n := len(batch)
-			if err := s.ingestBatch(ctx, batch, offset); err != nil {
-				return err
+			if batchErr := s.ingestBatch(ctx, batch, offset); batchErr != nil {
+				return batchErr
 			}
 
 			offset += n

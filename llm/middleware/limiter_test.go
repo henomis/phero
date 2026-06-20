@@ -217,17 +217,17 @@ func TestNewLimiter_StopUnblocksTokenWaiter(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		_, err := client.Execute(context.Background(), nil, nil)
-		errCh <- err
+		_, execErr := client.Execute(context.Background(), nil, nil)
+		errCh <- execErr
 	}()
 
 	time.Sleep(20 * time.Millisecond)
 	stop()
 
 	select {
-	case err := <-errCh:
-		if !errors.Is(err, ErrStopped) {
-			t.Fatalf("got %v, want ErrStopped", err)
+	case recvErr := <-errCh:
+		if !errors.Is(recvErr, ErrStopped) {
+			t.Fatalf("got %v, want ErrStopped", recvErr)
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("caller was not unblocked after stop()")
@@ -260,8 +260,8 @@ func TestNewLimiter_StopUnblocksSemaphoreWaiter(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		_, err := client.Execute(context.Background(), nil, nil)
-		errCh <- err
+		_, execErr := client.Execute(context.Background(), nil, nil)
+		errCh <- execErr
 	}()
 
 	time.Sleep(20 * time.Millisecond)
@@ -269,9 +269,9 @@ func TestNewLimiter_StopUnblocksSemaphoreWaiter(t *testing.T) {
 	close(gate) // release the first caller too
 
 	select {
-	case err := <-errCh:
-		if !errors.Is(err, ErrStopped) {
-			t.Fatalf("got %v, want ErrStopped", err)
+	case recvErr := <-errCh:
+		if !errors.Is(recvErr, ErrStopped) {
+			t.Fatalf("got %v, want ErrStopped", recvErr)
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("semaphore waiter was not unblocked after stop()")
@@ -305,17 +305,17 @@ func TestNewLimiter_ContextCancelToken(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		_, err := client.Execute(ctx, nil, nil)
-		errCh <- err
+		_, execErr := client.Execute(ctx, nil, nil)
+		errCh <- execErr
 	}()
 
 	time.Sleep(20 * time.Millisecond)
 	cancel()
 
 	select {
-	case err := <-errCh:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("got %v, want context.Canceled", err)
+	case recvErr := <-errCh:
+		if !errors.Is(recvErr, context.Canceled) {
+			t.Fatalf("got %v, want context.Canceled", recvErr)
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("caller was not unblocked after context cancellation")
@@ -347,8 +347,8 @@ func TestNewLimiter_ContextCancelSemaphore(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		_, err := client.Execute(ctx, nil, nil)
-		errCh <- err
+		_, execErr := client.Execute(ctx, nil, nil)
+		errCh <- execErr
 	}()
 
 	time.Sleep(20 * time.Millisecond)
@@ -356,9 +356,9 @@ func TestNewLimiter_ContextCancelSemaphore(t *testing.T) {
 	close(gate)
 
 	select {
-	case err := <-errCh:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("got %v, want context.Canceled", err)
+	case recvErr := <-errCh:
+		if !errors.Is(recvErr, context.Canceled) {
+			t.Fatalf("got %v, want context.Canceled", recvErr)
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("caller was not unblocked after context cancellation")
@@ -452,8 +452,8 @@ func TestNewLimiter_MultiAgentSharedRate(t *testing.T) {
 
 	for _, a := range []llm.LLM{agent1, agent2} {
 		go func(a llm.LLM) {
-			_, err := a.Execute(context.Background(), nil, nil)
-			results <- err
+			_, execErr := a.Execute(context.Background(), nil, nil)
+			results <- execErr
 		}(a)
 	}
 
@@ -471,9 +471,9 @@ func TestNewLimiter_MultiAgentSharedRate(t *testing.T) {
 	// Both blocked callers should now receive ErrStopped.
 	for range 2 {
 		select {
-		case err := <-results:
-			if !errors.Is(err, ErrStopped) {
-				t.Fatalf("got %v, want ErrStopped", err)
+		case recvErr := <-results:
+			if !errors.Is(recvErr, ErrStopped) {
+				t.Fatalf("got %v, want ErrStopped", recvErr)
 			}
 		case <-time.After(500 * time.Millisecond):
 			t.Fatal("caller not unblocked after stop()")

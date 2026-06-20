@@ -133,7 +133,7 @@ func (s *Server) Start(ctx context.Context) error {
 	statusSubject := fmt.Sprintf("agents.status.%s.%s.%s", s.cfg.agentID, s.owner, s.name)
 	hbSubject := fmt.Sprintf("agents.hb.%s.%s.%s", s.cfg.agentID, s.owner, s.name)
 
-	if err := svc.AddEndpoint("prompt",
+	if addErr := svc.AddEndpoint("prompt",
 		natsio.ContextHandler(ctx, s.handlePrompt),
 		natsio.WithEndpointSubject(promptSubject),
 		natsio.WithEndpointQueueGroup("agents"),
@@ -141,18 +141,18 @@ func (s *Server) Start(ctx context.Context) error {
 			"max_payload":    s.cfg.maxPayload,
 			"attachments_ok": attachmentsOkStr,
 		}),
-	); err != nil {
+	); addErr != nil {
 		_ = svc.Stop()
-		return fmt.Errorf("nats: register prompt endpoint: %w", err)
+		return fmt.Errorf("nats: register prompt endpoint: %w", addErr)
 	}
 
-	if err := svc.AddEndpoint("status",
+	if addErr := svc.AddEndpoint("status",
 		natsio.ContextHandler(ctx, s.handleStatus),
 		natsio.WithEndpointSubject(statusSubject),
 		natsio.WithEndpointQueueGroup("agents"),
-	); err != nil {
+	); addErr != nil {
 		_ = svc.Stop()
-		return fmt.Errorf("nats: register status endpoint: %w", err)
+		return fmt.Errorf("nats: register status endpoint: %w", addErr)
 	}
 
 	instanceID := svc.Info().ID

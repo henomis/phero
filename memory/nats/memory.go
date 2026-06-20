@@ -98,8 +98,8 @@ func (m *Memory) load() ([]llm.Message, error) {
 	}
 
 	var msgs []llm.Message
-	if err := json.Unmarshal(entry.Value(), &msgs); err != nil {
-		return nil, err
+	if unmarshalErr := json.Unmarshal(entry.Value(), &msgs); unmarshalErr != nil {
+		return nil, unmarshalErr
 	}
 
 	return msgs, nil
@@ -140,9 +140,9 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 
 		history := memory.FormatSummaryPrompt(toSummarize)
 
-		summaryMsg, err := m.llm.Execute(ctx, []llm.Message{history}, nil)
-		if err != nil {
-			return err
+		summaryMsg, llmErr := m.llm.Execute(ctx, []llm.Message{history}, nil)
+		if llmErr != nil {
+			return llmErr
 		}
 
 		merged = []llm.Message{

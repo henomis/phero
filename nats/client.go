@@ -119,8 +119,8 @@ func (c *Client) Discover(ctx context.Context, opts ...DiscoverOption) ([]*Agent
 	}
 	defer sub.Unsubscribe() //nolint:errcheck
 
-	if err := c.nc.PublishRequest("$SRV.INFO.agents", inbox, nil); err != nil {
-		return nil, fmt.Errorf("nats: discovery publish: %w", err)
+	if pubErr := c.nc.PublishRequest("$SRV.INFO.agents", inbox, nil); pubErr != nil {
+		return nil, fmt.Errorf("nats: discovery publish: %w", pubErr)
 	}
 
 	deadline := time.Now().Add(c.cfg.discoveryTimeout)
@@ -135,8 +135,8 @@ func (c *Client) Discover(ctx context.Context, opts ...DiscoverOption) ([]*Agent
 
 		timeout := min(c.cfg.stallTimeout, remaining)
 
-		msg, err := sub.NextMsg(timeout)
-		if err != nil {
+		msg, msgErr := sub.NextMsg(timeout)
+		if msgErr != nil {
 			break // stall or deadline — stop collecting
 		}
 
@@ -185,9 +185,9 @@ func (c *Client) Prompt(ctx context.Context, info *AgentInfo, text string) (*Str
 		return nil, fmt.Errorf("nats: subscribe reply: %w", err)
 	}
 
-	if err := c.nc.PublishRequest(info.PromptSubject, inbox, body); err != nil {
+	if pubErr := c.nc.PublishRequest(info.PromptSubject, inbox, body); pubErr != nil {
 		_ = sub.Unsubscribe()
-		return nil, fmt.Errorf("nats: publish prompt: %w", err)
+		return nil, fmt.Errorf("nats: publish prompt: %w", pubErr)
 	}
 
 	return &Stream{
@@ -249,7 +249,7 @@ func (s *Stream) Text(ctx context.Context) (string, error) {
 		}
 
 		var chunk rawChunk
-		if err := json.Unmarshal(msg.Data, &chunk); err != nil {
+		if unmarshalErr := json.Unmarshal(msg.Data, &chunk); unmarshalErr != nil {
 			continue // §6.6: silently ignore unknown or unparseable chunks
 		}
 

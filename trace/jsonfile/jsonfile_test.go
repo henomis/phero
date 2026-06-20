@@ -41,8 +41,8 @@ func TestNew_ValidPath_CreatesFile(t *testing.T) {
 	}
 
 	path := f.Name()
-	if err := f.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	if closeErr := f.Close(); closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
 	}
 
 	removeIfExists(t, path)
@@ -55,11 +55,11 @@ func TestNew_ValidPath_CreatesFile(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	if err := tr.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	if closeErr := tr.Close(); closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
 	}
 
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+	if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
 		t.Error("expected file to be created")
 	}
 }
@@ -71,8 +71,8 @@ func TestTracer_Trace_WritesNDJSON(t *testing.T) {
 	}
 
 	path := f.Name()
-	if err := f.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	if closeErr := f.Close(); closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
 	}
 
 	t.Cleanup(func() {
@@ -102,8 +102,8 @@ func TestTracer_Trace_WritesNDJSON(t *testing.T) {
 		tr.Trace(e)
 	}
 
-	if err := tr.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	if closeErr := tr.Close(); closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
 	}
 
 	file, err := os.Open(path)
@@ -111,8 +111,8 @@ func TestTracer_Trace_WritesNDJSON(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	defer func() {
-		if err := file.Close(); err != nil {
-			t.Errorf("Close: %v", err)
+		if closeErr := file.Close(); closeErr != nil {
+			t.Errorf("Close: %v", closeErr)
 		}
 	}()
 
@@ -130,8 +130,8 @@ func TestTracer_Trace_WritesNDJSON(t *testing.T) {
 		lines = append(lines, scanner.Text())
 	}
 
-	if err := scanner.Err(); err != nil {
-		t.Fatalf("scanner: %v", err)
+	if scanErr := scanner.Err(); scanErr != nil {
+		t.Fatalf("scanner: %v", scanErr)
 	}
 
 	if len(lines) != len(expectedTypes) {
@@ -140,8 +140,8 @@ func TestTracer_Trace_WritesNDJSON(t *testing.T) {
 
 	for i, line := range lines {
 		var m map[string]any
-		if err := json.Unmarshal([]byte(line), &m); err != nil {
-			t.Errorf("line %d is not valid JSON: %v - %q", i, err, line)
+		if unmarshalErr := json.Unmarshal([]byte(line), &m); unmarshalErr != nil {
+			t.Errorf("line %d is not valid JSON: %v - %q", i, unmarshalErr, line)
 			continue
 		}
 
@@ -159,8 +159,8 @@ func TestTracer_Trace_ErrorEvent(t *testing.T) {
 	}
 
 	path := f.Name()
-	if err := f.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	if closeErr := f.Close(); closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
 	}
 
 	t.Cleanup(func() {
@@ -175,8 +175,8 @@ func TestTracer_Trace_ErrorEvent(t *testing.T) {
 	tr.Trace(trace.AgentEndEvent{AgentName: "a", Err: errTest, Iterations: 1, Timestamp: time.Now()})
 	tr.Trace(trace.ToolResultEvent{AgentName: "a", ToolName: "t", Err: errTest, Iteration: 1, Timestamp: time.Now()})
 
-	if err := tr.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	if closeErr := tr.Close(); closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
 	}
 
 	data, err := os.ReadFile(path)

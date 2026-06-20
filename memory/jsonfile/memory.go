@@ -88,8 +88,8 @@ func (m *Memory) load() error {
 	}
 
 	var msgs []llm.Message
-	if err := json.Unmarshal(data, &msgs); err != nil {
-		return err
+	if unmarshalErr := json.Unmarshal(data, &msgs); unmarshalErr != nil {
+		return unmarshalErr
 	}
 
 	m.messages = msgs
@@ -116,28 +116,28 @@ func (m *Memory) persist() error {
 
 	tmpName := tmp.Name()
 
-	if _, err := tmp.Write(data); err != nil {
+	if _, writeErr := tmp.Write(data); writeErr != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpName)
 
-		return fmt.Errorf("write temp file: %w", err)
+		return fmt.Errorf("write temp file: %w", writeErr)
 	}
 
-	if err := tmp.Sync(); err != nil {
+	if syncErr := tmp.Sync(); syncErr != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpName)
 
-		return fmt.Errorf("sync temp file: %w", err)
+		return fmt.Errorf("sync temp file: %w", syncErr)
 	}
 
-	if err := tmp.Close(); err != nil {
+	if closeErr := tmp.Close(); closeErr != nil {
 		_ = os.Remove(tmpName)
-		return fmt.Errorf("close temp file: %w", err)
+		return fmt.Errorf("close temp file: %w", closeErr)
 	}
 
-	if err := os.Rename(tmpName, m.filePath); err != nil {
+	if renameErr := os.Rename(tmpName, m.filePath); renameErr != nil {
 		_ = os.Remove(tmpName)
-		return fmt.Errorf("rename temp file: %w", err)
+		return fmt.Errorf("rename temp file: %w", renameErr)
 	}
 
 	return nil

@@ -61,39 +61,39 @@ func (s *Server) AsTools(ctx context.Context, filter ToolFilter) ([]*llm.Tool, e
 			continue
 		}
 
-		schema, err := normalizeMCPInputSchema(tool.InputSchema)
-		if err != nil {
-			return nil, fmt.Errorf("invalid tool input schema for tool %q: %w", tool.Name, err)
+		schema, schemaErr := normalizeMCPInputSchema(tool.InputSchema)
+		if schemaErr != nil {
+			return nil, fmt.Errorf("invalid tool input schema for tool %q: %w", tool.Name, schemaErr)
 		}
 
 		toolName := tool.Name
 
-		newTool, err := llm.NewRawTool(
+		newTool, newToolErr := llm.NewRawTool(
 			toolName,
 			tool.Description,
 			schema,
 			func(ctx context.Context, arguments string) (any, error) {
 				argumentsAsMap := make(map[string]any)
-				if err := json.Unmarshal([]byte(arguments), &argumentsAsMap); err != nil {
-					return nil, fmt.Errorf("invalid tool arguments: %w", err)
+				if unmarshalErr := json.Unmarshal([]byte(arguments), &argumentsAsMap); unmarshalErr != nil {
+					return nil, fmt.Errorf("invalid tool arguments: %w", unmarshalErr)
 				}
 
-				result, err := s.session.CallTool(
+				callResult, callErr := s.session.CallTool(
 					ctx,
 					&mcp.CallToolParams{
 						Name:      toolName,
 						Arguments: argumentsAsMap,
 					},
 				)
-				if err != nil {
-					return nil, err
+				if callErr != nil {
+					return nil, callErr
 				}
 
-				return callToolResultText(result), nil
+				return callToolResultText(callResult), nil
 			},
 		)
-		if err != nil {
-			return nil, err
+		if newToolErr != nil {
+			return nil, newToolErr
 		}
 
 		functionTools = append(functionTools, newTool)
@@ -119,7 +119,7 @@ func normalizeMCPInputSchema(raw any) (map[string]any, error) {
 	maps.Copy(clone, schemaMap)
 
 	// Ensure a "properties" key exists for OpenAI function-calling compatibility.
-	if _, ok := clone["properties"]; !ok {
+	if _, hasProperties := clone["properties"]; !hasProperties {
 		clone["properties"] = map[string]any{}
 	}
 

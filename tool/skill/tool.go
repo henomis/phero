@@ -134,9 +134,9 @@ func (t *Tool) buildCatalog(skillsRootPath string) ([]catalogEntry, map[string]c
 	commands := make(map[string]catalogEntry, len(dirs)*catalogSizeMultiple)
 
 	for _, dir := range dirs {
-		skillItem, err := t.parser.Parse(dir)
-		if err != nil {
-			return nil, nil, err
+		skillItem, parseErr := t.parser.Parse(dir)
+		if parseErr != nil {
+			return nil, nil, parseErr
 		}
 
 		name := strings.TrimSpace(skillItem.Name)

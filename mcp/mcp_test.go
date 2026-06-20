@@ -56,7 +56,7 @@ func TestNormalizeMCPInputSchema_PreservesExistingProperties(t *testing.T) {
 		t.Fatalf("expected properties to be map[string]any, got %T", result["properties"])
 	}
 
-	if _, ok := got["name"]; !ok {
+	if _, hasName := got["name"]; !hasName {
 		t.Fatal("expected 'name' property to be preserved")
 	}
 }

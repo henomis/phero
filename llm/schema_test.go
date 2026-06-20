@@ -122,7 +122,7 @@ func TestEnsureStrictJSONSchema_PropertiesBecomesRequired(t *testing.T) {
 	requiredMap := make(map[string]bool)
 
 	for _, r := range required {
-		if str, ok := r.(string); ok {
+		if str, isStr := r.(string); isStr {
 			requiredMap[str] = true
 		}
 	}
@@ -523,7 +523,7 @@ func TestEnsureStrictJSONSchema_RefExpansion(t *testing.T) {
 	}
 
 	// $ref should be removed after expansion
-	if _, ok := item["$ref"]; ok {
+	if _, hasRef := item["$ref"]; hasRef {
 		t.Errorf("expected $ref to be removed after expansion, but it still exists")
 	}
 

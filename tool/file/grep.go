@@ -151,8 +151,8 @@ func (g *GrepTool) grep(_ context.Context, input *GrepInput) (*GrepOutput, error
 		}
 
 		if globMatcher != nil {
-			rel, err := normalizeRelativePath(root, path)
-			if err != nil {
+			rel, relErr := normalizeRelativePath(root, path)
+			if relErr != nil {
 				return nil
 			}
 
@@ -174,8 +174,8 @@ func (g *GrepTool) grep(_ context.Context, input *GrepInput) (*GrepOutput, error
 	out := make([]string, 0)
 
 	for _, path := range files {
-		contentBytes, err := os.ReadFile(path)
-		if err != nil {
+		contentBytes, readErr := os.ReadFile(path)
+		if readErr != nil {
 			continue
 		}
 

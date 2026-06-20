@@ -212,17 +212,17 @@ func (s *Store) Upsert(ctx context.Context, points []vectorstore.Point) error {
 			return &VectorSizeMismatchError{Expected: s.vectorSize, Got: len(p.Vector)}
 		}
 
-		vecLit, err := vectorLiteral(p.Vector)
-		if err != nil {
-			return err
+		vecLit, litErr := vectorLiteral(p.Vector)
+		if litErr != nil {
+			return litErr
 		}
 
 		var payload any
 
 		if p.Payload != nil {
-			b, err := json.Marshal(p.Payload)
-			if err != nil {
-				return err
+			b, marshalErr := json.Marshal(p.Payload)
+			if marshalErr != nil {
+				return marshalErr
 			}
 
 			payload = string(b)
@@ -230,8 +230,8 @@ func (s *Store) Upsert(ctx context.Context, points []vectorstore.Point) error {
 			payload = nil
 		}
 
-		if _, err := tx.ExecContext(ctx, stmt, s.collection, p.ID, vecLit, payload); err != nil {
-			return err
+		if _, execErr := tx.ExecContext(ctx, stmt, s.collection, p.ID, vecLit, payload); execErr != nil {
+			return execErr
 		}
 	}
 
@@ -299,22 +299,22 @@ func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint6
 			score64      float64
 			payloadBytes []byte
 		)
-		if err := rows.Scan(&id, &score64, &payloadBytes); err != nil {
-			return nil, err
+		if scanErr := rows.Scan(&id, &score64, &payloadBytes); scanErr != nil {
+			return nil, scanErr
 		}
 
 		payload := map[string]any{}
 		if len(payloadBytes) > 0 {
-			if err := json.Unmarshal(payloadBytes, &payload); err != nil {
-				return nil, &PayloadDecodeError{PointID: id, Cause: err}
+			if unmarshalErr := json.Unmarshal(payloadBytes, &payload); unmarshalErr != nil {
+				return nil, &PayloadDecodeError{PointID: id, Cause: unmarshalErr}
 			}
 		}
 
 		out = append(out, vectorstore.ScoredPoint{ID: id, Score: float32(score64), Payload: payload})
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, err
+	if rowsErr := rows.Err(); rowsErr != nil {
+		return nil, rowsErr
 	}
 
 	return out, nil

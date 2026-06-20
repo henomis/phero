@@ -155,8 +155,8 @@ func (s *Store) EnsureCollection(ctx context.Context) error {
 			{Name: propPayload, DataType: []string{"text"}},
 		},
 	}
-	if err := s.client.Schema().ClassCreator().WithClass(class).Do(ctx); err != nil {
-		return fmt.Errorf("creating class: %w", err)
+	if createErr := s.client.Schema().ClassCreator().WithClass(class).Do(ctx); createErr != nil {
+		return fmt.Errorf("creating class: %w", createErr)
 	}
 
 	return nil
@@ -342,8 +342,8 @@ func (s *Store) parseQueryResult(result *models.GraphQLResponse) ([]vectorstore.
 
 	scored := make([]vectorstore.ScoredPoint, 0, len(objs))
 	for _, obj := range objs {
-		m, ok := obj.(map[string]interface{})
-		if !ok {
+		m, isMap := obj.(map[string]interface{})
+		if !isMap {
 			continue
 		}
 

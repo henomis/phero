@@ -635,8 +635,8 @@ func TestExecute_WithPromptCaching_MarksSystemAndLastTool(t *testing.T) {
 		llm.SystemMessage("you are helpful"),
 		llm.UserMessage(llm.Text("hi")),
 	}
-	if _, err := c.Execute(context.Background(), msgs, []*llm.Tool{tool}); err != nil {
-		t.Fatalf("Execute: %v", err)
+	if _, execErr := c.Execute(context.Background(), msgs, []*llm.Tool{tool}); execErr != nil {
+		t.Fatalf("Execute: %v", execErr)
 	}
 
 	var req struct {
@@ -651,8 +651,8 @@ func TestExecute_WithPromptCaching_MarksSystemAndLastTool(t *testing.T) {
 			} `json:"cache_control"`
 		} `json:"tools"`
 	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		t.Fatalf("unmarshal request: %v", err)
+	if unmarshalErr := json.Unmarshal(body, &req); unmarshalErr != nil {
+		t.Fatalf("unmarshal request: %v", unmarshalErr)
 	}
 
 	if len(req.System) == 0 || req.System[len(req.System)-1].CacheControl == nil {

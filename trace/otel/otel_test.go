@@ -121,20 +121,20 @@ func TestTracer_RunProducesNestedSpans(t *testing.T) {
 	}
 
 	// Attribute spot checks.
-	if v, ok := attrValue(llmSpan, "gen_ai.response.model"); !ok || v.AsString() != "gpt-test" {
-		t.Errorf("llm span model attr = %v (ok=%v)", v.AsString(), ok)
+	if v, found := attrValue(llmSpan, "gen_ai.response.model"); !found || v.AsString() != "gpt-test" {
+		t.Errorf("llm span model attr = %v (ok=%v)", v.AsString(), found)
 	}
 
-	if v, ok := attrValue(llmSpan, "gen_ai.usage.input_tokens"); !ok || v.AsInt64() != 12 {
-		t.Errorf("llm span input tokens = %v (ok=%v)", v.AsInt64(), ok)
+	if v, found := attrValue(llmSpan, "gen_ai.usage.input_tokens"); !found || v.AsInt64() != 12 {
+		t.Errorf("llm span input tokens = %v (ok=%v)", v.AsInt64(), found)
 	}
 
-	if v, ok := attrValue(root, "phero.run.cost_usd"); !ok || v.AsFloat64() != 0.0003 {
-		t.Errorf("root cost attr = %v (ok=%v)", v.AsFloat64(), ok)
+	if v, found := attrValue(root, "phero.run.cost_usd"); !found || v.AsFloat64() != 0.0003 {
+		t.Errorf("root cost attr = %v (ok=%v)", v.AsFloat64(), found)
 	}
 
-	if v, ok := attrValue(toolSpan, "phero.tool.result"); !ok || v.AsString() != "2" {
-		t.Errorf("tool result attr = %v (ok=%v)", v.AsString(), ok)
+	if v, found := attrValue(toolSpan, "phero.tool.result"); !found || v.AsString() != "2" {
+		t.Errorf("tool result attr = %v (ok=%v)", v.AsString(), found)
 	}
 }
 

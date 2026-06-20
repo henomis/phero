@@ -260,9 +260,9 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 
 		iterCtx := trace.WithIteration(ctx, iteration)
 
-		iterationResult, err := a.handleAgentIteration(iterCtx, session, iteration, stats, emit)
-		if err != nil {
-			return nil, err
+		iterationResult, iterErr := a.handleAgentIteration(iterCtx, session, iteration, stats, emit)
+		if iterErr != nil {
+			return nil, iterErr
 		}
 
 		session = iterationResult.session

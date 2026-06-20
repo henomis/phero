@@ -256,9 +256,9 @@ func (c *Client) waitForTask(ctx context.Context, task *sdka2a.Task) (*sdka2a.Ta
 			}
 		case *sdka2a.TaskStatusUpdateEvent:
 			if v.Status.State.Terminal() {
-				t, err := c.client.GetTask(ctx, &sdka2a.GetTaskRequest{ID: task.ID})
-				if err != nil {
-					return nil, err
+				t, getErr := c.client.GetTask(ctx, &sdka2a.GetTaskRequest{ID: task.ID})
+				if getErr != nil {
+					return nil, getErr
 				}
 
 				return t, nil

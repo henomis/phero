@@ -492,8 +492,8 @@ func anthropicToolInputSchema(schema map[string]any) anthropicapi.ToolInputSchem
 			required = append(required, v...)
 		case []any:
 			for _, it := range v {
-				s, ok := it.(string)
-				if ok {
+				s, isStr := it.(string)
+				if isStr {
 					required = append(required, s)
 				}
 			}

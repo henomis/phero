@@ -48,8 +48,8 @@ func TestMemory_SaveAndRetrieve(t *testing.T) {
 		llm.UserMessage(llm.Text("hello")),
 		llm.AssistantMessage([]llm.ContentPart{llm.Text("world")}),
 	}
-	if err := mem.Save(ctx, msgs); err != nil {
-		t.Fatalf("Save() error = %v", err)
+	if saveErr := mem.Save(ctx, msgs); saveErr != nil {
+		t.Fatalf("Save() error = %v", saveErr)
 	}
 
 	got, err := mem.Retrieve(ctx, "")
@@ -80,8 +80,8 @@ func TestMemory_PersistsAcrossReopen(t *testing.T) {
 	msgs := []llm.Message{
 		llm.UserMessage(llm.Text("persisted")),
 	}
-	if err := mem1.Save(ctx, msgs); err != nil {
-		t.Fatalf("Save() error = %v", err)
+	if saveErr := mem1.Save(ctx, msgs); saveErr != nil {
+		t.Fatalf("Save() error = %v", saveErr)
 	}
 
 	// open a second instance from the same file
@@ -109,12 +109,12 @@ func TestMemory_Clear(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	if err := mem.Save(ctx, []llm.Message{llm.UserMessage(llm.Text("x"))}); err != nil {
-		t.Fatalf("Save() error = %v", err)
+	if saveErr := mem.Save(ctx, []llm.Message{llm.UserMessage(llm.Text("x"))}); saveErr != nil {
+		t.Fatalf("Save() error = %v", saveErr)
 	}
 
-	if err := mem.Clear(ctx); err != nil {
-		t.Fatalf("Clear() error = %v", err)
+	if clearErr := mem.Clear(ctx); clearErr != nil {
+		t.Fatalf("Clear() error = %v", clearErr)
 	}
 
 	got, err := mem.Retrieve(ctx, "")
@@ -203,8 +203,8 @@ func TestMemory_SummarizationReplacesHistory(t *testing.T) {
 		llm.UserMessage(llm.Text("hello5")),
 		llm.AssistantMessage([]llm.ContentPart{llm.Text("hello6")}),
 	}
-	if err := mem.Save(ctx, msgs); err != nil {
-		t.Fatalf("Save() error = %v", err)
+	if saveErr := mem.Save(ctx, msgs); saveErr != nil {
+		t.Fatalf("Save() error = %v", saveErr)
 	}
 
 	if mockLLM.called != 1 {
@@ -246,8 +246,8 @@ func TestMemory_SummarizationPersistedToDisk(t *testing.T) {
 		llm.UserMessage(llm.Text("c")),
 		llm.AssistantMessage([]llm.ContentPart{llm.Text("d")}),
 	}
-	if err := mem.Save(ctx, msgs); err != nil {
-		t.Fatalf("Save() error = %v", err)
+	if saveErr := mem.Save(ctx, msgs); saveErr != nil {
+		t.Fatalf("Save() error = %v", saveErr)
 	}
 
 	// Reopen and confirm the summarized state was written to disk

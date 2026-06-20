@@ -103,14 +103,14 @@ func (g *GlobTool) glob(_ context.Context, input *GlobInput) (*GlobOutput, error
 			return nil
 		}
 
-		rel, err := normalizeRelativePath(root, path)
-		if err != nil {
+		rel, relErr := normalizeRelativePath(root, path)
+		if relErr != nil {
 			return nil
 		}
 
 		if matcher.MatchString(rel) {
-			info, err := d.Info()
-			if err != nil {
+			info, infoErr := d.Info()
+			if infoErr != nil {
 				return nil
 			}
 

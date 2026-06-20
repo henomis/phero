@@ -125,8 +125,8 @@ func (g *guardrailsLLM) Execute(ctx context.Context, messages []llm.Message, too
 	}
 
 	for _, guard := range g.cfg.resultGuards {
-		if err := guard.guard(ctx, result); err != nil {
-			return nil, &GuardrailError{Stage: "output", Name: guard.name, Err: err}
+		if guardErr := guard.guard(ctx, result); guardErr != nil {
+			return nil, &GuardrailError{Stage: "output", Name: guard.name, Err: guardErr}
 		}
 	}
 
