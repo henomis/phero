@@ -24,10 +24,10 @@ import (
 )
 
 const (
-	chunkTypeResponse  = "response"
-	chunkTypeStatus    = "status"
-	svcNameAgents      = "agents"
-	attachmentsOkTrue  = "true"
+	chunkTypeResponse = "response"
+	chunkTypeStatus   = "status"
+	svcNameAgents     = "agents"
+	attachmentsOkTrue = "true"
 )
 
 // envelope is the JSON request payload (§5.1).
@@ -61,7 +61,7 @@ type heartbeatPayload struct {
 	Owner      string `json:"owner"`
 	Session    string `json:"session,omitempty"`
 	InstanceID string `json:"instance_id"`
-	Ts         string `json:"ts"`
+	TS         string `json:"ts"`
 	IntervalS  int    `json:"interval_s"`
 }
 

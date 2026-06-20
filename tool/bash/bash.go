@@ -340,7 +340,7 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(runCtx, "bash", "-c", input.Command) //nolint:gosec // intentional: bash tool executes arbitrary commands by design
+	cmd := exec.CommandContext(runCtx, "bash", "-c", input.Command) //nolint:gosec,lll // intentional: bash tool executes arbitrary commands by design
 	if t.workingDir != "" {
 		cmd.Dir = t.workingDir
 	}
@@ -518,7 +518,7 @@ func (t *Tool) startBackground(command string, timeout time.Duration) (string, e
 		baseCtx, cancel = context.WithTimeout(context.Background(), timeout)
 	}
 
-	cmd := exec.CommandContext(baseCtx, "bash", "-c", command) //nolint:gosec // intentional: bash tool executes arbitrary commands by design
+	cmd := exec.CommandContext(baseCtx, "bash", "-c", command) //nolint:gosec,lll // intentional: bash tool executes arbitrary commands by design
 	if t.workingDir != "" {
 		cmd.Dir = t.workingDir
 	}

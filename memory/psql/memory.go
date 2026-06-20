@@ -324,9 +324,10 @@ func (m *Memory) maybeSummarize(ctx context.Context) error {
 		return err
 	}
 
-	messagesToStore := []llm.Message{llm.SystemMessage(
-		memory.SummarySystemMessagePrefix + summaryMsg.Message.TextContent(),
-	)}
+	messagesToStore := make([]llm.Message, 0, 1+len(toAppend))
+	messagesToStore = append(messagesToStore, llm.SystemMessage(
+		memory.SummarySystemMessagePrefix+summaryMsg.Message.TextContent(),
+	))
 	messagesToStore = append(messagesToStore, toAppend...)
 
 	table, err := sqlutil.QuoteQualifiedIdent(m.tableName)

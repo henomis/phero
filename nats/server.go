@@ -258,7 +258,7 @@ func (s *Server) handleStatus(_ context.Context, req natsio.Request) {
 		Owner:      s.owner,
 		Session:    s.cfg.session,
 		InstanceID: instanceID,
-		Ts:         time.Now().UTC().Format(time.RFC3339),
+		TS:         time.Now().UTC().Format(time.RFC3339),
 		IntervalS:  int(s.cfg.heartbeatInterval.Seconds()),
 	}
 	_ = req.Respond(encodeHeartbeat(p))

@@ -58,7 +58,7 @@ func New(filePath string) (*Tracer, error) {
 		return nil, ErrEmptyFilePath
 	}
 
-	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // path is supplied by the caller at construction time
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec,lll // path is supplied by the caller at construction time
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +90,7 @@ func toRecord(event trace.Event) record {
 	case trace.AgentStartEvent:
 		return record{Type: "AgentStart", Timestamp: e.Timestamp, Data: map[string]any{
 			fieldAgentName: e.AgentName,
-			"input":      e.Input,
+			"input":        e.Input,
 		}}
 	case trace.AgentEndEvent:
 		errStr := ""
@@ -100,14 +100,14 @@ func toRecord(event trace.Event) record {
 
 		return record{Type: "AgentEnd", Timestamp: e.Timestamp, Data: map[string]any{
 			fieldAgentName: e.AgentName,
-			"output":     e.Output,
-			fieldErr:        errStr,
-			"iterations": e.Iterations,
+			"output":       e.Output,
+			fieldErr:       errStr,
+			"iterations":   e.Iterations,
 		}}
 	case trace.AgentIterationEvent:
 		return record{Type: "AgentIteration", Timestamp: e.Timestamp, Data: map[string]any{
 			fieldAgentName: e.AgentName,
-			fieldIteration:  e.Iteration,
+			fieldIteration: e.Iteration,
 		}}
 	case trace.AgentRunSummaryEvent:
 		return record{Type: "AgentRunSummary", Timestamp: e.Timestamp, Data: map[string]any{
@@ -115,25 +115,25 @@ func toRecord(event trace.Event) record {
 		}}
 	case trace.LLMRequestEvent:
 		return record{Type: "LLMRequest", Timestamp: e.Timestamp, Data: map[string]any{
-			fieldAgentName:    e.AgentName,
+			fieldAgentName:  e.AgentName,
 			"message_count": e.MessageCount,
 			"tool_names":    e.ToolNames,
-			fieldIteration:     e.Iteration,
+			fieldIteration:  e.Iteration,
 		}}
 	case trace.LLMResponseEvent:
 		return record{Type: "LLMResponse", Timestamp: e.Timestamp, Data: map[string]any{
 			fieldAgentName: e.AgentName,
-			"message":    e.Message,
-			"usage":      e.Usage,
-			fieldIteration:  e.Iteration,
+			"message":      e.Message,
+			"usage":        e.Usage,
+			fieldIteration: e.Iteration,
 		}}
 	case trace.ToolCallEvent:
 		return record{Type: "ToolCall", Timestamp: e.Timestamp, Data: map[string]any{
 			fieldAgentName: e.AgentName,
 			fieldToolName:  e.ToolName,
-			"arguments":  e.Arguments,
+			"arguments":    e.Arguments,
 			fieldCallID:    e.CallID,
-			fieldIteration:  e.Iteration,
+			fieldIteration: e.Iteration,
 		}}
 	case trace.ToolResultEvent:
 		errStr := ""
@@ -144,20 +144,20 @@ func toRecord(event trace.Event) record {
 		return record{Type: "ToolResult", Timestamp: e.Timestamp, Data: map[string]any{
 			fieldAgentName: e.AgentName,
 			fieldToolName:  e.ToolName,
-			"result":     e.Result,
-			fieldErr:        errStr,
+			"result":       e.Result,
+			fieldErr:       errStr,
 			fieldCallID:    e.CallID,
-			fieldIteration:  e.Iteration,
+			fieldIteration: e.Iteration,
 		}}
 	case trace.MemorySaveEvent:
 		return record{Type: "MemorySave", Timestamp: e.Timestamp, Data: map[string]any{
 			fieldAgentName: e.AgentName,
-			fieldCount:      e.Count,
+			fieldCount:     e.Count,
 		}}
 	case trace.MemoryRetrieveEvent:
 		return record{Type: "MemoryRetrieve", Timestamp: e.Timestamp, Data: map[string]any{
 			fieldAgentName: e.AgentName,
-			fieldCount:      e.Count,
+			fieldCount:     e.Count,
 		}}
 	default:
 		return record{Type: "Unknown", Timestamp: time.Now()}

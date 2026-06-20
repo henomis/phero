@@ -100,10 +100,10 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 			return err
 		}
 
-		messagesToStore := []llm.Message{llm.SystemMessage(
-			memory.SummarySystemMessagePrefix + summaryMsg.Message.TextContent(),
-		)}
-
+		messagesToStore := make([]llm.Message, 0, 1+len(toAppend))
+		messagesToStore = append(messagesToStore, llm.SystemMessage(
+			memory.SummarySystemMessagePrefix+summaryMsg.Message.TextContent(),
+		))
 		messagesToStore = append(messagesToStore, toAppend...)
 
 		m.buffer.Replace(messagesToStore)

@@ -26,7 +26,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// Quote API response structure.
+// QuoteResponse represents the structure of the response from the quote API.
 type QuoteResponse struct {
 	Content string `json:"content"`
 	Author  string `json:"author"`

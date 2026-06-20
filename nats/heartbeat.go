@@ -100,7 +100,7 @@ func (s *Server) startHeartbeats(ctx context.Context, subject, instanceID string
 			Owner:      s.owner,
 			Session:    s.cfg.session,
 			InstanceID: instanceID,
-			Ts:         time.Now().UTC().Format(time.RFC3339),
+			TS:         time.Now().UTC().Format(time.RFC3339),
 			IntervalS:  int(s.cfg.heartbeatInterval.Seconds()),
 		}
 		_ = s.nc.Publish(subject, encodeHeartbeat(p))

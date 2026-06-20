@@ -145,9 +145,8 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 			return llmErr
 		}
 
-		merged = []llm.Message{
-			llm.SystemMessage(memory.SummarySystemMessagePrefix + summaryMsg.Message.TextContent()),
-		}
+		merged = make([]llm.Message, 0, 1+len(toAppend))
+		merged = append(merged, llm.SystemMessage(memory.SummarySystemMessagePrefix+summaryMsg.Message.TextContent()))
 		merged = append(merged, toAppend...)
 	}
 

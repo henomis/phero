@@ -33,8 +33,8 @@ const (
 // The returned Memory provides a simplified interface for storing and retrieving
 // llm.Message objects, making it suitable for conversational contexts where you
 // want to store chat history and retrieve relevant past messages.
-func (r *RAG) AsMemory() *Memory {
-	return &Memory{rag: r}
+func (m *RAG) AsMemory() *Memory {
+	return &Memory{rag: m}
 }
 
 // Memory wraps a RAG instance to provide message-oriented storage and retrieval.
@@ -67,22 +67,22 @@ func (m *Memory) Retrieve(ctx context.Context, query string) ([]llm.Message, err
 	return m.rag.retrieve(ctx, query)
 }
 
-func (r *RAG) save(ctx context.Context, messages []llm.Message) error {
+func (m *RAG) save(ctx context.Context, messages []llm.Message) error {
 	content := formatSessionContent(messages)
 
-	if err := r.ensureCollection(ctx); err != nil {
+	if err := m.ensureCollection(ctx); err != nil {
 		return err
 	}
 
-	return r.ingestBatch(ctx, []document.Document{{Content: content}}, 0)
+	return m.ingestBatch(ctx, []document.Document{{Content: content}}, 0)
 }
 
-func (r *RAG) clear(ctx context.Context) error {
-	return r.store.Clear(ctx)
+func (m *RAG) clear(ctx context.Context) error {
+	return m.store.Clear(ctx)
 }
 
-func (r *RAG) retrieve(ctx context.Context, query string) ([]llm.Message, error) {
-	points, err := r.Query(ctx, query)
+func (m *RAG) retrieve(ctx context.Context, query string) ([]llm.Message, error) {
+	points, err := m.Query(ctx, query)
 	if err != nil {
 		return nil, err
 	}
