@@ -125,7 +125,7 @@ var ErrConfirmationDenied = errors.New("user denied confirmation")
 // confirmBeforeRun returns a ToolMiddleware that prints the tool name and
 // arguments to w, reads a y/N answer from r, and short-circuits with
 // ErrConfirmationDenied when the user does not confirm.
-func confirmBeforeRun(r *os.File, w *os.File) llm.ToolMiddleware {
+func confirmBeforeRun(r, w *os.File) llm.ToolMiddleware {
 	scanner := bufio.NewScanner(r)
 
 	return func(tool *llm.Tool, next llm.ToolHandler) llm.ToolHandler {

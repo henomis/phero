@@ -102,7 +102,9 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 func (e *agentExecutor) Cancel(_ context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[sdka2a.Event, error] {
 	return func(yield func(sdka2a.Event, error) bool) {
 		if fn, ok := e.cancels.Load(execCtx.TaskID); ok {
-			fn.(context.CancelFunc)()
+			if cancelFn, ok := fn.(context.CancelFunc); ok {
+				cancelFn()
+			}
 		}
 
 		yield(sdka2a.NewStatusUpdateEvent(execCtx, sdka2a.TaskStateCanceled, nil), nil)
