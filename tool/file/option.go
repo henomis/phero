@@ -50,5 +50,6 @@ func applyOptions(opts ...Option) *toolOptions {
 	for _, opt := range opts {
 		opt(o)
 	}
+
 	return o
 }

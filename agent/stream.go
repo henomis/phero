@@ -84,21 +84,26 @@ func (a *Agent) RunStream(ctx context.Context, parts ...llm.ContentPart) iter.Se
 			if stopped {
 				return false
 			}
+
 			if !yield(ev, nil) {
 				stopped = true
 				return false
 			}
+
 			return true
 		}
 
 		result, err := a.run(ctx, emit, parts...)
+
 		if stopped {
 			return
 		}
+
 		if err != nil {
 			yield(AgentEvent{}, err)
 			return
 		}
+
 		emit(AgentEvent{Type: AgentEventDone, Result: result})
 	}
 }
@@ -111,6 +116,7 @@ func (a *Agent) streamIteration(ctx context.Context, session []llm.Message, iter
 	for i, t := range a.tools {
 		toolNames[i] = t.Name()
 	}
+
 	a.tracer.Trace(trace.LLMRequestEvent{
 		AgentName:    a.name,
 		MessageCount: len(session),
@@ -120,21 +126,26 @@ func (a *Agent) streamIteration(ctx context.Context, session []llm.Message, iter
 	})
 
 	start := time.Now()
+
 	var (
 		final    llm.StreamChunk
 		gotFinal bool
 	)
+
 	for chunk, err := range llm.StreamOrBuffer(ctx, a.llm, session, a.tools) {
 		if err != nil {
 			stats.recordLLM(time.Since(start), "", nil)
 			return nil, err
 		}
+
 		if chunk.TextDelta != "" {
 			emit(AgentEvent{Type: AgentEventTextDelta, TextDelta: chunk.TextDelta, Iteration: iteration})
 		}
+
 		if chunk.ReasoningDelta != "" {
 			emit(AgentEvent{Type: AgentEventReasoningDelta, ReasoningDelta: chunk.ReasoningDelta, Iteration: iteration})
 		}
+
 		if chunk.Done {
 			final = chunk
 			gotFinal = true
@@ -146,6 +157,7 @@ func (a *Agent) streamIteration(ctx context.Context, session []llm.Message, iter
 		stats.recordLLM(duration, "", nil)
 		return nil, ErrIncompleteStream
 	}
+
 	stats.recordLLM(duration, final.Model, final.Usage)
 
 	a.tracer.Trace(trace.LLMResponseEvent{
@@ -156,6 +168,7 @@ func (a *Agent) streamIteration(ctx context.Context, session []llm.Message, iter
 		Iteration: iteration,
 		Timestamp: time.Now(),
 	})
+
 	if reasoning := final.Message.ReasoningContent(); reasoning != "" {
 		a.tracer.Trace(trace.ReasoningEvent{
 			AgentName: a.name,

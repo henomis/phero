@@ -57,6 +57,7 @@ func TestNoopTracer_DiscardEvents(t *testing.T) {
 
 func TestWithTracer_FromContext(t *testing.T) {
 	var got []trace.Event
+
 	spy := &spyTracer{fn: func(e trace.Event) { got = append(got, e) }}
 
 	ctx := trace.WithTracer(context.Background(), spy)
@@ -66,6 +67,7 @@ func TestWithTracer_FromContext(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(got))
 	}
+
 	if _, ok := got[0].(trace.AgentStartEvent); !ok {
 		t.Errorf("expected AgentStartEvent, got %T", got[0])
 	}

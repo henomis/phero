@@ -65,12 +65,14 @@ func main() {
 					return errors.New("prompt asks for password-related content")
 				}
 			}
+
 			return nil
 		}),
 		middleware.WithResultGuard("require-content", func(_ context.Context, result *llm.Result) error {
 			if result == nil || result.Message == nil || strings.TrimSpace(result.Message.TextContent()) == "" {
 				return errors.New("empty model response")
 			}
+
 			return nil
 		}),
 	)
@@ -91,6 +93,7 @@ func main() {
 			defer wg.Done()
 
 			messages := []llm.Message{llm.UserMessage(llm.Text(prompt))}
+
 			result, err := client.Execute(context.Background(), messages, nil)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "[%d] error: %v\n", i, err)

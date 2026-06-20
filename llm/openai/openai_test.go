@@ -69,11 +69,13 @@ type usage struct {
 
 // newTestServer returns an httptest.Server that serves the provided
 // completion response for all POST requests to /v1/chat/completions.
-func newTestServer(t *testing.T, resp chatCompletionResponse, statusCode int) *httptest.Server {
+func newTestServer(t *testing.T, resp chatCompletionResponse) *httptest.Server {
 	t.Helper()
+
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(statusCode)
+		w.WriteHeader(http.StatusOK)
+
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
 			t.Errorf("encode response: %v", err)
 		}
@@ -98,7 +100,7 @@ func TestWithModel_ChangesModel(t *testing.T) {
 			{Message: message{Role: "assistant", Content: "hi"}, Reason: "stop"},
 		},
 		Usage: usage{PromptTokens: 5, CompletionTokens: 3},
-	}, http.StatusOK)
+	})
 	defer srv.Close()
 
 	c := openai.New("key", openai.WithModel("gpt-4o"), openai.WithBaseURL(srv.URL+"/v1"))
@@ -108,6 +110,7 @@ func TestWithModel_ChangesModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
+
 	if result.Message.TextContent() != "hi" {
 		t.Fatalf("expected %q, got %q", "hi", result.Message.TextContent())
 	}
@@ -124,7 +127,7 @@ func TestExecute_TextResponse(t *testing.T) {
 			{Message: message{Role: "assistant", Content: "Hello there!"}, Reason: "stop"},
 		},
 		Usage: usage{PromptTokens: 10, CompletionTokens: 4},
-	}, http.StatusOK)
+	})
 	defer srv.Close()
 
 	c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"))
@@ -134,15 +137,19 @@ func TestExecute_TextResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
+
 	if result.Message == nil {
 		t.Fatal("expected non-nil message")
 	}
+
 	if result.Message.TextContent() != "Hello there!" {
 		t.Fatalf("expected %q, got %q", "Hello there!", result.Message.TextContent())
 	}
+
 	if result.Usage == nil {
 		t.Fatal("expected non-nil usage")
 	}
+
 	if result.Usage.InputTokens != 10 || result.Usage.OutputTokens != 4 {
 		t.Fatalf("usage mismatch: got input=%d output=%d", result.Usage.InputTokens, result.Usage.OutputTokens)
 	}
@@ -165,9 +172,11 @@ func TestExecute_WithTemperature(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected numeric temperature in request payload, got %T", payload["temperature"])
 		}
+
 		gotTemperature = value
 
 		w.Header().Set("Content-Type", "application/json")
+
 		if err := json.NewEncoder(w).Encode(chatCompletionResponse{
 			Object: "chat.completion",
 			ID:     "chatcmpl-temp",
@@ -189,9 +198,11 @@ func TestExecute_WithTemperature(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
+
 	if result.Message.TextContent() != "ok" {
 		t.Fatalf("expected %q, got %q", "ok", result.Message.TextContent())
 	}
+
 	if gotTemperature != 0.7 {
 		t.Fatalf("expected temperature 0.7, got %v", gotTemperature)
 	}
@@ -203,7 +214,7 @@ func TestExecute_EmptyChoices_ReturnsError(t *testing.T) {
 		ID:      "chatcmpl-2",
 		Model:   openai.DefaultModel,
 		Choices: []choice{},
-	}, http.StatusOK)
+	})
 	defer srv.Close()
 
 	c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"))
@@ -240,12 +251,13 @@ func TestExecute_WithToolCalls(t *testing.T) {
 			},
 		},
 		Usage: usage{PromptTokens: 20, CompletionTokens: 8},
-	}, http.StatusOK)
+	})
 	defer srv.Close()
 
 	type weatherInput struct {
 		Location string `json:"location"`
 	}
+
 	tool, err := llm.NewTool("get_weather", "returns weather", func(_ context.Context, in *weatherInput) (string, error) {
 		return "sunny", nil
 	})
@@ -260,9 +272,11 @@ func TestExecute_WithToolCalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
+
 	if len(result.Message.ToolCalls) != 1 {
 		t.Fatalf("expected 1 tool call, got %d", len(result.Message.ToolCalls))
 	}
+
 	if result.Message.ToolCalls[0].Function.Name != "get_weather" {
 		t.Fatalf("expected tool %q, got %q", "get_weather", result.Message.ToolCalls[0].Function.Name)
 	}

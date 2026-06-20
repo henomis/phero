@@ -27,6 +27,7 @@ func resolveSearchRoot(workingDir, inputPath string) (string, error) {
 		if strings.TrimSpace(workingDir) != "" {
 			return filepath.Abs(filepath.Clean(workingDir))
 		}
+
 		return os.Getwd()
 	}
 
@@ -38,8 +39,10 @@ func resolveSearchRoot(workingDir, inputPath string) (string, error) {
 			if err != nil {
 				return "", err
 			}
+
 			base = wd
 		}
+
 		candidate = filepath.Join(base, candidate)
 	}
 
@@ -56,18 +59,22 @@ func resolveSearchRoot(workingDir, inputPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	resolvedWorkingDir, err = filepath.EvalSymlinks(resolvedWorkingDir)
 	if err != nil {
 		return "", err
 	}
+
 	resolvedCandidate, err := resolvePathWithSymlinks(absCandidate)
 	if err != nil {
 		return "", err
 	}
+
 	rel, err := filepath.Rel(resolvedWorkingDir, resolvedCandidate)
 	if err != nil {
 		return "", err
 	}
+
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return "", ErrPathOutsideWorkingDirectory
 	}
@@ -91,14 +98,17 @@ func compileGlobMatcher(pattern string) (*regexp.Regexp, error) {
 			if i+1 < len(p) && p[i+1] == '*' {
 				if i+2 < len(p) && p[i+2] == '/' {
 					b.WriteString("(?:.*/)?")
+
 					i += 2
 				} else {
 					b.WriteString(".*")
+
 					i++
 				}
 			} else {
 				b.WriteString("[^/]*")
 			}
+
 			continue
 		}
 
@@ -116,16 +126,22 @@ func compileGlobMatcher(pattern string) (*regexp.Regexp, error) {
 				b.WriteString("\\{")
 				continue
 			}
+
 			inner := p[i+1 : i+1+closeIdx]
 			parts := strings.Split(inner, ",")
+
 			b.WriteString("(?:")
+
 			for pi, part := range parts {
 				if pi > 0 {
 					b.WriteString("|")
 				}
+
 				b.WriteString(regexp.QuoteMeta(part))
 			}
+
 			b.WriteString(")")
+
 			i += closeIdx + 1
 		case '[':
 			closeIdx := strings.IndexByte(p[i+1:], ']')
@@ -133,13 +149,16 @@ func compileGlobMatcher(pattern string) (*regexp.Regexp, error) {
 				b.WriteString("\\[")
 				continue
 			}
+
 			cls := p[i+1 : i+1+closeIdx]
 			if strings.HasPrefix(cls, "!") {
 				cls = "^" + cls[1:]
 			}
+
 			b.WriteString("[")
 			b.WriteString(cls)
 			b.WriteString("]")
+
 			i += closeIdx + 1
 		case '/':
 			b.WriteString("/")
@@ -149,10 +168,12 @@ func compileGlobMatcher(pattern string) (*regexp.Regexp, error) {
 	}
 
 	b.WriteString("$")
+
 	re, err := regexp.Compile(b.String())
 	if err != nil {
 		return nil, fmt.Errorf("compile glob regex: %w", err)
 	}
+
 	return re, nil
 }
 
@@ -161,5 +182,6 @@ func normalizeRelativePath(root, fullPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	return filepath.ToSlash(rel), nil
 }

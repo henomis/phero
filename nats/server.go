@@ -61,17 +61,21 @@ func New(nc *natsclient.Conn, h Handler, owner, name string, opts ...ServerOptio
 	if nc == nil {
 		return nil, ErrNilConn
 	}
+
 	if h == nil {
 		return nil, ErrNilHandler
 	}
+
 	if owner == "" {
 		return nil, ErrEmptyOwner
 	}
+
 	if name == "" {
 		return nil, ErrEmptyName
 	}
 
 	cfg := defaultServerConfig()
+
 	for _, opt := range opts {
 		if opt != nil {
 			opt(cfg)
@@ -122,6 +126,7 @@ func (s *Server) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("nats: register micro service: %w", err)
 	}
+
 	s.svc = svc
 
 	promptSubject := fmt.Sprintf("agents.prompt.%s.%s.%s", s.cfg.agentID, s.owner, s.name)
@@ -151,12 +156,15 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	instanceID := svc.Info().ID
+
 	s.wg.Go(func() { s.startHeartbeats(ctx, hbSubject, instanceID) })
 
 	<-ctx.Done()
 
 	_ = svc.Stop()
+
 	s.wg.Wait()
+
 	return nil
 }
 
@@ -205,10 +213,12 @@ func (s *Server) processPrompt(ctx context.Context, req natsio.Request) {
 	// Keepalive: emit periodic ack chunks so the caller's inactivity timeout
 	// does not fire during long-running agent work (§6.4).
 	kaCtx, kaCancel := context.WithCancel(ctx)
+
 	var kaWg sync.WaitGroup
 	kaWg.Go(func() {
 		ticker := time.NewTicker(s.cfg.keepaliveInterval)
 		defer ticker.Stop()
+
 		for {
 			select {
 			case <-ticker.C:
@@ -242,6 +252,7 @@ func (s *Server) handleStatus(ctx context.Context, req natsio.Request) {
 	if s.svc != nil {
 		instanceID = s.svc.Info().ID
 	}
+
 	p := heartbeatPayload{
 		Agent:      s.cfg.agentID,
 		Owner:      s.owner,

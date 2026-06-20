@@ -31,9 +31,12 @@ import (
 
 func newTestTracer(t *testing.T) (*otelbackend.Tracer, *tracetest.InMemoryExporter) {
 	t.Helper()
+
 	exp := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp))
+
 	t.Cleanup(func() { _ = tp.Shutdown(t.Context()) })
+
 	return otelbackend.New(tp.Tracer("test")), exp
 }
 
@@ -43,6 +46,7 @@ func spanByName(spans tracetest.SpanStubs, name string) (tracetest.SpanStub, boo
 			return s, true
 		}
 	}
+
 	return tracetest.SpanStub{}, false
 }
 
@@ -52,6 +56,7 @@ func attrValue(s tracetest.SpanStub, key string) (attribute.Value, bool) {
 			return kv.Value, true
 		}
 	}
+
 	return attribute.Value{}, false
 }
 
@@ -61,6 +66,7 @@ func TestTracer_RunProducesNestedSpans(t *testing.T) {
 
 	tr.Trace(phtrace.AgentStartEvent{AgentName: "writer", Input: "hello", Timestamp: now})
 	tr.Trace(phtrace.LLMRequestEvent{AgentName: "writer", MessageCount: 2, ToolNames: []string{"calc"}, Iteration: 1, Timestamp: now})
+
 	msg := llm.AssistantMessage([]llm.ContentPart{llm.Text("hi")})
 	tr.Trace(phtrace.LLMResponseEvent{
 		AgentName: "writer",
@@ -90,10 +96,12 @@ func TestTracer_RunProducesNestedSpans(t *testing.T) {
 	if !ok {
 		t.Fatal("missing root span 'agent writer'")
 	}
+
 	llmSpan, ok := spanByName(spans, "llm.request")
 	if !ok {
 		t.Fatal("missing 'llm.request' span")
 	}
+
 	toolSpan, ok := spanByName(spans, "tool calc")
 	if !ok {
 		t.Fatal("missing 'tool calc' span")
@@ -103,9 +111,11 @@ func TestTracer_RunProducesNestedSpans(t *testing.T) {
 	if llmSpan.SpanContext.TraceID() != root.SpanContext.TraceID() {
 		t.Error("llm span not in root trace")
 	}
+
 	if llmSpan.Parent.SpanID() != root.SpanContext.SpanID() {
 		t.Error("llm span not parented to root")
 	}
+
 	if toolSpan.Parent.SpanID() != root.SpanContext.SpanID() {
 		t.Error("tool span not parented to root")
 	}
@@ -114,12 +124,15 @@ func TestTracer_RunProducesNestedSpans(t *testing.T) {
 	if v, ok := attrValue(llmSpan, "gen_ai.response.model"); !ok || v.AsString() != "gpt-test" {
 		t.Errorf("llm span model attr = %v (ok=%v)", v.AsString(), ok)
 	}
+
 	if v, ok := attrValue(llmSpan, "gen_ai.usage.input_tokens"); !ok || v.AsInt64() != 12 {
 		t.Errorf("llm span input tokens = %v (ok=%v)", v.AsInt64(), ok)
 	}
+
 	if v, ok := attrValue(root, "phero.run.cost_usd"); !ok || v.AsFloat64() != 0.0003 {
 		t.Errorf("root cost attr = %v (ok=%v)", v.AsFloat64(), ok)
 	}
+
 	if v, ok := attrValue(toolSpan, "phero.tool.result"); !ok || v.AsString() != "2" {
 		t.Errorf("tool result attr = %v (ok=%v)", v.AsString(), ok)
 	}
@@ -136,13 +149,16 @@ func TestTracer_ToolErrorSetsStatus(t *testing.T) {
 	tr.Trace(phtrace.AgentRunSummaryEvent{Summary: phtrace.RunSummary{AgentName: "a", Error: "failed"}, Timestamp: now})
 
 	spans := exp.GetSpans()
+
 	toolSpan, ok := spanByName(spans, "tool boom")
 	if !ok {
 		t.Fatal("missing tool span")
 	}
+
 	if toolSpan.Status.Code != codes.Error {
 		t.Errorf("expected error status on tool span, got %v", toolSpan.Status.Code)
 	}
+
 	if len(toolSpan.Events) == 0 {
 		t.Error("expected recorded error event on tool span")
 	}
@@ -151,6 +167,7 @@ func TestTracer_ToolErrorSetsStatus(t *testing.T) {
 	if !ok {
 		t.Fatal("missing root span")
 	}
+
 	if root.Status.Code != codes.Error {
 		t.Errorf("expected error status on root span, got %v", root.Status.Code)
 	}
@@ -169,6 +186,7 @@ func TestTracer_RootSpanEndedOnSummary(t *testing.T) {
 	}
 
 	tr.Trace(phtrace.AgentRunSummaryEvent{Summary: phtrace.RunSummary{AgentName: "x"}, Timestamp: now})
+
 	if got := len(exp.GetSpans()); got != 1 {
 		t.Fatalf("expected root span exported after summary, got %d", got)
 	}

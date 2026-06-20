@@ -42,24 +42,31 @@ BODY`
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
+
 	if s.Name != "pdf-processing" {
 		t.Fatalf("Name: expected %q, got %q", "pdf-processing", s.Name)
 	}
+
 	if s.Description == "" {
 		t.Fatalf("Description: expected non-empty")
 	}
+
 	if s.License != "Apache-2.0" {
 		t.Fatalf("License: expected %q, got %q", "Apache-2.0", s.License)
 	}
+
 	if s.Compatibility != "Linux, macOS" {
 		t.Fatalf("Compatibility: expected %q, got %q", "Linux, macOS", s.Compatibility)
 	}
+
 	if s.AllowedTools != "pdftk pdftotext" {
 		t.Fatalf("AllowedTools: expected %q, got %q", "pdftk pdftotext", s.AllowedTools)
 	}
+
 	if s.Metadata == nil || s.Metadata["author"] != "example-org" {
 		t.Fatalf("Metadata.author: expected %q, got %#v", "example-org", s.Metadata)
 	}
+
 	if strings.TrimSpace(s.Body) != "BODY" {
 		t.Fatalf("Body: expected %q, got %q", "BODY", s.Body)
 	}
@@ -86,6 +93,7 @@ func TestParser_List_OnlyDirectoriesWithSkillFile(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, "pdf-processing"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
+
 	if err := os.WriteFile(filepath.Join(root, "pdf-processing", "SKILL.md"), []byte("---\nname: pdf-processing\ndescription: x\n---\nBODY"), 0o644); err != nil {
 		t.Fatalf("write SKILL.md: %v", err)
 	}
@@ -93,6 +101,7 @@ func TestParser_List_OnlyDirectoriesWithSkillFile(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, "image-tools"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
+
 	if err := os.WriteFile(filepath.Join(root, "image-tools", "SKILL.md"), []byte("---\nname: image-tools\ndescription: x\n---\nBODY"), 0o644); err != nil {
 		t.Fatalf("write SKILL.md: %v", err)
 	}
@@ -108,6 +117,7 @@ func TestParser_List_OnlyDirectoriesWithSkillFile(t *testing.T) {
 	}
 
 	p := skill.New(root)
+
 	got, err := p.List()
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -125,6 +135,7 @@ func TestParser_Parse_ReadsSkillFile(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, "pdf-processing"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
+
 	if err := os.WriteFile(
 		filepath.Join(root, "pdf-processing", "SKILL.md"),
 		[]byte("---\nname: pdf-processing\ndescription: hello\n---\nBODY"),
@@ -134,16 +145,20 @@ func TestParser_Parse_ReadsSkillFile(t *testing.T) {
 	}
 
 	p := skill.New(root)
+
 	s, err := p.Parse("pdf-processing")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
+
 	if s.Name != "pdf-processing" {
 		t.Fatalf("Name: expected %q, got %q", "pdf-processing", s.Name)
 	}
+
 	if s.Description != "hello" {
 		t.Fatalf("Description: expected %q, got %q", "hello", s.Description)
 	}
+
 	if strings.TrimSpace(s.Body) != "BODY" {
 		t.Fatalf("Body: expected %q, got %q", "BODY", s.Body)
 	}
@@ -152,6 +167,7 @@ func TestParser_Parse_ReadsSkillFile(t *testing.T) {
 func TestParser_Parse_MissingSkillFile(t *testing.T) {
 	root := t.TempDir()
 	p := skill.New(root)
+
 	_, err := p.Parse("does-not-exist")
 	if err == nil {
 		t.Fatalf("expected error, got nil")

@@ -48,6 +48,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "agent.New billing: %v\n", err)
 		os.Exit(1)
 	}
+
 	billingAgent.SetMemory(sharedMemory)
 
 	technicalAgent, err := agent.New(
@@ -63,6 +64,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "agent.New technical: %v\n", err)
 		os.Exit(1)
 	}
+
 	technicalAgent.SetMemory(sharedMemory)
 
 	triageAgent, err := agent.New(
@@ -78,12 +80,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "agent.New triage: %v\n", err)
 		os.Exit(1)
 	}
+
 	triageAgent.SetMemory(sharedMemory)
 
 	if err := triageAgent.AddHandoff(billingAgent); err != nil {
 		fmt.Fprintf(os.Stderr, "AddHandoff billing: %v\n", err)
 		os.Exit(1)
 	}
+
 	if err := triageAgent.AddHandoff(technicalAgent); err != nil {
 		fmt.Fprintf(os.Stderr, "AddHandoff technical: %v\n", err)
 		os.Exit(1)
@@ -94,14 +98,17 @@ func main() {
 		fmt.Fprintf(os.Stderr, "AddHandoff billing→technical: %v\n", err)
 		os.Exit(1)
 	}
+
 	if err := billingAgent.AddHandoff(triageAgent); err != nil {
 		fmt.Fprintf(os.Stderr, "AddHandoff billing→triage: %v\n", err)
 		os.Exit(1)
 	}
+
 	if err := technicalAgent.AddHandoff(billingAgent); err != nil {
 		fmt.Fprintf(os.Stderr, "AddHandoff technical→billing: %v\n", err)
 		os.Exit(1)
 	}
+
 	if err := technicalAgent.AddHandoff(triageAgent); err != nil {
 		fmt.Fprintf(os.Stderr, "AddHandoff technical→triage: %v\n", err)
 		os.Exit(1)
@@ -142,9 +149,12 @@ func main() {
 				fmt.Fprintf(os.Stderr, "clear: %v\n", err)
 			} else {
 				currentAgent = nil
+
 				fmt.Println("Memory cleared.")
 			}
+
 			fmt.Print("\n> ")
+
 			continue
 		}
 
@@ -154,6 +164,7 @@ func main() {
 		if routingAgent == nil {
 			routingAgent = triageAgent
 		}
+
 		currentInput := userInput
 
 		for handoffs := 0; ; handoffs++ {
@@ -173,11 +184,13 @@ func main() {
 				routingAgent = result.HandoffAgents[0]
 				// Empty input: the specialist reads context from shared memory.
 				currentInput = ""
+
 				continue
 			}
 
 			currentAgent = routingAgent
 			fmt.Printf("\n%s: %s\n", currentAgent.Name(), strings.TrimSpace(result.TextContent()))
+
 			break
 		}
 
@@ -206,6 +219,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
+
 	client := openai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s base_url=%s", model, baseURL)

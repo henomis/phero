@@ -69,6 +69,7 @@ func New(llmClient llm.LLM, tools ...*llm.Tool) (*Tool, error) {
 	}
 
 	t.tool = tool
+
 	return t, nil
 }
 

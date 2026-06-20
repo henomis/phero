@@ -39,6 +39,7 @@ func FromContext(ctx context.Context) Tracer {
 	if !ok || t == nil {
 		return Noop
 	}
+
 	return t
 }
 

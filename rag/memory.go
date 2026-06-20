@@ -69,9 +69,11 @@ func (m *Memory) Retrieve(ctx context.Context, query string) ([]llm.Message, err
 
 func (s *RAG) save(ctx context.Context, messages []llm.Message) error {
 	content := formatSessionContent(messages)
+
 	if err := s.ensureCollection(ctx); err != nil {
 		return err
 	}
+
 	return s.ingestBatch(ctx, []document.Document{{Content: content}}, 0)
 }
 
@@ -100,6 +102,7 @@ func pointToContext(points []vectorstore.ScoredPoint) llm.Message {
 		if !ok || strings.TrimSpace(text) == "" {
 			continue
 		}
+
 		sb.WriteString(text)
 		sb.WriteByte('\n')
 	}
@@ -110,10 +113,12 @@ func pointToContext(points []vectorstore.ScoredPoint) llm.Message {
 // formatSessionContent converts a slice of llm.Message into a single string, concatenating the role and content of each message in a readable format.
 func formatSessionContent(messages []llm.Message) string {
 	var b strings.Builder
+
 	for _, message := range messages {
 		if message.Role != llm.RoleAssistant && message.Role != llm.RoleUser {
 			continue
 		}
+
 		msg := strings.TrimSpace(message.TextContent())
 		if msg == "" {
 			continue

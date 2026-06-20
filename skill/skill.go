@@ -69,10 +69,12 @@ func New(skillsRootPath string) *Parser {
 // a SKILL.md file.
 func (p *Parser) List() ([]string, error) {
 	dirs := []string{}
+
 	entries, err := os.ReadDir(p.root)
 	if err != nil {
 		return nil, err
 	}
+
 	for _, entry := range entries {
 		if entry.IsDir() {
 			skillPath := filepath.Join(p.root, entry.Name(), skillFileName)
@@ -81,16 +83,19 @@ func (p *Parser) List() ([]string, error) {
 			}
 		}
 	}
+
 	return dirs, nil
 }
 
 // Parse parses the SKILL.md for the given skillName from the parser root.
 func (p *Parser) Parse(skillName string) (*Skill, error) {
 	skillFile := filepath.Join(p.root, skillName, skillFileName)
+
 	f, err := os.Open(skillFile)
 	if err != nil {
 		return nil, err
 	}
+
 	defer func() {
 		_ = f.Close()
 	}()
@@ -104,6 +109,7 @@ func (p *Parser) Parse(skillName string) (*Skill, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	skill.RootPath = absPath
 
 	return skill, nil
@@ -118,15 +124,19 @@ func Parse(r io.Reader) (*Skill, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	content := string(data)
+
 	content = strings.TrimSpace(content)
 	if !strings.HasPrefix(content, yamlFrontmatterDelim) {
 		return nil, ErrMissingYAMLFrontmatter
 	}
+
 	parts := strings.SplitN(content, yamlFrontmatterDelim, 3)
 	if len(parts) < 3 {
 		return nil, ErrInvalidSkillFormat
 	}
+
 	yamlPart := parts[1]
 	body := strings.TrimSpace(parts[2])
 
@@ -134,6 +144,8 @@ func Parse(r io.Reader) (*Skill, error) {
 	if err := yaml.Unmarshal([]byte(yamlPart), &skill); err != nil {
 		return nil, err
 	}
+
 	skill.Body = body
+
 	return &skill, nil
 }

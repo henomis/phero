@@ -48,10 +48,12 @@ func New(filePath string) (*Tracer, error) {
 	if filePath == "" {
 		return nil, ErrEmptyFilePath
 	}
+
 	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
 	}
+
 	return &Tracer{f: f, enc: json.NewEncoder(f)}, nil
 }
 
@@ -59,14 +61,17 @@ func New(filePath string) (*Tracer, error) {
 func (t *Tracer) Close() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
 	return t.f.Close()
 }
 
 // Trace encodes event as a single JSON line and appends it to the file.
 func (t *Tracer) Trace(event trace.Event) {
 	r := toRecord(event)
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
 	_ = t.enc.Encode(r)
 }
 
@@ -83,6 +88,7 @@ func toRecord(event trace.Event) record {
 		if e.Err != nil {
 			errStr = e.Err.Error()
 		}
+
 		return record{Type: "AgentEnd", Timestamp: e.Timestamp, Data: map[string]any{
 			"agent_name": e.AgentName,
 			"output":     e.Output,
@@ -125,6 +131,7 @@ func toRecord(event trace.Event) record {
 		if e.Err != nil {
 			errStr = e.Err.Error()
 		}
+
 		return record{Type: "ToolResult", Timestamp: e.Timestamp, Data: map[string]any{
 			"agent_name": e.AgentName,
 			"tool_name":  e.ToolName,

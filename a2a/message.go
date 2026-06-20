@@ -37,6 +37,7 @@ func translatePartsToPhero(msg *sdka2a.Message) []llm.ContentPart {
 	if msg == nil {
 		return nil
 	}
+
 	parts := make([]llm.ContentPart, 0, len(msg.Parts))
 	for _, part := range msg.Parts {
 		switch {
@@ -60,6 +61,7 @@ func translatePartsToPhero(msg *sdka2a.Message) []llm.ContentPart {
 			}
 		}
 	}
+
 	return parts
 }
 
@@ -73,6 +75,7 @@ func translateResultToA2A(result *agent.Result) []*sdka2a.Part {
 	if result == nil {
 		return nil
 	}
+
 	parts := make([]*sdka2a.Part, 0, len(result.Parts))
 	for _, p := range result.Parts {
 		switch p.Type {
@@ -90,6 +93,7 @@ func translateResultToA2A(result *agent.Result) []*sdka2a.Part {
 			}
 		}
 	}
+
 	return parts
 }
 
@@ -106,6 +110,7 @@ func extractTextFromResult(result sdka2a.SendMessageResult) (string, error) {
 				return t, nil
 			}
 		}
+
 		return "", ErrNoTextContent
 
 	case *sdka2a.Task:
@@ -116,6 +121,7 @@ func extractTextFromResult(result sdka2a.SendMessageResult) (string, error) {
 				}
 			}
 		}
+
 		for _, artifact := range v.Artifacts {
 			for _, part := range artifact.Parts {
 				if t := part.Text(); t != "" {
@@ -123,6 +129,7 @@ func extractTextFromResult(result sdka2a.SendMessageResult) (string, error) {
 				}
 			}
 		}
+
 		return "", ErrNoTextContent
 
 	default:

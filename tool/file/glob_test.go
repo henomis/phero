@@ -30,9 +30,11 @@ func TestGlobTool_MatchesAndSortsByModTime(t *testing.T) {
 
 	p1 := filepath.Join(tmp, "a.go")
 	p2 := filepath.Join(tmp, "nested", "b.go")
+
 	if err := os.WriteFile(p1, []byte("package main"), 0o644); err != nil {
 		t.Fatalf("write p1: %v", err)
 	}
+
 	if err := os.WriteFile(p2, []byte("package nested"), 0o644); err != nil {
 		t.Fatalf("write p2: %v", err)
 	}
@@ -41,6 +43,7 @@ func TestGlobTool_MatchesAndSortsByModTime(t *testing.T) {
 	if err := os.Chtimes(p1, now.Add(-time.Hour), now.Add(-time.Hour)); err != nil {
 		t.Fatalf("chtimes p1: %v", err)
 	}
+
 	if err := os.Chtimes(p2, now, now); err != nil {
 		t.Fatalf("chtimes p2: %v", err)
 	}
@@ -54,9 +57,11 @@ func TestGlobTool_MatchesAndSortsByModTime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("glob failed: %v", err)
 	}
+
 	if len(out.Paths) != 2 {
 		t.Fatalf("expected 2 matches, got %d (%v)", len(out.Paths), out.Paths)
 	}
+
 	if out.Paths[0] != p2 {
 		t.Fatalf("expected newest file first, got %v", out.Paths)
 	}

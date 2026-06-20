@@ -75,11 +75,13 @@ func StreamOrBuffer(ctx context.Context, client LLM, messages []Message, tools [
 		if result != nil {
 			chunk.Message = result.Message
 			chunk.Usage = result.Usage
+
 			chunk.Model = result.Model
 			if result.Message != nil {
 				chunk.TextDelta = result.Message.TextContent()
 			}
 		}
+
 		yield(chunk, nil)
 	}
 }

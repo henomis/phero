@@ -37,6 +37,7 @@ type Pricing struct {
 // Cost returns the US-dollar cost of the given usage under this pricing.
 func (p Pricing) Cost(u Usage) float64 {
 	const perMillion = 1_000_000.0
+
 	return float64(u.InputTokens)/perMillion*p.InputPer1M +
 		float64(u.OutputTokens)/perMillion*p.OutputPer1M +
 		float64(u.CacheReadTokens)/perMillion*p.CacheReadPer1M +
@@ -75,6 +76,7 @@ var pricingTable = map[string]Pricing{
 func RegisterPricing(model string, p Pricing) {
 	pricingMu.Lock()
 	defer pricingMu.Unlock()
+
 	pricingTable[model] = p
 }
 
@@ -99,6 +101,7 @@ func PricingFor(model string) (Pricing, bool) {
 			best, bestLen = p, len(prefix)
 		}
 	}
+
 	return best, bestLen >= 0
 }
 
@@ -111,5 +114,6 @@ func (u Usage) Cost(model string) float64 {
 	if !ok {
 		return 0
 	}
+
 	return p.Cost(u)
 }

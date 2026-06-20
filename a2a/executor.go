@@ -61,6 +61,7 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 
 		// Register a cancellable context so a concurrent Cancel() call can interrupt Run.
 		taskCtx, cancel := context.WithCancel(ctx)
+
 		e.cancels.Store(execCtx.TaskID, cancel)
 		defer func() {
 			cancel()
@@ -68,14 +69,17 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 		}()
 
 		parts := translatePartsToPhero(execCtx.Message)
+
 		result, err := e.agent.Run(taskCtx, parts...)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				yield(sdka2a.NewStatusUpdateEvent(execCtx, sdka2a.TaskStateCanceled, nil), nil)
 				return
 			}
+
 			errMsg := sdka2a.NewMessageForTask(sdka2a.MessageRoleAgent, execCtx, sdka2a.NewTextPart(err.Error()))
 			yield(sdka2a.NewStatusUpdateEvent(execCtx, sdka2a.TaskStateFailed, errMsg), nil)
+
 			return
 		}
 
@@ -84,6 +88,7 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 			// Fallback: use text content from result if part translation produced nothing.
 			a2aParts = []*sdka2a.Part{sdka2a.NewTextPart(result.TextContent())}
 		}
+
 		responseMsg := sdka2a.NewMessageForTask(sdka2a.MessageRoleAgent, execCtx, a2aParts...)
 		yield(sdka2a.NewStatusUpdateEvent(execCtx, sdka2a.TaskStateCompleted, responseMsg), nil)
 	}
@@ -99,6 +104,7 @@ func (e *agentExecutor) Cancel(_ context.Context, execCtx *a2asrv.ExecutorContex
 		if fn, ok := e.cancels.Load(execCtx.TaskID); ok {
 			fn.(context.CancelFunc)()
 		}
+
 		yield(sdka2a.NewStatusUpdateEvent(execCtx, sdka2a.TaskStateCanceled, nil), nil)
 	}
 }

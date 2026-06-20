@@ -39,10 +39,12 @@ func TestNew_ValidPath_CreatesFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	path := f.Name()
 	if err := f.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
+
 	removeIfExists(t, path)
 	t.Cleanup(func() {
 		removeIfExists(t, path)
@@ -52,6 +54,7 @@ func TestNew_ValidPath_CreatesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+
 	if err := tr.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -66,10 +69,12 @@ func TestTracer_Trace_WritesNDJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	path := f.Name()
 	if err := f.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
+
 	t.Cleanup(func() {
 		removeIfExists(t, path)
 	})
@@ -80,6 +85,7 @@ func TestTracer_Trace_WritesNDJSON(t *testing.T) {
 	}
 
 	now := time.Now()
+
 	events := []trace.Event{
 		trace.AgentStartEvent{AgentName: "a", Input: "hello", Timestamp: now},
 		trace.AgentIterationEvent{AgentName: "a", Iteration: 1, Timestamp: now},
@@ -95,6 +101,7 @@ func TestTracer_Trace_WritesNDJSON(t *testing.T) {
 	for _, e := range events {
 		tr.Trace(e)
 	}
+
 	if err := tr.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -117,13 +124,16 @@ func TestTracer_Trace_WritesNDJSON(t *testing.T) {
 	}
 
 	scanner := bufio.NewScanner(file)
+
 	var lines []string
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
 	}
+
 	if err := scanner.Err(); err != nil {
 		t.Fatalf("scanner: %v", err)
 	}
+
 	if len(lines) != len(expectedTypes) {
 		t.Fatalf("expected %d lines, got %d", len(expectedTypes), len(lines))
 	}
@@ -134,6 +144,7 @@ func TestTracer_Trace_WritesNDJSON(t *testing.T) {
 			t.Errorf("line %d is not valid JSON: %v - %q", i, err, line)
 			continue
 		}
+
 		got, _ := m["type"].(string)
 		if !strings.EqualFold(got, expectedTypes[i]) {
 			t.Errorf("line %d: expected type %q, got %q", i, expectedTypes[i], got)
@@ -146,10 +157,12 @@ func TestTracer_Trace_ErrorEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	path := f.Name()
 	if err := f.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
+
 	t.Cleanup(func() {
 		removeIfExists(t, path)
 	})
@@ -158,8 +171,10 @@ func TestTracer_Trace_ErrorEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+
 	tr.Trace(trace.AgentEndEvent{AgentName: "a", Err: errTest, Iterations: 1, Timestamp: time.Now()})
 	tr.Trace(trace.ToolResultEvent{AgentName: "a", ToolName: "t", Err: errTest, Iteration: 1, Timestamp: time.Now()})
+
 	if err := tr.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -168,6 +183,7 @@ func TestTracer_Trace_ErrorEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
+
 	if !strings.Contains(string(data), "tool failed") {
 		t.Errorf("expected error message in output, got: %s", data)
 	}

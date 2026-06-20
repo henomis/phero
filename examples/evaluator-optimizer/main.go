@@ -35,10 +35,13 @@ type EvalResult struct {
 }
 
 func main() {
-	var topic string
-	var threshold int
-	var maxAttempts int
-	var timeout time.Duration
+	var (
+		topic       string
+		threshold   int
+		maxAttempts int
+		timeout     time.Duration
+	)
+
 	flag.StringVar(&topic, "topic", "Explain how large language models work to a general audience.", "Writing topic for the generator agent")
 	flag.IntVar(&threshold, "threshold", 8, "Minimum score (0-10) required to accept the output")
 	flag.IntVar(&maxAttempts, "max-attempts", 4, "Maximum number of generator-evaluator iterations")
@@ -62,6 +65,7 @@ func main() {
 	fmt.Println()
 
 	prompt := topic
+
 	var lastDraft string
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
@@ -72,6 +76,7 @@ func main() {
 		if err != nil {
 			panic(fmt.Errorf("generator failed: %w", err))
 		}
+
 		lastDraft = strings.TrimSpace(genOut.TextContent())
 
 		fmt.Printf("draft (%d chars):\n%s\n\n", len(lastDraft), lastDraft)
@@ -81,6 +86,7 @@ func main() {
 			"Evaluate the following text on the topic %q.\n\nText:\n%s",
 			topic, lastDraft,
 		)
+
 		evalOut, err := evaluator.Run(ctx, llm.Text(evalPrompt))
 		if err != nil {
 			panic(fmt.Errorf("evaluator failed: %w", err))
@@ -136,6 +142,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
+
 	client := openai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s base_url=%s", model, baseURL)
@@ -200,6 +207,7 @@ func parseEvalResult(raw string) (EvalResult, error) {
 // extractJSONObject extracts the first {...} block from s.
 func extractJSONObject(s string) string {
 	start := strings.Index(s, "{")
+
 	end := strings.LastIndex(s, "}")
 	if start == -1 || end == -1 || end < start {
 		return s

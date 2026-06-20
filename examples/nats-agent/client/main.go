@@ -41,6 +41,7 @@ func main() {
 	agentFilter := flag.String("agent", "", "Filter by metadata.agent (e.g. \"phero\")")
 	ownerFilter := flag.String("owner", "", "Filter by metadata.owner")
 	nameFilter := flag.String("name", "", "Filter by instance name")
+
 	flag.Parse()
 
 	url := resolveNATSURL(*natsURL)
@@ -60,14 +61,17 @@ func main() {
 	if *agentFilter != "" {
 		discoverOpts = append(discoverOpts, natsagent.FilterByAgent(*agentFilter))
 	}
+
 	if *ownerFilter != "" {
 		discoverOpts = append(discoverOpts, natsagent.FilterByOwner(*ownerFilter))
 	}
+
 	if *nameFilter != "" {
 		discoverOpts = append(discoverOpts, natsagent.FilterByName(*nameFilter))
 	}
 
 	fmt.Println("Discovering agents...")
+
 	ctx := context.Background()
 
 	agents, err := c.Discover(ctx, discoverOpts...)
@@ -76,6 +80,7 @@ func main() {
 	}
 
 	fmt.Printf("Found %d agent(s):\n", len(agents))
+
 	for i, a := range agents {
 		fmt.Printf("  [%d] agent=%-12s owner=%-12s name=%-12s protocol=%s\n",
 			i+1, a.Agent, a.Owner, a.Name, a.ProtocolVersion)
@@ -91,27 +96,34 @@ func main() {
 
 	for {
 		fmt.Print("> ")
+
 		if !scanner.Scan() {
 			break
 		}
+
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
+
 		if line == "/exit" || line == "/quit" || line == "/q" {
 			break
 		}
 
 		turnCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+
 		stream, err := target.Prompt(turnCtx, line)
 		if err != nil {
 			cancel()
 			fmt.Printf("Error: %v\n\n", err)
+
 			continue
 		}
 
 		text, err := stream.Text(turnCtx)
+
 		cancel()
+
 		if err != nil {
 			fmt.Printf("Error: %v\n\n", err)
 			continue
@@ -131,8 +143,10 @@ func resolveNATSURL(flag string) string {
 	if flag != "" {
 		return flag
 	}
+
 	if v := os.Getenv("NATS_URL"); v != "" {
 		return v
 	}
+
 	return nats.DefaultURL
 }

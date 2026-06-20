@@ -60,6 +60,7 @@ func NewWriteTool(opts ...Option) (*WriteTool, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	w.tool = tool
 
 	return w, nil
@@ -74,6 +75,7 @@ func (w *WriteTool) write(_ context.Context, input *WriteInput) (*WriteOutput, e
 	if input == nil {
 		return nil, fmt.Errorf("nil input")
 	}
+
 	if strings.TrimSpace(input.FilePath) == "" {
 		return nil, ErrPathRequired
 	}
@@ -84,10 +86,12 @@ func (w *WriteTool) write(_ context.Context, input *WriteInput) (*WriteOutput, e
 	}
 
 	perm := os.FileMode(0o644)
+
 	if info, statErr := os.Stat(resolvedPath); statErr == nil {
 		if w.noOverwrite {
 			return nil, ErrFileExists
 		}
+
 		perm = info.Mode().Perm()
 	} else if !errors.Is(statErr, os.ErrNotExist) {
 		return nil, statErr
@@ -106,10 +110,12 @@ func (w *WriteTool) write(_ context.Context, input *WriteInput) (*WriteOutput, e
 
 func atomicWriteFile(path string, data []byte, perm os.FileMode) (retErr error) {
 	dir := filepath.Dir(path)
+
 	tmp, err := os.CreateTemp(dir, ".phero-write-*")
 	if err != nil {
 		return err
 	}
+
 	tmpPath := tmp.Name()
 
 	defer func() {
@@ -122,10 +128,12 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) (retErr error) 
 		_ = tmp.Close()
 		return err
 	}
+
 	if err := tmp.Chmod(perm); err != nil {
 		_ = tmp.Close()
 		return err
 	}
+
 	if err := tmp.Close(); err != nil {
 		return err
 	}
@@ -133,5 +141,6 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) (retErr error) 
 	if err := os.Rename(tmpPath, path); err != nil {
 		return err
 	}
+
 	return nil
 }

@@ -52,6 +52,7 @@ func calculate(_ context.Context, input *CalculatorInput) (*CalculatorOutput, er
 		if input.B == 0 {
 			return &CalculatorOutput{Error: "division by zero"}, nil
 		}
+
 		return &CalculatorOutput{Result: input.A / input.B}, nil
 	default:
 		return &CalculatorOutput{Error: "unknown operation: " + input.Operation}, nil

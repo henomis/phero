@@ -39,8 +39,10 @@ func ensureStrictJSONSchema(schema map[string]any) (map[string]any, error) {
 		for k, v := range emptySchema {
 			result[k] = v
 		}
+
 		return result, nil
 	}
+
 	return ensureStrictJSONSchemaRecursive(schema, nil, schema)
 }
 
@@ -56,6 +58,7 @@ func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[str
 		if defsMap, ok := defs.(map[string]any); ok {
 			for defName, defSchema := range defsMap {
 				newPath := append(append([]string{}, path...), "$defs", defName)
+
 				_, err := ensureStrictJSONSchemaRecursive(defSchema, newPath, root)
 				if err != nil {
 					return nil, err
@@ -69,6 +72,7 @@ func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[str
 		if defsMap, ok := definitions.(map[string]any); ok {
 			for defName, defSchema := range defsMap {
 				newPath := append(append([]string{}, path...), "definitions", defName)
+
 				_, err := ensureStrictJSONSchemaRecursive(defSchema, newPath, root)
 				if err != nil {
 					return nil, err
@@ -95,18 +99,22 @@ func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[str
 			for key := range propsMap {
 				required = append(required, key)
 			}
+
 			schema["required"] = required
 
 			// Recursively process each property
 			newPropsMap := make(map[string]any, len(propsMap))
 			for key, propSchema := range propsMap {
 				newPath := append(append([]string{}, path...), "properties", key)
+
 				processed, err := ensureStrictJSONSchemaRecursive(propSchema, newPath, root)
 				if err != nil {
 					return nil, err
 				}
+
 				newPropsMap[key] = processed
 			}
+
 			schema["properties"] = newPropsMap
 		}
 	}
@@ -115,10 +123,12 @@ func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[str
 	if items, ok := schema["items"]; ok {
 		if _, isMap := items.(map[string]any); isMap {
 			newPath := append(append([]string{}, path...), "items")
+
 			processed, err := ensureStrictJSONSchemaRecursive(items, newPath, root)
 			if err != nil {
 				return nil, err
 			}
+
 			schema["items"] = processed
 		}
 	}
@@ -129,12 +139,15 @@ func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[str
 			newAnyOf := make([]any, len(anyOfList))
 			for i, variant := range anyOfList {
 				newPath := append(append([]string{}, path...), "anyOf", strconv.Itoa(i))
+
 				processed, err := ensureStrictJSONSchemaRecursive(variant, newPath, root)
 				if err != nil {
 					return nil, err
 				}
+
 				newAnyOf[i] = processed
 			}
+
 			schema["anyOf"] = newAnyOf
 		}
 	}
@@ -151,12 +164,15 @@ func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[str
 			// Process each oneOf variant
 			for i, variant := range oneOfList {
 				newPath := append(append([]string{}, path...), "oneOf", strconv.Itoa(i))
+
 				processed, err := ensureStrictJSONSchemaRecursive(variant, newPath, root)
 				if err != nil {
 					return nil, err
 				}
+
 				existingAnyOf = append(existingAnyOf, processed)
 			}
+
 			schema["anyOf"] = existingAnyOf
 			delete(schema, "oneOf")
 		}
@@ -168,6 +184,7 @@ func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[str
 			if len(allOfList) == 1 {
 				// Merge single allOf entry into parent
 				newPath := append(append([]string{}, path...), "allOf", "0")
+
 				processed, err := ensureStrictJSONSchemaRecursive(allOfList[0], newPath, root)
 				if err != nil {
 					return nil, err
@@ -176,18 +193,22 @@ func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[str
 				for k, v := range processed {
 					schema[k] = v
 				}
+
 				delete(schema, "allOf")
 			} else {
 				// Process each allOf entry
 				newAllOf := make([]any, len(allOfList))
 				for i, entry := range allOfList {
 					newPath := append(append([]string{}, path...), "allOf", strconv.Itoa(i))
+
 					processed, err := ensureStrictJSONSchemaRecursive(entry, newPath, root)
 					if err != nil {
 						return nil, err
 					}
+
 					newAllOf[i] = processed
 				}
+
 				schema["allOf"] = newAllOf
 			}
 		}
@@ -221,6 +242,7 @@ func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[str
 				schema[k] = v
 			}
 		}
+
 		delete(schema, "$ref")
 
 		// Process again to ensure the expanded schema is valid
@@ -237,6 +259,7 @@ func resolveRef(root map[string]any, ref string) (any, error) {
 	}
 
 	pathParts := strings.Split(ref[2:], "/")
+
 	var resolved any = root
 
 	for _, key := range pathParts {
@@ -252,6 +275,7 @@ func resolveRef(root map[string]any, ref string) (any, error) {
 		if !exists {
 			return nil, fmt.Errorf("key %q not found while resolving $ref %q", key, ref)
 		}
+
 		resolved = value
 	}
 
@@ -267,12 +291,14 @@ func hasMoreThanNKeys(obj map[string]any, n int) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
 // jsonEncodeDecode is a helper function that marshals a value to JSON and then unmarshals it into the specified type.
 func jsonEncodeDecode[T any](v any) (T, error) {
 	var result T
+
 	b, err := json.Marshal(v)
 	if err != nil {
 		return result, err
@@ -282,6 +308,7 @@ func jsonEncodeDecode[T any](v any) (T, error) {
 	if err != nil {
 		return result, err
 	}
+
 	return result, nil
 }
 

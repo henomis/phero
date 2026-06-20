@@ -49,6 +49,7 @@ func TestNewExposesFixedToolIdentity(t *testing.T) {
 	if got := tool.Tool().Name(); got != toolName {
 		t.Fatalf("Tool().Name() = %q, want %q", got, toolName)
 	}
+
 	if got := tool.Tool().Description(); got != toolDescription {
 		t.Fatalf("Tool().Description() = %q, want %q", got, toolDescription)
 	}
@@ -111,8 +112,10 @@ func TestHandleInputRequired(t *testing.T) {
 }
 
 func TestHandleSuccess(t *testing.T) {
-	var gotMessages []llm.Message
-	var gotTools []*llm.Tool
+	var (
+		gotMessages []llm.Message
+		gotTools    []*llm.Tool
+	)
 
 	extraTool, err := llm.NewTool("echo", "echo tool", func(_ context.Context, _ *struct{}) (string, error) {
 		return "ok", nil
@@ -124,6 +127,7 @@ func TestHandleSuccess(t *testing.T) {
 	tool, err := New(stubLLM{execute: func(_ context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
 		gotMessages = messages
 		gotTools = tools
+
 		return &llm.Result{Message: &llm.Message{Role: llm.RoleAssistant, Parts: []llm.ContentPart{llm.Text("done")}}}, nil
 	}}, extraTool)
 	if err != nil {
@@ -139,6 +143,7 @@ func TestHandleSuccess(t *testing.T) {
 	if !ok {
 		t.Fatalf("Handle() result type = %T, want *Output", res)
 	}
+
 	if out.Output != "done" {
 		t.Fatalf("output = %q, want %q", out.Output, "done")
 	}
@@ -146,15 +151,19 @@ func TestHandleSuccess(t *testing.T) {
 	if len(gotMessages) != 2 {
 		t.Fatalf("messages length = %d, want %d", len(gotMessages), 2)
 	}
+
 	if got := gotMessages[0].Role; got != llm.RoleSystem {
 		t.Fatalf("system role = %q, want %q", got, llm.RoleSystem)
 	}
+
 	if got := gotMessages[0].TextContent(); got != "You are a researcher" {
 		t.Fatalf("system description = %q, want %q", got, "You are a researcher")
 	}
+
 	if got := gotMessages[1].Role; got != llm.RoleUser {
 		t.Fatalf("user role = %q, want %q", got, llm.RoleUser)
 	}
+
 	if got := gotMessages[1].TextContent(); got != "solve this" {
 		t.Fatalf("user input = %q, want %q", got, "solve this")
 	}
@@ -162,6 +171,7 @@ func TestHandleSuccess(t *testing.T) {
 	if len(gotTools) != 1 {
 		t.Fatalf("tools length = %d, want %d", len(gotTools), 1)
 	}
+
 	if gotTools[0].Name() != "echo" {
 		t.Fatalf("tool name = %q, want %q", gotTools[0].Name(), "echo")
 	}
@@ -169,6 +179,7 @@ func TestHandleSuccess(t *testing.T) {
 
 func TestHandleRunError(t *testing.T) {
 	runErr := errors.New("run failed")
+
 	tool, err := New(stubLLM{execute: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
 		return nil, runErr
 	}})
@@ -195,7 +206,9 @@ func TestToolMiddlewareOrder(t *testing.T) {
 		return func(ctx context.Context, arguments string) (any, error) {
 			steps = append(steps, "m1-before")
 			res, err := next(ctx, arguments)
+
 			steps = append(steps, "m1-after")
+
 			return res, err
 		}
 	}
@@ -203,12 +216,15 @@ func TestToolMiddlewareOrder(t *testing.T) {
 		return func(ctx context.Context, arguments string) (any, error) {
 			steps = append(steps, "m2-before")
 			res, err := next(ctx, arguments)
+
 			steps = append(steps, "m2-after")
+
 			return res, err
 		}
 	}
 
 	tool.Tool().Use(m1, m2)
+
 	_, err = tool.Tool().Handle(context.Background(), `{"name":"agent","description":"a desc","input":"go"}`)
 	if err != nil {
 		t.Fatalf("Handle() error = %v", err)
@@ -243,6 +259,7 @@ func TestToolMiddlewareShortCircuit(t *testing.T) {
 	if !ok {
 		t.Fatalf("Handle() result type = %T, want *Output", res)
 	}
+
 	if out.Output != "blocked" {
 		t.Fatalf("output = %q, want %q", out.Output, "blocked")
 	}

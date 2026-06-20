@@ -113,6 +113,7 @@ Return the complete polished article — not a list of changes.`,
 	fmt.Printf("agent card     http://localhost%s/.well-known/agent-card.json\n", addr)
 
 	<-ctx.Done()
+
 	if err := httpServer.Shutdown(context.Background()); err != nil {
 		log.Printf("shutdown: %v", err)
 	}

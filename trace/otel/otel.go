@@ -61,6 +61,7 @@ func New(tracer oteltrace.Tracer) *Tracer {
 	if tracer == nil {
 		tracer = otel.Tracer(instrumentationName)
 	}
+
 	return &Tracer{
 		tracer: tracer,
 		roots:  make(map[string]rootSpan),
@@ -119,10 +120,13 @@ func (t *Tracer) endAgent(e trace.AgentEndEvent) {
 	t.mu.Lock()
 	root, ok := t.roots[e.AgentName]
 	t.mu.Unlock()
+
 	if !ok {
 		return
 	}
+
 	root.span.SetAttributes(attribute.Int("phero.agent.iterations", e.Iterations))
+
 	if e.Err != nil {
 		root.span.RecordError(e.Err)
 		root.span.SetStatus(codes.Error, e.Err.Error())
@@ -138,9 +142,11 @@ func (t *Tracer) finishAgent(e trace.AgentRunSummaryEvent) {
 	root, ok := t.roots[e.Summary.AgentName]
 	delete(t.roots, e.Summary.AgentName)
 	t.mu.Unlock()
+
 	if !ok {
 		return
 	}
+
 	s := e.Summary
 	root.span.SetAttributes(
 		attribute.Int("phero.run.llm_calls", s.LLMCalls),
@@ -161,9 +167,11 @@ func (t *Tracer) startLLM(e trace.LLMRequestEvent) {
 		attribute.Int("phero.llm.message_count", e.MessageCount),
 		attribute.Int("phero.agent.iteration", e.Iteration),
 	)
+
 	if len(e.ToolNames) > 0 {
 		span.SetAttributes(attribute.StringSlice("phero.llm.tools", e.ToolNames))
 	}
+
 	t.mu.Lock()
 	t.llms[llmKey(e.AgentName, e.Iteration)] = span
 	t.mu.Unlock()
@@ -171,31 +179,39 @@ func (t *Tracer) startLLM(e trace.LLMRequestEvent) {
 
 func (t *Tracer) endLLM(e trace.LLMResponseEvent) {
 	key := llmKey(e.AgentName, e.Iteration)
+
 	t.mu.Lock()
 	span, ok := t.llms[key]
 	delete(t.llms, key)
 	t.mu.Unlock()
+
 	if !ok {
 		return
 	}
+
 	if e.Model != "" {
 		span.SetAttributes(attribute.String("gen_ai.response.model", e.Model))
 	}
+
 	if e.Usage != nil {
 		span.SetAttributes(
 			attribute.Int("gen_ai.usage.input_tokens", e.Usage.InputTokens),
 			attribute.Int("gen_ai.usage.output_tokens", e.Usage.OutputTokens),
 		)
+
 		if e.Usage.CacheReadTokens > 0 {
 			span.SetAttributes(attribute.Int("phero.llm.cache_read_tokens", e.Usage.CacheReadTokens))
 		}
+
 		if e.Usage.CacheWriteTokens > 0 {
 			span.SetAttributes(attribute.Int("phero.llm.cache_write_tokens", e.Usage.CacheWriteTokens))
 		}
 	}
+
 	if e.Message != nil {
 		span.SetAttributes(attribute.Int("phero.llm.tool_calls", len(e.Message.ToolCalls)))
 	}
+
 	span.End()
 }
 
@@ -206,9 +222,11 @@ func (t *Tracer) recordReasoning(e trace.ReasoningEvent) {
 	t.mu.Lock()
 	root, ok := t.roots[e.AgentName]
 	t.mu.Unlock()
+
 	if !ok {
 		return
 	}
+
 	root.span.AddEvent("reasoning", oteltrace.WithAttributes(
 		attribute.Int("phero.agent.iteration", e.Iteration),
 		attribute.String("phero.llm.reasoning", truncate(e.Content)),
@@ -230,13 +248,16 @@ func (t *Tracer) startTool(e trace.ToolCallEvent) {
 
 func (t *Tracer) endTool(e trace.ToolResultEvent) {
 	key := toolKey(e.AgentName, e.CallID)
+
 	t.mu.Lock()
 	span, ok := t.tools[key]
 	delete(t.tools, key)
 	t.mu.Unlock()
+
 	if !ok {
 		return
 	}
+
 	if e.Err != nil {
 		span.RecordError(e.Err)
 		span.SetStatus(codes.Error, e.Err.Error())
@@ -244,6 +265,7 @@ func (t *Tracer) endTool(e trace.ToolResultEvent) {
 		span.SetAttributes(attribute.String("phero.tool.result", truncate(e.Result)))
 		span.SetStatus(codes.Ok, "")
 	}
+
 	span.End()
 }
 
@@ -252,9 +274,11 @@ func (t *Tracer) endTool(e trace.ToolResultEvent) {
 func (t *Tracer) parentCtx(agentName string) context.Context {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
 	if root, ok := t.roots[agentName]; ok {
 		return root.ctx
 	}
+
 	return context.Background()
 }
 
@@ -273,5 +297,6 @@ func truncate(s string) string {
 	if len(runes) <= maxAttrLen {
 		return s
 	}
+
 	return string(runes[:maxAttrLen]) + "…"
 }

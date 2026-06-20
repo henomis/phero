@@ -94,6 +94,7 @@ type retryLLM struct {
 // exponential back-off and +/-25% jitter between each attempt.
 func (r *retryLLM) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
 	var lastErr error
+
 	backoff := r.cfg.initialBackoff
 
 	for attempt := 0; attempt < r.cfg.maxAttempts; attempt++ {
@@ -105,6 +106,7 @@ func (r *retryLLM) Execute(ctx context.Context, messages []llm.Message, tools []
 		if err == nil {
 			return result, nil
 		}
+
 		lastErr = err
 
 		if !r.cfg.shouldRetry(err) {
@@ -118,6 +120,7 @@ func (r *retryLLM) Execute(ctx context.Context, messages []llm.Message, tools []
 		sleep := backoff
 		if half := int64(backoff) / 2; half > 0 {
 			jitter := time.Duration(rand.Int63n(half)) - backoff/4 //nolint:gosec
+
 			sleep += jitter
 			if sleep < 0 {
 				sleep = 0

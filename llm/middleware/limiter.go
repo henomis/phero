@@ -50,6 +50,7 @@ func (l *limiterLLM) Execute(ctx context.Context, messages []llm.Message, tools 
 	case <-l.stopCh:
 		return nil, ErrStopped
 	}
+
 	defer func() { <-l.semaphore }()
 
 	return l.inner.Execute(ctx, messages, tools)
@@ -95,6 +96,7 @@ func NewLimiter(requestsPerSecond float64, maxConcurrentRequests int) (llm.LLMMi
 	if requestsPerSecond <= 0 {
 		return nil, nil, ErrInvalidRate
 	}
+
 	if maxConcurrentRequests <= 0 {
 		return nil, nil, ErrInvalidMaxConcurrentRequests
 	}
@@ -103,7 +105,9 @@ func NewLimiter(requestsPerSecond float64, maxConcurrentRequests int) (llm.LLMMi
 	bucketCapacity := max(1, int(requestsPerSecond))
 
 	stopCh := make(chan struct{})
+
 	var stopOnce sync.Once
+
 	stop := func() {
 		stopOnce.Do(func() { close(stopCh) })
 	}
@@ -113,6 +117,7 @@ func NewLimiter(requestsPerSecond float64, maxConcurrentRequests int) (llm.LLMMi
 	// when multiple agents each wrap their own LLM with the same limiter.
 	tokens := make(chan struct{}, bucketCapacity)
 	semaphore := make(chan struct{}, maxConcurrentRequests)
+
 	go runLimiterTokenProducer(tokens, interval, stopCh)
 
 	mw := func(next llm.LLM) llm.LLM {

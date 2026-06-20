@@ -58,9 +58,11 @@ func newRunStats(agentName string) *runStats {
 func (s *runStats) recordLLM(duration time.Duration, model string, usage *llm.Usage) {
 	s.llmCalls++
 	s.llmDuration += duration
+
 	if usage == nil {
 		return
 	}
+
 	s.llmInputTokens += usage.InputTokens
 	s.llmOutputTokens += usage.OutputTokens
 	s.llmCostUSD += usage.Cost(model)
@@ -80,6 +82,7 @@ func (s *runStats) recordTool(toolName string, err error, duration time.Duration
 	}
 
 	stats.calls++
+
 	if err != nil {
 		s.toolErrors++
 		stats.errors++
@@ -98,11 +101,14 @@ func (s *runStats) recordMemorySave(count int, duration time.Duration) {
 
 func (s *runStats) summary(iterations int, handoffAgents []string, err error) *trace.RunSummary {
 	tools := make([]trace.ToolCallSummary, 0, len(s.toolSummaries))
+
 	toolNames := make([]string, 0, len(s.toolSummaries))
 	for toolName := range s.toolSummaries {
 		toolNames = append(toolNames, toolName)
 	}
+
 	sort.Strings(toolNames)
+
 	for _, toolName := range toolNames {
 		stats := s.toolSummaries[toolName]
 		tools = append(tools, trace.ToolCallSummary{

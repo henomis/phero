@@ -58,10 +58,12 @@ func TestAgentCard_Fields(t *testing.T) {
 
 	t.Run("name and description", func(t *testing.T) {
 		srv, _ := pheroA2A.New(ag, "http://localhost:9000")
+
 		card := srv.AgentCard()
 		if card.Name != "my-agent" {
 			t.Errorf("Name = %q, want %q", card.Name, "my-agent")
 		}
+
 		if card.Description != "does things" {
 			t.Errorf("Description = %q, want %q", card.Description, "does things")
 		}
@@ -83,16 +85,20 @@ func TestAgentCard_Fields(t *testing.T) {
 
 	t.Run("two interfaces with REST", func(t *testing.T) {
 		srv, _ := pheroA2A.New(ag, "http://localhost:9000", pheroA2A.WithRESTTransport())
+
 		ifaces := srv.AgentCard().SupportedInterfaces
 		if len(ifaces) != 2 {
 			t.Fatalf("SupportedInterfaces len = %d, want 2", len(ifaces))
 		}
+
 		var hasREST bool
+
 		for _, iface := range ifaces {
 			if strings.HasSuffix(iface.URL, pheroA2A.RESTPathPrefix) {
 				hasREST = true
 			}
 		}
+
 		if !hasREST {
 			t.Errorf("no interface URL ending with %q", pheroA2A.RESTPathPrefix)
 		}
@@ -110,7 +116,7 @@ func TestAgentCard_Fields(t *testing.T) {
 // routed correctly — including the /rest/ prefix-stripped path (regression
 // guard for the http.StripPrefix fix).
 func TestMount_Routes(t *testing.T) {
-	ts, _ := newTestServer(t, textLLM("pong"), pheroA2A.WithRESTTransport())
+	ts := newTestServer(t, textLLM("pong"), pheroA2A.WithRESTTransport())
 
 	// Valid JSON-RPC envelope (method may be unknown, but routing must not 404).
 	jsonRPCBody := `{"jsonrpc":"2.0","id":"1","method":"message/send","params":{"message":{"messageId":"m1","role":"user","parts":[{"kind":"text","text":"ping"}]}}}`
@@ -136,15 +142,19 @@ func TestMount_Routes(t *testing.T) {
 			} else {
 				body = &bytes.Buffer{}
 			}
+
 			req, _ := http.NewRequest(tc.method, ts.URL+tc.path, body)
 			if tc.body != "" {
 				req.Header.Set("Content-Type", "application/json")
 			}
+
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				t.Fatalf("request failed: %v", err)
 			}
+
 			defer func() { _ = resp.Body.Close() }()
+
 			if resp.StatusCode == tc.notCode {
 				t.Errorf("%s %s returned %d, which must not happen", tc.method, tc.path, tc.notCode)
 			}
@@ -156,6 +166,7 @@ func TestMount_Routes(t *testing.T) {
 // WithRESTTransport is not used.
 func TestMount_RESTHandlerNil(t *testing.T) {
 	ag := mustAgent(t, textLLM("x"), "ag", "desc")
+
 	srv, _ := pheroA2A.New(ag, "http://localhost:9000")
 	if h := srv.RESTHandler(); h != nil {
 		t.Error("RESTHandler() should be nil without WithRESTTransport()")
@@ -168,13 +179,16 @@ func TestAgentCard_Skills(t *testing.T) {
 	ag := mustAgent(t, textLLM("x"), "ag", "desc")
 	extra := sdka2a.AgentSkill{ID: "s1", Name: "S1", Description: "extra"}
 	srv, _ := pheroA2A.New(ag, "http://localhost:9000", pheroA2A.WithSkills(extra))
+
 	skills := srv.AgentCard().Skills
 	if len(skills) != 2 {
 		t.Fatalf("want 2 skills, got %d", len(skills))
 	}
+
 	if skills[0].ID != "ag" {
 		t.Errorf("primary skill ID = %q, want %q", skills[0].ID, "ag")
 	}
+
 	if skills[1].ID != "s1" {
 		t.Errorf("extra skill ID = %q, want %q", skills[1].ID, "s1")
 	}

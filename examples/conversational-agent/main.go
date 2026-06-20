@@ -42,6 +42,7 @@ func main() {
 	summarizationThreshold := flag.Uint("summary-threshold", 8, "Number of messages before triggering summarization (only used with -summarize)")
 	summarySize := flag.Uint("summary-size", 15, "Number of messages before triggering summarization (only used with -summarize)")
 	maxMessages := flag.Uint("max-messages", 20, "Maximum number of messages to keep in memory")
+
 	flag.Parse()
 
 	ctx := context.Background()
@@ -78,6 +79,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	if err := a.AddTool(timeTool); err != nil {
 		panic(err)
 	}
@@ -87,11 +89,13 @@ func main() {
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Printf("LLM: %s\n", llmInfo)
 	fmt.Printf("Memory: %d messages max\n", *maxMessages)
+
 	if *enableSummarization {
 		fmt.Printf("Summarization: enabled (threshold=%d, summary_size=%d)\n", *summarizationThreshold, *summarySize)
 	} else {
 		fmt.Println("Summarization: disabled")
 	}
+
 	fmt.Println()
 	fmt.Println("Commands:")
 	fmt.Println("  /history   - Show conversation history")
@@ -119,12 +123,14 @@ func main() {
 		if strings.HasPrefix(line, "/") {
 			handleCommand(ctx, line, conversationMemory)
 			fmt.Print("\n> ")
+
 			continue
 		}
 
 		// Run the agent
 		turnCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		response, err := a.Run(turnCtx, llm.Text(line))
+
 		cancel()
 
 		if err != nil {
@@ -156,6 +162,7 @@ func handleCommand(ctx context.Context, cmd string, mem *memory.Memory) {
 			fmt.Printf("Error retrieving memory: %v\n", err)
 			return
 		}
+
 		if len(messages) == 0 {
 			fmt.Println("\nNo conversation history yet.")
 			return
@@ -174,6 +181,7 @@ func handleCommand(ctx context.Context, cmd string, mem *memory.Memory) {
 			}
 
 			symbol := ""
+
 			switch role {
 			case llm.RoleUser:
 				symbol = "👤"
@@ -198,10 +206,12 @@ func handleCommand(ctx context.Context, cmd string, mem *memory.Memory) {
 	case "/clear", "/c":
 		previousCount := mem.Len()
 		_ = mem.Clear(ctx)
+
 		fmt.Printf("\n✨ Cleared %d messages from memory.\n", previousCount)
 
 	case "/stats", "/s":
 		msgCount := mem.Len()
+
 		messages, err := mem.Retrieve(ctx, "")
 		if err != nil {
 			fmt.Printf("Error retrieving memory: %v\n", err)
@@ -217,7 +227,9 @@ func handleCommand(ctx context.Context, cmd string, mem *memory.Memory) {
 			for _, msg := range messages {
 				roleCount[msg.Role]++
 			}
+
 			fmt.Println("\nBy role:")
+
 			for role, count := range roleCount {
 				fmt.Printf("  %s: %d\n", role, count)
 			}
@@ -284,6 +296,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
+
 	client := openai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s base_url=%s", model, baseURL)

@@ -134,6 +134,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
+
 	client := openai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s base_url=%s", model, baseURL)
@@ -212,6 +213,7 @@ Be direct and practical.`))
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+
 	if err := runner.AddTool(goTool); err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -226,16 +228,20 @@ func makePlan(ctx context.Context, planner *agent.Agent, goal string) (Plan, err
 	}
 
 	out := extractJSONObject(response.TextContent())
+
 	var plan Plan
 	if err := json.Unmarshal([]byte(out), &plan); err != nil {
 		return Plan{}, fmt.Errorf("failed to parse planner JSON: %w\nraw=%s", err, out)
 	}
+
 	if strings.TrimSpace(plan.Goal) == "" {
 		plan.Goal = goal
 	}
+
 	if len(plan.Steps) == 0 {
 		return Plan{}, errors.New("planner returned an empty steps array")
 	}
+
 	if len(plan.Steps) > 3 {
 		plan.Steps = plan.Steps[:3]
 	}
@@ -253,18 +259,22 @@ func validateStep(step PlanStep) error {
 	if strings.TrimSpace(step.Name) == "" {
 		return errors.New("missing name")
 	}
+
 	if len(step.GoArgs) == 0 {
 		return errors.New("missing go_args")
 	}
+
 	sub := step.GoArgs[0]
 	if sub != "test" && sub != "list" {
 		return fmt.Errorf("unsupported go subcommand %q (allowed: test, list)", sub)
 	}
+
 	for _, a := range step.GoArgs {
 		if strings.Contains(a, "\n") || strings.Contains(a, "\r") {
 			return errors.New("go_args contains newline")
 		}
 	}
+
 	return nil
 }
 
@@ -272,31 +282,37 @@ func executePlan(ctx context.Context, runner *agent.Agent, plan Plan) ([]StepRes
 	results := make([]StepResult, 0, len(plan.Steps))
 	for _, step := range plan.Steps {
 		prompt := fmt.Sprintf("Execute this step now. step_name=%q go_args=%s", step.Name, mustJSON(step.GoArgs))
+
 		response, err := runner.Run(ctx, llm.Text(prompt))
 		if err != nil {
 			return nil, err
 		}
 
 		out := extractJSONObject(response.TextContent())
+
 		var r GoRunResult
 		if err := json.Unmarshal([]byte(out), &r); err != nil {
 			return nil, fmt.Errorf("failed to parse runner JSON: %w\nraw=%s", err, out)
 		}
+
 		results = append(results, StepResult{StepName: step.Name, GoArgs: step.GoArgs, Result: &r})
 
 		if step.StopOnFail && r.ExitCode != 0 {
 			break
 		}
 	}
+
 	return results, nil
 }
 
 func synthesize(ctx context.Context, analyst *agent.Agent, goal string, plan Plan, stepResults []StepResult) (string, error) {
 	in := RunSummaryInput{Goal: goal, Plan: plan, StepResults: stepResults}
+
 	response, err := analyst.Run(ctx, llm.Text(mustJSON(in)))
 	if err != nil {
 		return "", err
 	}
+
 	return response.TextContent(), nil
 }
 
@@ -317,6 +333,7 @@ func reviewReport(ctx context.Context, critic *agent.Agent, goal string, plan Pl
 	if err != nil {
 		return "", err
 	}
+
 	return response.TextContent(), nil
 }
 
@@ -325,16 +342,19 @@ func mustJSON(v any) string {
 	if err != nil {
 		panic(err)
 	}
+
 	return string(b)
 }
 
 func extractJSONObject(s string) string {
 	s = strings.TrimSpace(s)
 	start := strings.IndexByte(s, '{')
+
 	end := strings.LastIndexByte(s, '}')
 	if start == -1 || end == -1 || end <= start {
 		return s
 	}
+
 	return strings.TrimSpace(s[start : end+1])
 }
 
@@ -350,6 +370,7 @@ func runGo(ctx context.Context, in *GoRunInput) (*GoRunResult, error) {
 	if in == nil {
 		return &GoRunResult{ExitCode: 2, Error: "missing input"}, nil
 	}
+
 	if len(in.Args) == 0 {
 		return &GoRunResult{ExitCode: 2, Error: "missing args"}, nil
 	}
@@ -358,6 +379,7 @@ func runGo(ctx context.Context, in *GoRunInput) (*GoRunResult, error) {
 	if sub != "test" && sub != "list" {
 		return &GoRunResult{ExitCode: 2, Error: fmt.Sprintf("unsupported go subcommand: %s", sub)}, nil
 	}
+
 	for _, a := range in.Args {
 		if strings.Contains(a, "\n") || strings.Contains(a, "\r") {
 			return &GoRunResult{ExitCode: 2, Error: "invalid args"}, nil
@@ -372,6 +394,7 @@ func runGo(ctx context.Context, in *GoRunInput) (*GoRunResult, error) {
 
 	cmd := exec.CommandContext(ctx, goPath, in.Args...)
 	out, err := cmd.CombinedOutput()
+
 	res := &GoRunResult{ExitCode: 0, Output: string(out)}
 	if err == nil {
 		return res, nil
@@ -381,10 +404,12 @@ func runGo(ctx context.Context, in *GoRunInput) (*GoRunResult, error) {
 	if errors.As(err, &ee) {
 		res.ExitCode = ee.ExitCode()
 		res.Error = err.Error()
+
 		return res, nil
 	}
 
 	res.ExitCode = 1
 	res.Error = err.Error()
+
 	return res, nil
 }

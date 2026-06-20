@@ -37,17 +37,21 @@ import (
 )
 
 func main() {
-	var filePath string
-	var chunkSize int
-	var chunkOverlap int
-	var topK uint64
-	var timeout time.Duration
+	var (
+		filePath     string
+		chunkSize    int
+		chunkOverlap int
+		topK         uint64
+		timeout      time.Duration
+	)
 
-	var qdrantHost string
-	var qdrantPort int
-	var qdrantAPIKey string
-	var qdrantUseTLS bool
-	var qdrantCollection string
+	var (
+		qdrantHost       string
+		qdrantPort       int
+		qdrantAPIKey     string
+		qdrantUseTLS     bool
+		qdrantCollection string
+	)
 
 	flag.StringVar(&filePath, "file", "", "Path to a .txt file to load as the knowledge base (required)")
 	flag.IntVar(&chunkSize, "chunk-size", 1000, "Chunk size for splitting (measured in bytes)")
@@ -89,10 +93,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "failed to embed first chunk (to infer vector size): %v\n", err)
 		return
 	}
+
 	if len(vecs) != 1 || len(vecs[0]) == 0 {
 		fmt.Fprintln(os.Stderr, "failed to infer vector size from embedder")
 		return
 	}
+
 	vectorSize := uint64(len(vecs[0]))
 
 	qc, err := qdrantapi.NewClient(&qdrantapi.Config{
@@ -152,8 +158,10 @@ Document: %s`, filepath.Base(filePath)))
 		fmt.Fprintf(os.Stderr, "failed to create agent: %v\n", err)
 		return
 	}
+
 	a.SetMaxIterations(8)
 	a.SetMemory(memory.New(60))
+
 	if err := a.AddTool(ragTool); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to add rag tool: %v\n", err)
 		return
@@ -178,6 +186,7 @@ Document: %s`, filepath.Base(filePath)))
 			fmt.Print("> ")
 			continue
 		}
+
 		switch strings.ToLower(line) {
 		case "exit", "quit":
 			return
@@ -185,6 +194,7 @@ Document: %s`, filepath.Base(filePath)))
 
 		turnCtx, turnCancel := context.WithTimeout(context.Background(), timeout)
 		out, err := a.Run(turnCtx, llm.Text(fmt.Sprintf("Question: %s", line)))
+
 		turnCancel()
 
 		if err != nil {
@@ -192,9 +202,11 @@ Document: %s`, filepath.Base(filePath)))
 		} else {
 			fmt.Println(strings.TrimSpace(out.TextContent()))
 		}
+
 		fmt.Println()
 		fmt.Print("> ")
 	}
+
 	if err := scanner.Err(); err != nil {
 		fmt.Fprintln(os.Stderr, "stdin error:", err)
 		return
@@ -223,6 +235,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if baseURL != "" {
 		opts = append(opts, llmopenai.WithBaseURL(baseURL))
 	}
+
 	client := llmopenai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s base_url=%s", model, baseURL)
@@ -246,6 +259,7 @@ func buildEmbedderFromEnv() (*embeddingopenai.Client, string) {
 	if baseURL != "" {
 		opts = append(opts, embeddingopenai.WithBaseURL(baseURL))
 	}
+
 	client := embeddingopenai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s base_url=%s", embeddingopenai.DefaultModel, baseURL)

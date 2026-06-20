@@ -67,6 +67,7 @@ func (s *Server) AsTools(ctx context.Context, filter ToolFilter) ([]*llm.Tool, e
 		}
 
 		toolName := tool.Name
+
 		newTool, err := llm.NewRawTool(
 			toolName,
 			tool.Description,
@@ -131,6 +132,7 @@ func callToolResultText(res *mcp.CallToolResult) string {
 	if res == nil || len(res.Content) == 0 {
 		return ""
 	}
+
 	parts := make([]string, 0, len(res.Content))
 	for _, c := range res.Content {
 		switch v := c.(type) {
@@ -142,5 +144,6 @@ func callToolResultText(res *mcp.CallToolResult) string {
 			parts = append(parts, fmt.Sprintf("[%T]", c))
 		}
 	}
+
 	return strings.Join(parts, "\n")
 }

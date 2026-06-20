@@ -36,8 +36,11 @@ type workerResult struct {
 }
 
 func main() {
-	var topic string
-	var timeout time.Duration
+	var (
+		topic   string
+		timeout time.Duration
+	)
+
 	flag.StringVar(&topic, "topic", "renewable energy", "Research topic to investigate from multiple angles")
 	flag.DurationVar(&timeout, "timeout", 6*time.Minute, "Overall timeout for the run")
 	flag.Parse()
@@ -59,6 +62,7 @@ func main() {
 
 	// Fan-out: run all worker agents concurrently.
 	results := make([]workerResult, len(workers))
+
 	var wg sync.WaitGroup
 
 	for i, entry := range workers {
@@ -68,6 +72,7 @@ func main() {
 			defer wg.Done()
 
 			prompt := fmt.Sprintf("Research the topic %q from the %s angle.", topic, angle)
+
 			out, err := a.Run(ctx, llm.Text(prompt))
 			if err != nil {
 				results[idx] = workerResult{angle: angle, err: err}
@@ -202,6 +207,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
+
 	client := openai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s base_url=%s", model, baseURL)

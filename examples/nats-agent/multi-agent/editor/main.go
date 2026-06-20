@@ -104,6 +104,7 @@ func resolveNATSURL(envVal string) string {
 	if envVal != "" {
 		return envVal
 	}
+
 	return nats.DefaultURL
 }
 
@@ -117,6 +118,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if apiKey == "" && baseURL == "" {
 		baseURL = openai.OllamaBaseURL
 	}
+
 	if model == "" {
 		if baseURL == openai.OllamaBaseURL && apiKey == "" {
 			model = "gpt-oss:20b-cloud"
@@ -129,11 +131,13 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
+
 	client := openai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s", model)
 	if baseURL != "" {
 		info = fmt.Sprintf("model=%s base_url=%s", model, baseURL)
 	}
+
 	return client, info
 }

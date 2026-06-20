@@ -80,6 +80,7 @@ func TestAskReturnsStructuredAnswers(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected answer for Approve header")
 	}
+
 	if len(answer.Selections) != 1 || answer.Selections[0] != "Approve" {
 		t.Fatalf("unexpected selections: %#v", answer.Selections)
 	}
@@ -145,6 +146,7 @@ func TestAskPropagatesInteractorFailure(t *testing.T) {
 	if !errors.Is(err, ErrInteractionFailed) {
 		t.Fatalf("expected ErrInteractionFailed, got %v", err)
 	}
+
 	if !errors.Is(err, interactorErr) {
 		t.Fatalf("expected wrapped interactor error, got %v", err)
 	}

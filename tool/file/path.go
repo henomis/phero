@@ -41,6 +41,7 @@ func resolveToolPath(workingDir, inputPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve working directory: %w", err)
 	}
+
 	resolvedWorkingDir, err = filepath.EvalSymlinks(resolvedWorkingDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve working directory symlinks: %w", err)
@@ -55,6 +56,7 @@ func resolveToolPath(workingDir, inputPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("compare path with working directory: %w", err)
 	}
+
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return "", ErrPathOutsideWorkingDirectory
 	}
@@ -72,6 +74,7 @@ func resolvePathWithSymlinks(path string) (string, error) {
 			for i := len(missingParts) - 1; i >= 0; i-- {
 				resolved = filepath.Join(resolved, missingParts[i])
 			}
+
 			return filepath.Clean(resolved), nil
 		}
 

@@ -48,6 +48,7 @@ func NewHeartbeatTracker(nc *natsclient.Conn) (*HeartbeatTracker, error) {
 		if err := json.Unmarshal(msg.Data, &p); err != nil || p.InstanceID == "" {
 			return
 		}
+
 		t.mu.Lock()
 		t.seen[p.InstanceID] = &heartbeatEntry{payload: p, lastSeen: time.Now()}
 		t.mu.Unlock()
@@ -57,6 +58,7 @@ func NewHeartbeatTracker(nc *natsclient.Conn) (*HeartbeatTracker, error) {
 	}
 
 	t.sub = sub
+
 	return t, nil
 }
 
@@ -66,10 +68,13 @@ func (t *HeartbeatTracker) IsOnline(instanceID string) bool {
 	t.mu.RLock()
 	e, ok := t.seen[instanceID]
 	t.mu.RUnlock()
+
 	if !ok {
 		return false
 	}
+
 	threshold := time.Duration(e.payload.IntervalS) * time.Second * 3
+
 	return time.Since(e.lastSeen) <= threshold
 }
 

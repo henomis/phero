@@ -102,16 +102,19 @@ func New(skillsRootPath string, opts ...Option) (*Tool, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	t.catalog = entries
 	t.commands = commands
 
 	description := t.buildDescription()
+
 	tool, err := llm.NewTool(toolName, description, t.handle)
 	if err != nil {
 		return nil, err
 	}
 
 	t.tool = tool
+
 	return t, nil
 }
 
@@ -161,6 +164,7 @@ func (t *Tool) buildCatalog(skillsRootPath string) ([]catalogEntry, map[string]c
 		if existing, ok := commands[normalizedName]; ok {
 			return nil, nil, &DuplicateSkillNameError{Name: name, ExistingDir: existing.dir, DuplicateDir: dir}
 		}
+
 		commands[normalizedName] = entry
 
 		normalizedDir := strings.ToLower(strings.TrimSpace(dir))
@@ -192,6 +196,7 @@ func (t *Tool) buildDescription() string {
 	b.WriteString("</skills_instructions>\n\n")
 
 	b.WriteString("<available_skills>\n")
+
 	for _, entry := range t.catalog {
 		b.WriteString("  <skill>\n")
 		b.WriteString("    <name>")
@@ -205,6 +210,7 @@ func (t *Tool) buildDescription() string {
 		b.WriteString("</location>\n")
 		b.WriteString("  </skill>\n")
 	}
+
 	b.WriteString("</available_skills>")
 
 	return b.String()
@@ -267,5 +273,6 @@ func escapeXML(s string) string {
 		`"`, "&quot;",
 		"'", "&apos;",
 	)
+
 	return replacer.Replace(s)
 }

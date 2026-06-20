@@ -55,6 +55,7 @@ import (
 func main() {
 	topic := flag.String("topic", "quantum computing", "topic to research and write about")
 	natsURL := flag.String("nats-url", "", "NATS server URL (overrides NATS_URL env var; default nats://localhost:4222)")
+
 	flag.Parse()
 
 	url := resolveNATSURL(*natsURL)
@@ -177,6 +178,7 @@ func discoverOne(ctx context.Context, c *natsagent.Client, agentName string) (*n
 	if err != nil {
 		return nil, err
 	}
+
 	return handles[0], nil
 }
 
@@ -194,9 +196,11 @@ func resolveNATSURL(flagVal string) string {
 	if flagVal != "" {
 		return flagVal
 	}
+
 	if v := os.Getenv("NATS_URL"); v != "" {
 		return v
 	}
+
 	return nats.DefaultURL
 }
 
@@ -210,6 +214,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if apiKey == "" && baseURL == "" {
 		baseURL = openai.OllamaBaseURL
 	}
+
 	if model == "" {
 		if baseURL == openai.OllamaBaseURL && apiKey == "" {
 			model = "gpt-oss:20b-cloud"
@@ -222,11 +227,13 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
+
 	client := openai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s", model)
 	if baseURL != "" {
 		info = fmt.Sprintf("model=%s base_url=%s", model, baseURL)
 	}
+
 	return client, info
 }

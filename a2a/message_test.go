@@ -44,13 +44,16 @@ func agentImageBase64Result(mediaType, b64 string) *agent.Result {
 
 func TestTranslatePartsToPhero_Text(t *testing.T) {
 	msg := sdka2a.NewMessage(sdka2a.MessageRoleUser, sdka2a.NewTextPart("hello"))
+
 	parts := pheroA2A.TranslatePartsToPhero(msg)
 	if len(parts) != 1 {
 		t.Fatalf("want 1 part, got %d", len(parts))
 	}
+
 	if parts[0].Type != llm.ContentTypeText {
 		t.Errorf("want ContentTypeText, got %v", parts[0].Type)
 	}
+
 	if parts[0].Text != "hello" {
 		t.Errorf("want %q, got %q", "hello", parts[0].Text)
 	}
@@ -59,13 +62,16 @@ func TestTranslatePartsToPhero_Text(t *testing.T) {
 func TestTranslatePartsToPhero_ImageURL(t *testing.T) {
 	part := sdka2a.NewFileURLPart("http://example.com/img.png", "image/png")
 	msg := sdka2a.NewMessage(sdka2a.MessageRoleUser, part)
+
 	parts := pheroA2A.TranslatePartsToPhero(msg)
 	if len(parts) != 1 {
 		t.Fatalf("want 1 part, got %d", len(parts))
 	}
+
 	if parts[0].Type != llm.ContentTypeImageURL {
 		t.Errorf("want ContentTypeImageURL, got %v", parts[0].Type)
 	}
+
 	if parts[0].ImageURL != "http://example.com/img.png" {
 		t.Errorf("unexpected URL: %s", parts[0].ImageURL)
 	}
@@ -74,6 +80,7 @@ func TestTranslatePartsToPhero_ImageURL(t *testing.T) {
 func TestTranslatePartsToPhero_NonImageURL_Skipped(t *testing.T) {
 	part := sdka2a.NewFileURLPart("http://example.com/doc.pdf", "application/pdf")
 	msg := sdka2a.NewMessage(sdka2a.MessageRoleUser, part)
+
 	parts := pheroA2A.TranslatePartsToPhero(msg)
 	if len(parts) != 0 {
 		t.Errorf("non-image URL parts should be skipped, got %d parts", len(parts))
@@ -85,10 +92,12 @@ func TestTranslatePartsToPhero_ImageBase64(t *testing.T) {
 	part := sdka2a.NewRawPart(raw)
 	part.MediaType = "image/jpeg"
 	msg := sdka2a.NewMessage(sdka2a.MessageRoleUser, part)
+
 	parts := pheroA2A.TranslatePartsToPhero(msg)
 	if len(parts) != 1 {
 		t.Fatalf("want 1 part, got %d", len(parts))
 	}
+
 	if parts[0].Type != llm.ContentTypeImageBase64 {
 		t.Errorf("want ContentTypeImageBase64, got %v", parts[0].Type)
 	}
@@ -105,10 +114,12 @@ func TestTranslatePartsToPhero_NilMessage(t *testing.T) {
 
 func TestTranslateResultToA2A_Text(t *testing.T) {
 	result := agentTextResult("response")
+
 	parts := pheroA2A.TranslateResultToA2A(result)
 	if len(parts) != 1 {
 		t.Fatalf("want 1 part, got %d", len(parts))
 	}
+
 	if parts[0].Text() != "response" {
 		t.Errorf("want %q, got %q", "response", parts[0].Text())
 	}
@@ -116,10 +127,12 @@ func TestTranslateResultToA2A_Text(t *testing.T) {
 
 func TestTranslateResultToA2A_ImageURL(t *testing.T) {
 	result := agentImageURLResult("http://example.com/img.png")
+
 	parts := pheroA2A.TranslateResultToA2A(result)
 	if len(parts) != 1 {
 		t.Fatalf("want 1 part, got %d", len(parts))
 	}
+
 	if string(parts[0].URL()) != "http://example.com/img.png" {
 		t.Errorf("unexpected URL: %s", parts[0].URL())
 	}
@@ -129,10 +142,12 @@ func TestTranslateResultToA2A_ImageBase64_Valid(t *testing.T) {
 	raw := []byte{0x89, 0x50, 0x4e, 0x47} // PNG magic
 	encoded := base64.StdEncoding.EncodeToString(raw)
 	result := agentImageBase64Result("image/png", encoded)
+
 	parts := pheroA2A.TranslateResultToA2A(result)
 	if len(parts) != 1 {
 		t.Fatalf("want 1 part, got %d", len(parts))
 	}
+
 	if parts[0].MediaType != "image/png" {
 		t.Errorf("want media type %q, got %q", "image/png", parts[0].MediaType)
 	}
@@ -140,6 +155,7 @@ func TestTranslateResultToA2A_ImageBase64_Valid(t *testing.T) {
 
 func TestTranslateResultToA2A_ImageBase64_Invalid_Skipped(t *testing.T) {
 	result := agentImageBase64Result("image/png", "not-valid-base64!!!")
+
 	parts := pheroA2A.TranslateResultToA2A(result)
 	if len(parts) != 0 {
 		t.Errorf("invalid base64 should be skipped, got %d parts", len(parts))
@@ -150,10 +166,12 @@ func TestTranslateResultToA2A_ImageBase64_Invalid_Skipped(t *testing.T) {
 
 func TestExtractTextFromResult_Message(t *testing.T) {
 	msg := sdka2a.NewMessage(sdka2a.MessageRoleAgent, sdka2a.NewTextPart("agent reply"))
+
 	text, err := pheroA2A.ExtractTextFromResult(msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	if text != "agent reply" {
 		t.Errorf("want %q, got %q", "agent reply", text)
 	}
@@ -163,6 +181,7 @@ func TestExtractTextFromResult_Message_NoText(t *testing.T) {
 	raw := []byte{0x01}
 	part := sdka2a.NewRawPart(raw)
 	msg := sdka2a.NewMessage(sdka2a.MessageRoleAgent, part)
+
 	_, err := pheroA2A.ExtractTextFromResult(msg)
 	if !errors.Is(err, pheroA2A.ErrNoTextContent) {
 		t.Errorf("want ErrNoTextContent, got %v", err)
@@ -176,10 +195,12 @@ func TestExtractTextFromResult_Task_StatusMessage(t *testing.T) {
 		ContextID: "ctx-1",
 		Status:    sdka2a.TaskStatus{State: sdka2a.TaskStateCompleted, Message: statusMsg},
 	}
+
 	text, err := pheroA2A.ExtractTextFromResult(task)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	if text != "done" {
 		t.Errorf("want %q, got %q", "done", text)
 	}
@@ -196,10 +217,12 @@ func TestExtractTextFromResult_Task_Artifact(t *testing.T) {
 		Status:    sdka2a.TaskStatus{State: sdka2a.TaskStateCompleted},
 		Artifacts: []*sdka2a.Artifact{artifact},
 	}
+
 	text, err := pheroA2A.ExtractTextFromResult(task)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	if text != "artifact content" {
 		t.Errorf("want %q, got %q", "artifact content", text)
 	}
@@ -211,6 +234,7 @@ func TestExtractTextFromResult_Task_NoText(t *testing.T) {
 		ContextID: "ctx-3",
 		Status:    sdka2a.TaskStatus{State: sdka2a.TaskStateFailed},
 	}
+
 	_, err := pheroA2A.ExtractTextFromResult(task)
 	if !errors.Is(err, pheroA2A.ErrNoTextContent) {
 		t.Errorf("want ErrNoTextContent, got %v", err)

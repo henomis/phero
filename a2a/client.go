@@ -184,6 +184,7 @@ func (c *Client) AsTool() (*llm.Tool, error) {
 			if err != nil {
 				return nil, err
 			}
+
 			result = task
 		}
 
@@ -194,6 +195,7 @@ func (c *Client) AsTool() (*llm.Tool, error) {
 				if reason := extractStatusMessage(task.Status.Message); reason != "" {
 					return nil, fmt.Errorf("%w: %s", ErrTaskFailed, reason)
 				}
+
 				return nil, ErrTaskFailed
 			case sdka2a.TaskStateCanceled:
 				return nil, ErrTaskCanceled
@@ -217,11 +219,13 @@ func extractStatusMessage(msg *sdka2a.Message) string {
 	if msg == nil {
 		return ""
 	}
+
 	for _, part := range msg.Parts {
 		if t := part.Text(); t != "" {
 			return t
 		}
 	}
+
 	return ""
 }
 
@@ -242,6 +246,7 @@ func (c *Client) waitForTask(ctx context.Context, task *sdka2a.Task) (*sdka2a.Ta
 		if err != nil {
 			break
 		}
+
 		switch v := event.(type) {
 		case *sdka2a.Task:
 			if v.Status.State.Terminal() {
@@ -253,6 +258,7 @@ func (c *Client) waitForTask(ctx context.Context, task *sdka2a.Task) (*sdka2a.Ta
 				if err != nil {
 					return nil, err
 				}
+
 				return t, nil
 			}
 		}
@@ -271,6 +277,7 @@ func (c *Client) waitForTask(ctx context.Context, task *sdka2a.Task) (*sdka2a.Ta
 			if err != nil {
 				return nil, err
 			}
+
 			if t.Status.State.Terminal() {
 				return t, nil
 			}

@@ -59,11 +59,13 @@ type anthropicUsage struct {
 
 // newTestServer returns an httptest.Server that serves the provided Anthropic
 // response to all POST requests under any path.
-func newTestServer(t *testing.T, resp anthropicResponse, statusCode int) *httptest.Server {
+func newTestServer(t *testing.T, resp anthropicResponse) *httptest.Server {
 	t.Helper()
+
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(statusCode)
+		w.WriteHeader(http.StatusOK)
+
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
 			t.Errorf("encode response: %v", err)
 		}
@@ -107,7 +109,7 @@ func TestExecute_TextResponse(t *testing.T) {
 			{Type: "text", Text: "Hello from Anthropic!"},
 		},
 		Usage: anthropicUsage{InputTokens: 12, OutputTokens: 6},
-	}, http.StatusOK)
+	})
 	defer srv.Close()
 
 	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
@@ -117,15 +119,19 @@ func TestExecute_TextResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
+
 	if result.Message == nil {
 		t.Fatal("expected non-nil message")
 	}
+
 	if result.Message.TextContent() != "Hello from Anthropic!" {
 		t.Fatalf("expected %q, got %q", "Hello from Anthropic!", result.Message.TextContent())
 	}
+
 	if result.Usage == nil {
 		t.Fatal("expected non-nil usage")
 	}
+
 	if result.Usage.InputTokens != 12 || result.Usage.OutputTokens != 6 {
 		t.Fatalf("usage mismatch: input=%d output=%d", result.Usage.InputTokens, result.Usage.OutputTokens)
 	}
@@ -147,12 +153,13 @@ func TestExecute_WithToolUse(t *testing.T) {
 			},
 		},
 		Usage: anthropicUsage{InputTokens: 25, OutputTokens: 10},
-	}, http.StatusOK)
+	})
 	defer srv.Close()
 
 	type weatherInput struct {
 		Location string `json:"location"`
 	}
+
 	tool, err := llm.NewTool("get_weather", "returns weather", func(_ context.Context, in *weatherInput) (string, error) {
 		return "cloudy", nil
 	})
@@ -167,12 +174,15 @@ func TestExecute_WithToolUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
+
 	if len(result.Message.ToolCalls) != 1 {
 		t.Fatalf("expected 1 tool call, got %d", len(result.Message.ToolCalls))
 	}
+
 	if result.Message.ToolCalls[0].Function.Name != "get_weather" {
 		t.Fatalf("expected tool %q, got %q", "get_weather", result.Message.ToolCalls[0].Function.Name)
 	}
+
 	if result.Message.ToolCalls[0].Function.Arguments != `{"location":"Paris"}` {
 		t.Fatalf("unexpected arguments: %s", result.Message.ToolCalls[0].Function.Arguments)
 	}
@@ -187,7 +197,7 @@ func TestExecute_SystemMessage_Converted(t *testing.T) {
 		StopReason: "end_turn",
 		Content:    []contentBlock{{Type: "text", Text: "ok"}},
 		Usage:      anthropicUsage{InputTokens: 5, OutputTokens: 2},
-	}, http.StatusOK)
+	})
 	defer srv.Close()
 
 	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
@@ -200,6 +210,7 @@ func TestExecute_SystemMessage_Converted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
+
 	if result.Message.TextContent() != "ok" {
 		t.Fatalf("expected %q, got %q", "ok", result.Message.TextContent())
 	}
@@ -222,6 +233,7 @@ func TestExecute_UnsupportedRole_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unsupported role")
 	}
+
 	var unsupported *anthropic.UnsupportedRoleError
 	if !errors.As(err, &unsupported) {
 		t.Fatalf("expected UnsupportedRoleError, got %T: %v", err, err)
@@ -250,12 +262,15 @@ func TestExecute_ToolMessage_MissingToolCallID_ReturnsError(t *testing.T) {
 // replies with a minimal valid assistant message.
 func capturingServer(t *testing.T, body *[]byte) *httptest.Server {
 	t.Helper()
+
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Errorf("read request body: %v", err)
 		}
+
 		*body = b
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"id":"x","type":"message","role":"assistant","model":"m",` +
@@ -285,6 +300,7 @@ type wireRequest struct {
 // single user turn, as Anthropic requires.
 func TestExecute_ParallelToolResults_MergedIntoSingleUserMessage(t *testing.T) {
 	var body []byte
+
 	srv := capturingServer(t, &body)
 	defer srv.Close()
 
@@ -317,13 +333,16 @@ func TestExecute_ParallelToolResults_MergedIntoSingleUserMessage(t *testing.T) {
 	if last.Role != "user" {
 		t.Fatalf("expected final turn to be a user message, got %q", last.Role)
 	}
+
 	if len(last.Content) != 2 {
 		t.Fatalf("expected 2 tool_result blocks in the final user message, got %d: %s", len(last.Content), body)
 	}
+
 	for i, want := range []string{"call_a", "call_b"} {
 		if last.Content[i].Type != "tool_result" {
 			t.Fatalf("block %d: expected tool_result, got %q", i, last.Content[i].Type)
 		}
+
 		if last.Content[i].ToolUseID != want {
 			t.Fatalf("block %d: expected tool_use_id %q, got %q", i, want, last.Content[i].ToolUseID)
 		}
@@ -335,6 +354,7 @@ func TestExecute_ParallelToolResults_MergedIntoSingleUserMessage(t *testing.T) {
 // successful result omits it.
 func TestExecute_ToolError_MapsToIsError(t *testing.T) {
 	var body []byte
+
 	srv := capturingServer(t, &body)
 	defer srv.Close()
 
@@ -375,6 +395,7 @@ func TestExecute_ToolError_MapsToIsError(t *testing.T) {
 	if got := byID["call_ok"]; got != nil {
 		t.Fatalf("expected is_error omitted for successful result, got %v", *got)
 	}
+
 	if got := byID["call_err"]; got == nil || !*got {
 		t.Fatalf("expected is_error=true for failed result, got %v (body: %s)", got, body)
 	}
@@ -390,6 +411,7 @@ func TestExecute_DefaultTemperature_MatchesAnthropicSpec(t *testing.T) {
 
 	t.Run("default", func(t *testing.T) {
 		var body []byte
+
 		srv := capturingServer(t, &body)
 		defer srv.Close()
 
@@ -402,9 +424,11 @@ func TestExecute_DefaultTemperature_MatchesAnthropicSpec(t *testing.T) {
 		if err := json.Unmarshal(body, &req); err != nil {
 			t.Fatalf("unmarshal: %v", err)
 		}
+
 		if req.Temperature == nil {
 			t.Fatalf("expected temperature to be sent, body: %s", body)
 		}
+
 		if *req.Temperature != float64(anthropic.DefaultTemperature) {
 			t.Fatalf("expected default temperature %v, got %v", anthropic.DefaultTemperature, *req.Temperature)
 		}
@@ -412,6 +436,7 @@ func TestExecute_DefaultTemperature_MatchesAnthropicSpec(t *testing.T) {
 
 	t.Run("override", func(t *testing.T) {
 		var body []byte
+
 		srv := capturingServer(t, &body)
 		defer srv.Close()
 
@@ -424,6 +449,7 @@ func TestExecute_DefaultTemperature_MatchesAnthropicSpec(t *testing.T) {
 		if err := json.Unmarshal(body, &req); err != nil {
 			t.Fatalf("unmarshal: %v", err)
 		}
+
 		if req.Temperature == nil || *req.Temperature != float64(float32(0.2)) {
 			t.Fatalf("expected temperature 0.2, got %v (body: %s)", req.Temperature, body)
 		}
@@ -461,10 +487,11 @@ func TestExecute_ThinkingResponse_ParsedAsReasoning(t *testing.T) {
 		},
 		StopReason: "end_turn",
 		Usage:      anthropicUsage{InputTokens: 5, OutputTokens: 7},
-	}, http.StatusOK)
+	})
 	defer srv.Close()
 
 	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL), anthropic.WithThinking(1024))
+
 	res, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("q"))}, nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -473,16 +500,19 @@ func TestExecute_ThinkingResponse_ParsedAsReasoning(t *testing.T) {
 	if got := res.Message.ReasoningContent(); got != "let me reason" {
 		t.Fatalf("ReasoningContent = %q, want %q", got, "let me reason")
 	}
+
 	if got := res.Message.TextContent(); got != "the answer is 42" {
 		t.Fatalf("TextContent = %q, want %q (reasoning must not leak into text)", got, "the answer is 42")
 	}
 
 	var sig string
+
 	for _, p := range res.Message.Parts {
 		if p.Type == llm.ContentTypeReasoning {
 			sig = p.Signature
 		}
 	}
+
 	if sig != "sig-123" {
 		t.Fatalf("reasoning signature = %q, want %q", sig, "sig-123")
 	}
@@ -490,6 +520,7 @@ func TestExecute_ThinkingResponse_ParsedAsReasoning(t *testing.T) {
 
 func TestExecute_WithThinking_SetsConfigAndOmitsTemperature(t *testing.T) {
 	var body []byte
+
 	srv := capturingServer(t, &body)
 	defer srv.Close()
 
@@ -517,6 +548,7 @@ func TestExecute_WithThinking_SetsConfigAndOmitsTemperature(t *testing.T) {
 	if req.Thinking == nil || req.Thinking.Type != "enabled" || req.Thinking.BudgetTokens != 2048 {
 		t.Fatalf("thinking config = %+v, want enabled/2048", req.Thinking)
 	}
+
 	if req.Temperature != nil {
 		t.Fatalf("temperature = %v, want omitted under extended thinking", *req.Temperature)
 	}
@@ -528,10 +560,12 @@ func TestExecute_WithThinking_SetsConfigAndOmitsTemperature(t *testing.T) {
 
 func TestExecute_ReasoningRoundTrip_EmitsThinkingBlockFirst(t *testing.T) {
 	var body []byte
+
 	srv := capturingServer(t, &body)
 	defer srv.Close()
 
 	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL), anthropic.WithThinking(1024))
+
 	msgs := []llm.Message{
 		llm.UserMessage(llm.Text("q")),
 		llm.AssistantMessage([]llm.ContentPart{
@@ -570,12 +604,15 @@ func TestExecute_ReasoningRoundTrip_EmitsThinkingBlockFirst(t *testing.T) {
 			break
 		}
 	}
+
 	if assistant == nil || len(assistant.Content) == 0 {
 		t.Fatalf("no assistant message with content: %s", body)
 	}
+
 	if assistant.Content[0].Type != "thinking" {
 		t.Fatalf("first assistant block = %q, want thinking: %s", assistant.Content[0].Type, body)
 	}
+
 	if assistant.Content[0].Signature != "sig-xyz" {
 		t.Fatalf("thinking signature = %q, want sig-xyz", assistant.Content[0].Signature)
 	}
@@ -583,6 +620,7 @@ func TestExecute_ReasoningRoundTrip_EmitsThinkingBlockFirst(t *testing.T) {
 
 func TestExecute_WithPromptCaching_MarksSystemAndLastTool(t *testing.T) {
 	var body []byte
+
 	srv := capturingServer(t, &body)
 	defer srv.Close()
 
@@ -592,6 +630,7 @@ func TestExecute_WithPromptCaching_MarksSystemAndLastTool(t *testing.T) {
 	}
 
 	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL), anthropic.WithPromptCaching())
+
 	msgs := []llm.Message{
 		llm.SystemMessage("you are helpful"),
 		llm.UserMessage(llm.Text("hi")),
@@ -619,6 +658,7 @@ func TestExecute_WithPromptCaching_MarksSystemAndLastTool(t *testing.T) {
 	if len(req.System) == 0 || req.System[len(req.System)-1].CacheControl == nil {
 		t.Fatalf("expected cache_control on system block: %s", body)
 	}
+
 	if len(req.Tools) == 0 || req.Tools[len(req.Tools)-1].CacheControl == nil {
 		t.Fatalf("expected cache_control on last tool: %s", body)
 	}

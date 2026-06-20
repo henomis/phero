@@ -57,6 +57,7 @@ func NewEditTool(opts ...Option) (*EditTool, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	e.tool = tool
 
 	return e, nil
@@ -71,12 +72,15 @@ func (e *EditTool) edit(_ context.Context, input *EditInput) (*EditOutput, error
 	if input == nil {
 		return nil, fmt.Errorf("nil input")
 	}
+
 	if strings.TrimSpace(input.FilePath) == "" {
 		return nil, ErrPathRequired
 	}
+
 	if input.OldString == "" {
 		return nil, ErrOldStringRequired
 	}
+
 	if input.OldString == input.NewString {
 		return nil, fmt.Errorf("new_string must differ from old_string")
 	}
@@ -90,6 +94,7 @@ func (e *EditTool) edit(_ context.Context, input *EditInput) (*EditOutput, error
 	if err != nil {
 		return nil, err
 	}
+
 	mode := info.Mode().Perm()
 
 	content, err := os.ReadFile(resolvedPath)
@@ -99,10 +104,12 @@ func (e *EditTool) edit(_ context.Context, input *EditInput) (*EditOutput, error
 
 	needle := []byte(input.OldString)
 	replacement := []byte(input.NewString)
+
 	count := bytes.Count(content, needle)
 	if count == 0 {
 		return nil, fmt.Errorf("old_string not found in %s", resolvedPath)
 	}
+
 	if !input.ReplaceAll && count != 1 {
 		return nil, fmt.Errorf("old_string found %d times in %s", count, resolvedPath)
 	}
@@ -120,5 +127,6 @@ func (e *EditTool) edit(_ context.Context, input *EditInput) (*EditOutput, error
 	if !input.ReplaceAll {
 		return &EditOutput{Replacements: 1}, nil
 	}
+
 	return &EditOutput{Replacements: count}, nil
 }

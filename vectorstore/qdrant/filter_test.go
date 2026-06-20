@@ -28,6 +28,7 @@ func TestTranslateFilterNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("translateFilter(nil) error = %v", err)
 	}
+
 	if f != nil {
 		t.Fatalf("translateFilter(nil) = %v, want nil", f)
 	}
@@ -43,6 +44,7 @@ func TestTranslateFilterEq(t *testing.T) {
 	if err != nil {
 		t.Fatalf("translateFilter() error = %v", err)
 	}
+
 	if len(f.Must) != 4 {
 		t.Fatalf("len(Must) = %d, want 4", len(f.Must))
 	}
@@ -50,9 +52,11 @@ func TestTranslateFilterEq(t *testing.T) {
 	if kw := f.Must[0].GetField().GetMatch().GetKeyword(); kw != "news" {
 		t.Fatalf("keyword = %q, want news", kw)
 	}
+
 	if b := f.Must[1].GetField().GetMatch().GetBoolean(); b != false {
 		t.Fatalf("boolean = %v, want false", b)
 	}
+
 	if n := f.Must[2].GetField().GetMatch().GetInteger(); n != 2024 {
 		t.Fatalf("integer = %d, want 2024", n)
 	}
@@ -68,12 +72,15 @@ func TestTranslateFilterNe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("translateFilter() error = %v", err)
 	}
+
 	if len(f.MustNot) != 2 {
 		t.Fatalf("len(MustNot) = %d, want 2 (match + is-empty)", len(f.MustNot))
 	}
+
 	if kw := f.MustNot[0].GetField().GetMatch().GetKeyword(); kw != "news" {
 		t.Fatalf("keyword = %q, want news", kw)
 	}
+
 	if f.MustNot[1].GetIsEmpty().GetKey() != "category" {
 		t.Fatalf("is-empty key = %q, want category", f.MustNot[1].GetIsEmpty().GetKey())
 	}
@@ -84,13 +91,16 @@ func TestTranslateFilterIn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("translateFilter() error = %v", err)
 	}
+
 	if len(f.Must) != 1 {
 		t.Fatalf("len(Must) = %d, want 1", len(f.Must))
 	}
+
 	nested := f.Must[0].GetFilter()
 	if nested == nil || len(nested.Should) != 2 {
 		t.Fatalf("nested should = %v, want 2 conditions", nested)
 	}
+
 	if n := nested.Should[0].GetField().GetMatch().GetInteger(); n != 2020 {
 		t.Fatalf("integer = %d, want 2020", n)
 	}
@@ -114,9 +124,11 @@ func TestTranslateFilterRange(t *testing.T) {
 			if err != nil {
 				t.Fatalf("translateFilter() error = %v", err)
 			}
+
 			if len(f.Must) != 1 {
 				t.Fatalf("len(Must) = %d, want 1", len(f.Must))
 			}
+
 			r := f.Must[0].GetField().GetRange()
 			if r == nil || !tt.check(r) {
 				t.Fatalf("range = %v, unexpected bounds", r)

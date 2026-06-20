@@ -25,6 +25,7 @@ import (
 
 func TestReadTool_ReadAndTrackSession(t *testing.T) {
 	tmp := t.TempDir()
+
 	path := filepath.Join(tmp, "notes.txt")
 	if err := os.WriteFile(path, []byte("a\nb\nc"), 0o644); err != nil {
 		t.Fatalf("write fixture: %v", err)

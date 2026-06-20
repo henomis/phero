@@ -109,6 +109,7 @@ func New(client *weaviateclient.Client, class string, opts ...Option) (*Store, e
 	if client == nil {
 		return nil, ErrNilClient
 	}
+
 	if class == "" {
 		return nil, ErrEmptyCollection
 	}
@@ -119,11 +120,13 @@ func New(client *weaviateclient.Client, class string, opts ...Option) (*Store, e
 		distance:  defaultDistance,
 		batchSize: defaultBatchSize,
 	}
+
 	for _, opt := range opts {
 		if opt != nil {
 			opt(s)
 		}
 	}
+
 	return s, nil
 }
 
@@ -137,6 +140,7 @@ func (s *Store) EnsureCollection(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("checking class existence: %w", err)
 	}
+
 	if exists {
 		return nil
 	}
@@ -154,6 +158,7 @@ func (s *Store) EnsureCollection(ctx context.Context) error {
 	if err := s.client.Schema().ClassCreator().WithClass(class).Do(ctx); err != nil {
 		return fmt.Errorf("creating class: %w", err)
 	}
+
 	return nil
 }
 
@@ -173,15 +178,18 @@ func (s *Store) Upsert(ctx context.Context, points []vectorstore.Point) error {
 	if s.batchSize <= 0 || s.batchSize >= len(points) {
 		return s.upsertBatch(ctx, points)
 	}
+
 	for start := 0; start < len(points); start += s.batchSize {
 		end := start + s.batchSize
 		if end > len(points) {
 			end = len(points)
 		}
+
 		if err := s.upsertBatch(ctx, points[start:end]); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -191,9 +199,11 @@ func (s *Store) upsertBatch(ctx context.Context, points []vectorstore.Point) err
 		if p.ID == "" {
 			return ErrPointIDRequired
 		}
+
 		if len(p.Vector) == 0 {
 			return &EmptyVectorError{PointID: p.ID}
 		}
+
 		if s.vectorSize > 0 && uint64(len(p.Vector)) != s.vectorSize {
 			return &VectorSizeMismatchError{Expected: s.vectorSize, Got: len(p.Vector)}
 		}
@@ -217,6 +227,7 @@ func (s *Store) upsertBatch(ctx context.Context, points []vectorstore.Point) err
 	if _, err := s.client.Batch().ObjectsBatcher().WithObjects(objs...).Do(ctx); err != nil {
 		return fmt.Errorf("batch upsert: %w", err)
 	}
+
 	return nil
 }
 
@@ -242,9 +253,11 @@ func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint6
 	if len(query) == 0 {
 		return nil, vectorstore.ErrEmptyQuery
 	}
+
 	if limit == 0 {
 		return nil, fmt.Errorf("limit must be greater than zero")
 	}
+
 	if s.vectorSize > 0 && uint64(len(query)) != s.vectorSize {
 		return nil, &VectorSizeMismatchError{Expected: s.vectorSize, Got: len(query)}
 	}
@@ -255,6 +268,7 @@ func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint6
 	}
 
 	fetchLimit := limit
+
 	filtered := cfg.Filter != nil && len(cfg.Filter.Conditions) > 0
 	if filtered {
 		fetchLimit = min(limit*overfetchFactor, overfetchCap)
@@ -275,6 +289,7 @@ func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint6
 	if err != nil {
 		return nil, fmt.Errorf("graphql query: %w", err)
 	}
+
 	if len(result.Errors) > 0 {
 		return nil, fmt.Errorf("graphql errors: %v", result.Errors)
 	}
@@ -283,20 +298,24 @@ func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint6
 	if err != nil {
 		return nil, err
 	}
+
 	if !filtered {
 		return scored, nil
 	}
 
 	out := make([]vectorstore.ScoredPoint, 0, limit)
+
 	for _, sp := range scored {
 		if !vectorstore.MatchPayload(cfg.Filter, sp.Payload) {
 			continue
 		}
+
 		out = append(out, sp)
 		if uint64(len(out)) >= limit {
 			break
 		}
 	}
+
 	return out, nil
 }
 
@@ -305,14 +324,17 @@ func (s *Store) parseQueryResult(result *models.GraphQLResponse) ([]vectorstore.
 	if !ok {
 		return nil, nil
 	}
+
 	getMap, ok := getRaw.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("unexpected type for Get response: %T", getRaw)
 	}
+
 	raw, ok := getMap[s.class]
 	if !ok {
 		return nil, nil
 	}
+
 	objs, ok := raw.([]any)
 	if !ok {
 		return nil, fmt.Errorf("unexpected response shape for class %q", s.class)
@@ -332,6 +354,7 @@ func (s *Store) parseQueryResult(result *models.GraphQLResponse) ([]vectorstore.
 		origID, _ := m[propID].(string)
 
 		payloadStr, _ := m[propPayload].(string)
+
 		var payload map[string]any
 		if payloadStr != "" {
 			if err := json.Unmarshal([]byte(payloadStr), &payload); err != nil {
@@ -345,6 +368,7 @@ func (s *Store) parseQueryResult(result *models.GraphQLResponse) ([]vectorstore.
 			Payload: payload,
 		})
 	}
+
 	return scored, nil
 }
 
@@ -356,6 +380,7 @@ func (s *Store) Delete(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		return vectorstore.ErrEmptyIDs
 	}
+
 	for _, id := range ids {
 		if err := s.client.Data().Deleter().
 			WithClassName(s.class).
@@ -364,6 +389,7 @@ func (s *Store) Delete(ctx context.Context, ids []string) error {
 			return fmt.Errorf("deleting object %q: %w", id, err)
 		}
 	}
+
 	return nil
 }
 
@@ -373,6 +399,7 @@ func (s *Store) Clear(ctx context.Context) error {
 	if err := s.client.Schema().ClassDeleter().WithClassName(s.class).Do(ctx); err != nil {
 		return fmt.Errorf("deleting class: %w", err)
 	}
+
 	return s.EnsureCollection(ctx)
 }
 
@@ -385,26 +412,33 @@ func (s *Store) Count(ctx context.Context) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("aggregate count: %w", err)
 	}
+
 	if len(result.Errors) > 0 {
 		return 0, fmt.Errorf("aggregate count errors: %v", result.Errors)
 	}
+
 	agg, ok := result.Data["Aggregate"].(map[string]any)
 	if !ok {
 		return 0, nil
 	}
+
 	items, ok := agg[s.class].([]any)
 	if !ok || len(items) == 0 {
 		return 0, nil
 	}
+
 	item, ok := items[0].(map[string]any)
 	if !ok {
 		return 0, nil
 	}
+
 	meta, ok := item["meta"].(map[string]any)
 	if !ok {
 		return 0, nil
 	}
+
 	count, _ := meta["count"].(float64)
+
 	return uint64(count), nil
 }
 
@@ -419,8 +453,10 @@ func capitalizeFirst(s string) string {
 	if s == "" {
 		return s
 	}
+
 	r := []rune(s)
 	r[0] = unicode.ToUpper(r[0])
+
 	return string(r)
 }
 
@@ -431,5 +467,6 @@ func (s *Store) distanceToScore(dist float32) float32 {
 	if s.distance == DistanceCosine {
 		return 1 - dist
 	}
+
 	return -dist
 }

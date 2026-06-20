@@ -74,6 +74,7 @@ func New(apiKey string, opts ...Option) *Client {
 		maxTokens:   DefaultMaxTokens,
 		temperature: DefaultTemperature,
 	}
+
 	for _, opt := range opts {
 		if opt != nil {
 			opt(c)
@@ -84,11 +85,13 @@ func New(apiKey string, opts ...Option) *Client {
 	if c.apiKey != "" {
 		clientOpts = append(clientOpts, option.WithAPIKey(c.apiKey))
 	}
+
 	if c.baseURL != "" {
 		clientOpts = append(clientOpts, option.WithBaseURL(c.baseURL))
 	}
 
 	c.client = anthropicapi.NewClient(clientOpts...)
+
 	return c
 }
 
@@ -150,17 +153,16 @@ func (c *Client) buildParams(messages []llm.Message, tools []*llm.Tool) (anthrop
 		if maxTokens <= c.thinkingbudget {
 			maxTokens = c.thinkingbudget + c.maxTokens
 		}
+
 		params.Thinking = anthropicapi.ThinkingConfigParamOfEnabled(c.thinkingbudget)
 	} else {
 		params.Temperature = param.NewOpt(float64(c.temperature))
 	}
+
 	params.MaxTokens = maxTokens
 
 	if len(tools) > 0 {
-		params.Tools, err = anthropicTools(tools)
-		if err != nil {
-			return anthropicapi.MessageNewParams{}, err
-		}
+		params.Tools = anthropicTools(tools)
 	}
 
 	if c.promptCaching {
@@ -178,6 +180,7 @@ func applyPromptCaching(params *anthropicapi.MessageNewParams) {
 	if n := len(params.System); n > 0 {
 		params.System[n-1].CacheControl = anthropicapi.NewCacheControlEphemeralParam()
 	}
+
 	if n := len(params.Tools); n > 0 {
 		if tool := params.Tools[n-1].OfTool; tool != nil {
 			tool.CacheControl = anthropicapi.NewCacheControlEphemeralParam()
@@ -199,23 +202,28 @@ func applyPromptCaching(params *anthropicapi.MessageNewParams) {
 // degrades future parallel tool use).
 func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam, []anthropicapi.MessageParam, error) {
 	var systemParts []string
+
 	out := make([]anthropicapi.MessageParam, 0, len(messages))
 
 	// pending accumulates content blocks for consecutive messages that share the
 	// same Anthropic role (user or assistant); flush emits the merged turn.
-	var pendingRole string
-	var pending []anthropicapi.ContentBlockParamUnion
+	var (
+		pendingRole string
+		pending     []anthropicapi.ContentBlockParamUnion
+	)
 
 	flush := func() {
 		if len(pending) == 0 {
 			return
 		}
+
 		switch pendingRole {
 		case llm.RoleAssistant:
 			out = append(out, anthropicapi.NewAssistantMessage(pending...))
 		default:
 			out = append(out, anthropicapi.NewUserMessage(pending...))
 		}
+
 		pending = nil
 		pendingRole = ""
 	}
@@ -226,10 +234,13 @@ func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam,
 		if len(blocks) == 0 {
 			return
 		}
+
 		if pendingRole != "" && pendingRole != role {
 			flush()
 		}
+
 		pendingRole = role
+
 		pending = append(pending, blocks...)
 	}
 
@@ -242,10 +253,8 @@ func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam,
 			}
 
 		case llm.RoleUser:
-			blocks, err := contentBlocksToAnthropic(m.Parts)
-			if err != nil {
-				return nil, nil, err
-			}
+			blocks := contentBlocksToAnthropic(m.Parts)
+
 			add(llm.RoleUser, blocks...)
 
 		case llm.RoleAssistant:
@@ -265,11 +274,13 @@ func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam,
 					}
 				}
 			}
+
 			for _, p := range m.Parts {
 				if p.Type == llm.ContentTypeText && strings.TrimSpace(p.Text) != "" {
 					blocks = append(blocks, anthropicapi.NewTextBlock(p.Text))
 				}
 			}
+
 			for _, tc := range m.ToolCalls {
 				id := strings.TrimSpace(tc.ID)
 				if id == "" {
@@ -277,6 +288,7 @@ func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam,
 				}
 
 				var input any
+
 				args := strings.TrimSpace(tc.Function.Arguments)
 				if args == "" {
 					input = map[string]any{}
@@ -285,8 +297,10 @@ func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam,
 						return nil, nil, &ToolArgumentsParseError{ToolName: tc.Function.Name, Err: err}
 					}
 				}
+
 				blocks = append(blocks, anthropicapi.NewToolUseBlock(id, input, tc.Function.Name))
 			}
+
 			add(llm.RoleAssistant, blocks...)
 
 		case llm.RoleTool:
@@ -297,6 +311,7 @@ func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam,
 			// Build tool result content blocks from parts. Tool results map to the
 			// user role and are merged with adjacent tool results into one turn.
 			content := toolResultContentToAnthropic(m.Parts)
+
 			toolBlock := anthropicapi.ToolResultBlockParam{
 				ToolUseID: toolUseID,
 				Content:   content,
@@ -304,15 +319,18 @@ func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam,
 			if m.ToolError {
 				toolBlock.IsError = param.NewOpt(true)
 			}
+
 			add(llm.RoleUser, anthropicapi.ContentBlockParamUnion{OfToolResult: &toolBlock})
 
 		default:
 			return nil, nil, &UnsupportedRoleError{Role: m.Role}
 		}
 	}
+
 	flush()
 
 	joined := strings.TrimSpace(strings.Join(systemParts, "\n\n"))
+
 	var system []anthropicapi.TextBlockParam
 	if joined != "" {
 		system = []anthropicapi.TextBlockParam{{Text: joined}}
@@ -322,7 +340,7 @@ func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam,
 }
 
 // contentBlocksToAnthropic converts Phero ContentParts to Anthropic content block params.
-func contentBlocksToAnthropic(parts []llm.ContentPart) ([]anthropicapi.ContentBlockParamUnion, error) {
+func contentBlocksToAnthropic(parts []llm.ContentPart) []anthropicapi.ContentBlockParamUnion {
 	blocks := make([]anthropicapi.ContentBlockParamUnion, 0, len(parts))
 	for _, p := range parts {
 		switch p.Type {
@@ -343,7 +361,8 @@ func contentBlocksToAnthropic(parts []llm.ContentPart) ([]anthropicapi.ContentBl
 			))
 		}
 	}
-	return blocks, nil
+
+	return blocks
 }
 
 // toolResultContentToAnthropic converts Phero ContentParts to Anthropic ToolResultBlockParamContentUnion entries.
@@ -382,6 +401,7 @@ func toolResultContentToAnthropic(parts []llm.ContentPart) []anthropicapi.ToolRe
 			})
 		}
 	}
+
 	return content
 }
 
@@ -413,6 +433,7 @@ func messageFromAnthropic(m *anthropicapi.Message) (*llm.Message, error) {
 			if args == "" {
 				args = "{}"
 			}
+
 			toolCalls = append(toolCalls, llm.ToolCall{
 				ID:   b.ID,
 				Type: llm.ToolTypeFunction,
@@ -431,19 +452,19 @@ func messageFromAnthropic(m *anthropicapi.Message) (*llm.Message, error) {
 		Parts:     parts,
 		ToolCalls: toolCalls,
 	}
+
 	return msg, nil
 }
 
-func anthropicTools(tools []*llm.Tool) ([]anthropicapi.ToolUnionParam, error) {
+func anthropicTools(tools []*llm.Tool) []anthropicapi.ToolUnionParam {
 	out := make([]anthropicapi.ToolUnionParam, 0, len(tools))
 	for _, t := range tools {
 		if t == nil {
 			continue
 		}
-		inputSchema, err := anthropicToolInputSchema(t.InputSchema())
-		if err != nil {
-			return nil, err
-		}
+
+		inputSchema := anthropicToolInputSchema(t.InputSchema())
+
 		tool := anthropicapi.ToolParam{
 			Name:        t.Name(),
 			Description: anthropicapi.String(t.Description()),
@@ -452,17 +473,19 @@ func anthropicTools(tools []*llm.Tool) ([]anthropicapi.ToolUnionParam, error) {
 		}
 		out = append(out, anthropicapi.ToolUnionParam{OfTool: &tool})
 	}
-	return out, nil
+
+	return out
 }
 
-func anthropicToolInputSchema(schema map[string]any) (anthropicapi.ToolInputSchemaParam, error) {
+func anthropicToolInputSchema(schema map[string]any) anthropicapi.ToolInputSchemaParam {
 	if schema == nil {
-		return anthropicapi.ToolInputSchemaParam{Properties: map[string]any{}}, nil
+		return anthropicapi.ToolInputSchemaParam{Properties: map[string]any{}}
 	}
 
 	properties := schema["properties"]
 
 	required := make([]string, 0)
+
 	if raw, ok := schema["required"]; ok {
 		switch v := raw.(type) {
 		case []string:
@@ -478,10 +501,12 @@ func anthropicToolInputSchema(schema map[string]any) (anthropicapi.ToolInputSche
 	}
 
 	extra := make(map[string]any)
+
 	for k, v := range schema {
 		if k == "type" || k == "properties" || k == "required" {
 			continue
 		}
+
 		extra[k] = v
 	}
 
@@ -489,7 +514,7 @@ func anthropicToolInputSchema(schema map[string]any) (anthropicapi.ToolInputSche
 		Properties:  properties,
 		Required:    required,
 		ExtraFields: extra,
-	}, nil
+	}
 }
 
 // WithBaseURL overrides the Anthropic API base URL.

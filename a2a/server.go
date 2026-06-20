@@ -284,6 +284,7 @@ func (s *Server) RESTHandler() http.Handler {
 	if !s.cfg.enableREST {
 		return nil
 	}
+
 	return a2asrv.NewRESTHandler(s.getHandler())
 }
 
@@ -299,6 +300,7 @@ func (s *Server) RESTHandler() http.Handler {
 func (s *Server) Mount(mux *http.ServeMux) {
 	mux.Handle("/.well-known/agent-card.json", s.AgentCardHandler())
 	mux.Handle("/", s.JSONRPCHandler())
+
 	if s.cfg.enableREST {
 		mux.Handle(restPathPrefix+"/", http.StripPrefix(restPathPrefix, s.RESTHandler()))
 	}
@@ -312,6 +314,7 @@ func (s *Server) getHandler() a2asrv.RequestHandler {
 		executor := &agentExecutor{agent: s.agent}
 		s.handler = a2asrv.NewHandler(executor, s.cfg.handlerOpts...)
 	})
+
 	return s.handler
 }
 
@@ -327,5 +330,6 @@ func (s *Server) buildSkills() []sdka2a.AgentSkill {
 	skills := make([]sdka2a.AgentSkill, 0, 1+len(s.cfg.skills))
 	skills = append(skills, primary)
 	skills = append(skills, s.cfg.skills...)
+
 	return skills
 }

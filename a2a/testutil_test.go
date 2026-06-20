@@ -38,7 +38,9 @@ func (s *stubLLM) Execute(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*l
 	if idx >= len(s.responses) {
 		idx = len(s.responses) - 1
 	}
+
 	s.callIdx++
+
 	return s.responses[idx], s.errs[idx]
 }
 
@@ -63,16 +65,17 @@ func errLLM(err error) *stubLLM {
 // mustAgent creates an *agent.Agent with the given stub LLM.
 func mustAgent(t *testing.T, stub llm.LLM, name, desc string) *agent.Agent {
 	t.Helper()
+
 	ag, err := agent.New(stub, name, desc)
 	if err != nil {
 		t.Fatalf("agent.New: %v", err)
 	}
+
 	return ag
 }
 
-// newTestServer spins up an httptest.Server with the a2a.Server mounted on it
-// and returns both the httptest.Server and the a2a.Server.
-func newTestServer(t *testing.T, stub llm.LLM, opts ...pheroA2A.ServerOption) (*httptest.Server, *pheroA2A.Server) {
+// newTestServer spins up an httptest.Server with the a2a.Server mounted on it.
+func newTestServer(t *testing.T, stub llm.LLM, opts ...pheroA2A.ServerOption) *httptest.Server {
 	t.Helper()
 	ag := mustAgent(t, stub, "test-agent", "A test agent.")
 	mux := http.NewServeMux()
@@ -83,6 +86,8 @@ func newTestServer(t *testing.T, stub llm.LLM, opts ...pheroA2A.ServerOption) (*
 	if err != nil {
 		t.Fatalf("a2a.New: %v", err)
 	}
+
 	srv.Mount(mux)
-	return ts, srv
+
+	return ts
 }

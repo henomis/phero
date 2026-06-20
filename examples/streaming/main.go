@@ -42,10 +42,12 @@ func main() {
 	}
 
 	fmt.Print("Agent: ")
+
 	for ev, err := range a.RunStream(ctx, llm.Text("Tell me a tiny story about a brave gopher.")) {
 		if err != nil {
 			panic(err)
 		}
+
 		switch ev.Type {
 		case agent.AgentEventTextDelta:
 			// Print tokens as they arrive.
@@ -56,6 +58,7 @@ func main() {
 			fmt.Printf("\n[tool %s -> %s]\n", ev.ToolName, ev.ToolResult)
 		case agent.AgentEventDone:
 			fmt.Println()
+
 			if s := ev.Result.Summary; s != nil {
 				fmt.Printf("(llm_calls=%d tokens=%d/%d cost=$%.4f)\n",
 					s.LLMCalls, s.Usage.InputTokens, s.Usage.OutputTokens, s.Usage.CostUSD)
@@ -73,6 +76,7 @@ func buildLLMFromEnv() llm.LLM {
 	if apiKey == "" && baseURL == "" {
 		baseURL = openai.OllamaBaseURL
 	}
+
 	if model == "" {
 		if baseURL == openai.OllamaBaseURL && apiKey == "" {
 			model = "gpt-oss:20b-cloud"
@@ -85,5 +89,6 @@ func buildLLMFromEnv() llm.LLM {
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
+
 	return openai.New(apiKey, opts...)
 }

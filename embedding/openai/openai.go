@@ -54,6 +54,7 @@ func New(apiKey string, opts ...Option) *Client {
 		model:  DefaultModel,
 		config: openaiapi.DefaultConfig(apiKey),
 	}
+
 	for _, opt := range opts {
 		if opt != nil {
 			opt(c)
@@ -61,6 +62,7 @@ func New(apiKey string, opts ...Option) *Client {
 	}
 
 	c.client = openaiapi.NewClientWithConfig(c.config)
+
 	return c
 }
 
@@ -87,6 +89,7 @@ func (c *Client) Embed(ctx context.Context, texts []string) ([]embedding.Vector,
 		if item.Index < 0 || item.Index >= len(vecs) {
 			return nil, &ResponseIndexOutOfRangeError{Index: item.Index, Len: len(vecs)}
 		}
+
 		vecs[item.Index] = item.Embedding
 	}
 

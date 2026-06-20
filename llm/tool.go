@@ -75,6 +75,7 @@ func (t *Tool) Handle(ctx context.Context, arguments string) (any, error) {
 	for i := len(t.middlewares) - 1; i >= 0; i-- {
 		h = t.middlewares[i](t, h)
 	}
+
 	return h(ctx, arguments)
 }
 
@@ -127,6 +128,7 @@ func NewTool[T, R any](name, description string, handler func(ctx context.Contex
 	}
 
 	var zero T
+
 	t := reflect.TypeOf(zero)
 	if t == nil {
 		return nil, &ToolNilInputTypeError{ToolName: name}
@@ -134,6 +136,7 @@ func NewTool[T, R any](name, description string, handler func(ctx context.Contex
 
 	schemaType := t
 	schemaTarget := any(&zero)
+
 	if t.Kind() == reflect.Pointer && t.Elem().Kind() == reflect.Struct {
 		// If the handler takes a pointer-to-struct input (e.g. *Input), we still want
 		// to generate a strict object schema based on the underlying struct (Input),
@@ -141,6 +144,7 @@ func NewTool[T, R any](name, description string, handler func(ctx context.Contex
 		schemaType = t.Elem()
 		schemaTarget = reflect.New(schemaType).Interface()
 	}
+
 	var schema *jsonschema.Schema
 	if schemaType.Kind() == reflect.Struct && schemaType.Name() == "" && schemaType.NumField() == 0 {
 		// Avoid panic in jsonschema when reflecting an anonymous empty struct
@@ -180,6 +184,7 @@ func NewTool[T, R any](name, description string, handler func(ctx context.Contex
 			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
 				return nil, &ToolArgumentParseError{Err: err}
 			}
+
 			return handler(ctx, args)
 		},
 	}, nil

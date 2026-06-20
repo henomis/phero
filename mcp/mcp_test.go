@@ -27,10 +27,12 @@ func TestNormalizeMCPInputSchema_NonObjectRejected(t *testing.T) {
 
 func TestNormalizeMCPInputSchema_InsertsEmptyPropertiesWhenAbsent(t *testing.T) {
 	schema := map[string]any{"type": "object"}
+
 	result, err := normalizeMCPInputSchema(schema)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	if _, ok := result["properties"]; !ok {
 		t.Fatal("expected 'properties' key to be inserted, but it was not")
 	}
@@ -43,14 +45,17 @@ func TestNormalizeMCPInputSchema_PreservesExistingProperties(t *testing.T) {
 			"name": map[string]any{"type": "string"},
 		},
 	}
+
 	result, err := normalizeMCPInputSchema(schema)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	got, ok := result["properties"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected properties to be map[string]any, got %T", result["properties"])
 	}
+
 	if _, ok := got["name"]; !ok {
 		t.Fatal("expected 'name' property to be preserved")
 	}
@@ -58,10 +63,12 @@ func TestNormalizeMCPInputSchema_PreservesExistingProperties(t *testing.T) {
 
 func TestNormalizeMCPInputSchema_DoesNotMutateOriginalMap(t *testing.T) {
 	schema := map[string]any{"type": "object"}
+
 	_, err := normalizeMCPInputSchema(schema)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	if _, ok := schema["properties"]; ok {
 		t.Fatal("original schema was mutated: 'properties' key was added to the original map")
 	}

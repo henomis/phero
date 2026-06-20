@@ -182,6 +182,7 @@ func New(options ...Option) (*Tool, error) {
 	bashTool.tool = tool
 	bashTool.outputTool = outputTool
 	bashTool.killTool = killTool
+
 	return bashTool, nil
 }
 
@@ -280,9 +281,11 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 	if input == nil {
 		return nil, ErrNilInput
 	}
+
 	if strings.TrimSpace(input.Command) == "" {
 		return nil, ErrCommandRequired
 	}
+
 	if input.Timeout < 0 {
 		return nil, ErrTimeoutTooLarge
 	}
@@ -293,14 +296,17 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 			return nil, ErrCommandBlocked
 		}
 	}
+
 	if len(t.allowlist) > 0 {
 		allowed := false
+
 		for _, pat := range t.allowlist {
 			if strings.Contains(lower, pat) {
 				allowed = true
 				break
 			}
 		}
+
 		if !allowed {
 			return nil, ErrCommandNotAllowed
 		}
@@ -316,12 +322,15 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 		if startErr != nil {
 			return nil, startErr
 		}
+
 		return &Output{BashID: shellID, Running: true}, nil
 	}
 
 	runCtx := ctx
+
 	if cmdTimeout > 0 {
 		var cancel context.CancelFunc
+
 		runCtx, cancel = context.WithTimeout(ctx, cmdTimeout)
 		defer cancel()
 	}
@@ -351,8 +360,10 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 		if out != "" && !strings.HasSuffix(out, "\n") {
 			out += "\n"
 		}
+
 		out += fmt.Sprintf("exit code: %d", exitErr.ExitCode())
 		out, truncated = t.truncateOutput(out)
+
 		return &Output{Output: out, Running: false, Truncated: truncated}, nil
 	}
 
@@ -364,6 +375,7 @@ func (t *Tool) output(_ context.Context, input *BashOutputInput) (*BashOutputOut
 	if input == nil {
 		return nil, ErrNilInput
 	}
+
 	if strings.TrimSpace(input.BashID) == "" {
 		return nil, ErrBashIDRequired
 	}
@@ -371,24 +383,29 @@ func (t *Tool) output(_ context.Context, input *BashOutputInput) (*BashOutputOut
 	t.mu.RLock()
 	shell, ok := t.shell[input.BashID]
 	t.mu.RUnlock()
+
 	if !ok {
 		return nil, ErrShellNotFound
 	}
 
 	var re *regexp.Regexp
+
 	if strings.TrimSpace(input.Filter) != "" {
 		compiled, err := regexp.Compile(input.Filter)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidOutputFilter, err)
 		}
+
 		re = compiled
 	}
 
 	shell.mu.Lock()
+
 	raw := shell.out.String()
 	if shell.readOffset > len(raw) {
 		shell.readOffset = len(raw)
 	}
+
 	incremental := raw[shell.readOffset:]
 	shell.readOffset = len(raw)
 	running := shell.running
@@ -396,16 +413,19 @@ func (t *Tool) output(_ context.Context, input *BashOutputInput) (*BashOutputOut
 
 	if re != nil && incremental != "" {
 		lines := strings.Split(incremental, "\n")
+
 		filtered := make([]string, 0, len(lines))
 		for _, line := range lines {
 			if re.MatchString(line) {
 				filtered = append(filtered, line)
 			}
 		}
+
 		incremental = strings.Join(filtered, "\n")
 	}
 
 	trimmed, truncated := t.truncateOutput(incremental)
+
 	return &BashOutputOutput{Output: trimmed, Running: running, Truncated: truncated}, nil
 }
 
@@ -413,6 +433,7 @@ func (t *Tool) kill(_ context.Context, input *KillShellInput) (*KillShellOutput,
 	if input == nil {
 		return nil, ErrNilInput
 	}
+
 	if strings.TrimSpace(input.ShellID) == "" {
 		return nil, ErrShellIDRequired
 	}
@@ -420,6 +441,7 @@ func (t *Tool) kill(_ context.Context, input *KillShellInput) (*KillShellOutput,
 	t.mu.RLock()
 	shell, ok := t.shell[input.ShellID]
 	t.mu.RUnlock()
+
 	if !ok {
 		return nil, ErrShellNotFound
 	}
@@ -451,6 +473,7 @@ func (t *Tool) resolveTimeout(timeoutMs int) (time.Duration, error) {
 		if t.maxTimeout > 0 && requested > t.maxTimeout {
 			return 0, ErrTimeoutTooLarge
 		}
+
 		effective = requested
 	}
 
@@ -469,9 +492,11 @@ func (t *Tool) truncateOutput(output string) (string, bool) {
 	if t.maxOutputChars <= 0 {
 		return output, false
 	}
+
 	if len(output) <= t.maxOutputChars {
 		return output, false
 	}
+
 	return output[:t.maxOutputChars], true
 }
 
@@ -482,6 +507,7 @@ func (t *Tool) startBackground(command string, timeout time.Duration) (string, e
 	}
 
 	baseCtx := context.Background()
+
 	var cancel context.CancelFunc
 	if timeout > 0 {
 		baseCtx, cancel = context.WithTimeout(context.Background(), timeout)
@@ -514,9 +540,11 @@ func (t *Tool) startBackground(command string, timeout time.Duration) (string, e
 
 	go func() {
 		_ = cmd.Wait()
+
 		if shell.cancel != nil {
 			shell.cancel()
 		}
+
 		shell.mu.Lock()
 		shell.running = false
 		shell.mu.Unlock()
@@ -531,6 +559,7 @@ func randomID() (string, error) {
 	if _, err := io.ReadFull(rand.Reader, b); err != nil {
 		return "", err
 	}
+
 	return hex.EncodeToString(b), nil
 }
 
@@ -541,5 +570,6 @@ type lockedWriter struct {
 func (w *lockedWriter) Write(p []byte) (int, error) {
 	w.shell.mu.Lock()
 	defer w.shell.mu.Unlock()
+
 	return w.shell.out.Write(p)
 }

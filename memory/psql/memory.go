@@ -63,6 +63,7 @@ func New(db *sql.DB, sessionID string, options ...Option) (*Memory, error) {
 	if db == nil {
 		return nil, ErrNilDB
 	}
+
 	if strings.TrimSpace(sessionID) == "" {
 		return nil, ErrEmptySessionID
 	}
@@ -83,6 +84,7 @@ func New(db *sql.DB, sessionID string, options ...Option) (*Memory, error) {
 	if strings.TrimSpace(m.tableName) == "" {
 		return nil, ErrEmptyTableName
 	}
+
 	if _, err := sqlutil.QuoteQualifiedIdent(m.tableName); err != nil {
 		return nil, ErrInvalidTableName
 	}
@@ -160,6 +162,7 @@ func (m *Memory) EnsureSchema(ctx context.Context) error {
 	}
 
 	m.schemaDone = true
+
 	return nil
 }
 
@@ -168,6 +171,7 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 	if err := m.EnsureSchema(ctx); err != nil {
 		return err
 	}
+
 	if len(messages) == 0 {
 		return nil
 	}
@@ -190,6 +194,7 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 		if err != nil {
 			return err
 		}
+
 		if _, err := tx.ExecContext(ctx, insertStmt, m.sessionID, string(b)); err != nil {
 			return err
 		}
@@ -218,27 +223,34 @@ func (m *Memory) Retrieve(ctx context.Context, _ string) ([]llm.Message, error) 
 	}
 
 	stmt := fmt.Sprintf(selectAllMessagesSQLTemplate, table)
+
 	rows, err := m.db.QueryContext(ctx, stmt, m.sessionID)
 	if err != nil {
 		return nil, err
 	}
+
 	defer func() { _ = rows.Close() }()
 
 	out := make([]llm.Message, 0)
+
 	for rows.Next() {
 		var msgBytes []byte
 		if err := rows.Scan(&msgBytes); err != nil {
 			return nil, err
 		}
+
 		var msg llm.Message
 		if err := json.Unmarshal(msgBytes, &msg); err != nil {
 			return nil, err
 		}
+
 		out = append(out, msg)
 	}
+
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+
 	return out, nil
 }
 
@@ -255,6 +267,7 @@ func (m *Memory) Clear(ctx context.Context) error {
 
 	stmt := fmt.Sprintf(clearSessionSQLTemplate, table)
 	_, err = m.db.ExecContext(ctx, stmt, m.sessionID)
+
 	return err
 }
 
@@ -263,11 +276,14 @@ func (m *Memory) count(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, ErrInvalidTableName
 	}
+
 	stmt := fmt.Sprintf(countMessagesSQLTemplate, table)
+
 	var n int
 	if err := m.db.QueryRowContext(ctx, stmt, m.sessionID).Scan(&n); err != nil {
 		return 0, err
 	}
+
 	return n, nil
 }
 
@@ -280,6 +296,7 @@ func (m *Memory) maybeSummarize(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	if n < int(m.summaryThreshold) {
 		return nil
 	}
@@ -288,9 +305,11 @@ func (m *Memory) maybeSummarize(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	if len(msgs) < int(m.summaryThreshold) {
 		return nil
 	}
+
 	if len(msgs) <= int(m.summarySize) {
 		return nil
 	}
@@ -327,11 +346,13 @@ func (m *Memory) maybeSummarize(ctx context.Context) error {
 	}
 
 	insertStmt := fmt.Sprintf(insertMessageSQLTemplate, table)
+
 	for _, msg := range messagesToStore {
 		b, err := json.Marshal(msg)
 		if err != nil {
 			return err
 		}
+
 		if _, err := tx.ExecContext(ctx, insertStmt, m.sessionID, string(b)); err != nil {
 			return err
 		}

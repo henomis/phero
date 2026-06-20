@@ -41,10 +41,12 @@ func TestNewRetry_SuccessOnFirstAttempt(t *testing.T) {
 	}
 
 	client := llm.Use(okLLM("ok"), mw)
+
 	result, err := client.Execute(context.Background(), nil, nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
+
 	if result.Message.TextContent() != "ok" {
 		t.Fatalf("got %q, want %q", result.Message.TextContent(), "ok")
 	}
@@ -61,6 +63,7 @@ func TestNewRetry_RetriesAndSucceeds(t *testing.T) {
 		if callCount < 3 {
 			return nil, transient
 		}
+
 		return &llm.Result{Message: &llm.Message{Parts: []llm.ContentPart{llm.Text("success")}}}, nil
 	}}
 
@@ -70,13 +73,16 @@ func TestNewRetry_RetriesAndSucceeds(t *testing.T) {
 	}
 
 	client := llm.Use(inner, mw)
+
 	result, execErr := client.Execute(context.Background(), nil, nil)
 	if execErr != nil {
 		t.Fatalf("Execute: %v", execErr)
 	}
+
 	if callCount != 3 {
 		t.Fatalf("callCount=%d, want 3", callCount)
 	}
+
 	if result.Message.TextContent() != "success" {
 		t.Fatalf("got %q, want %q", result.Message.TextContent(), "success")
 	}
@@ -99,9 +105,11 @@ func TestNewRetry_ExhaustsAttempts(t *testing.T) {
 	if !errors.As(execErr, &maxErr) {
 		t.Fatalf("got %T %v, want MaxAttemptsExceededError", execErr, execErr)
 	}
+
 	if maxErr.Attempts != 3 {
 		t.Fatalf("Attempts=%d, want 3", maxErr.Attempts)
 	}
+
 	if !errors.Is(execErr, sentinel) {
 		t.Fatalf("Unwrap should yield sentinel error")
 	}
@@ -127,10 +135,12 @@ func TestNewRetry_ShouldRetryFalse(t *testing.T) {
 	}
 
 	client := llm.Use(inner, mw)
+
 	_, execErr := client.Execute(context.Background(), nil, nil)
 	if !errors.Is(execErr, fatal) {
 		t.Fatalf("got %v, want fatal error", execErr)
 	}
+
 	if callCount != 1 {
 		t.Fatalf("callCount=%d, want 1 (no retry)", callCount)
 	}
@@ -144,7 +154,9 @@ func TestNewRetry_ContextCancellation(t *testing.T) {
 	callCount := 0
 	inner := &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
 		callCount++
+
 		cancel() // cancel after first attempt
+
 		return nil, errors.New("transient")
 	}}
 
@@ -154,10 +166,12 @@ func TestNewRetry_ContextCancellation(t *testing.T) {
 	}
 
 	client := llm.Use(inner, mw)
+
 	_, execErr := client.Execute(ctx, nil, nil)
 	if !errors.Is(execErr, context.Canceled) {
 		t.Fatalf("got %v, want context.Canceled", execErr)
 	}
+
 	if callCount != 1 {
 		t.Fatalf("callCount=%d, want 1", callCount)
 	}

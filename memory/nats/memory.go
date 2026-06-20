@@ -51,6 +51,7 @@ func New(kv nats.KeyValue, sessionID string, options ...Option) (*Memory, error)
 	if kv == nil {
 		return nil, ErrNilKeyValue
 	}
+
 	if strings.TrimSpace(sessionID) == "" {
 		return nil, ErrEmptySessionID
 	}
@@ -92,6 +93,7 @@ func (m *Memory) load() ([]llm.Message, error) {
 		if err == nats.ErrKeyNotFound {
 			return []llm.Message{}, nil
 		}
+
 		return nil, err
 	}
 
@@ -99,6 +101,7 @@ func (m *Memory) load() ([]llm.Message, error) {
 	if err := json.Unmarshal(entry.Value(), &msgs); err != nil {
 		return nil, err
 	}
+
 	return msgs, nil
 }
 
@@ -109,7 +112,9 @@ func (m *Memory) store(msgs []llm.Message) error {
 	if err != nil {
 		return err
 	}
+
 	_, err = m.kv.Put(m.sessionID, data)
+
 	return err
 }
 
@@ -167,5 +172,6 @@ func (m *Memory) Clear(_ context.Context) error {
 	if err := m.kv.Purge(m.sessionID); err != nil && err != nats.ErrKeyNotFound {
 		return err
 	}
+
 	return nil
 }

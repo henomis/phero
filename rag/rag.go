@@ -59,9 +59,11 @@ func New(store vectorstore.Store, embedder embedding.Embedder, options ...Option
 	if store == nil {
 		return nil, ErrNilStore
 	}
+
 	if embedder == nil {
 		return nil, ErrNilEmbedder
 	}
+
 	rag := &RAG{store: store, embedder: embedder, topk: defaultTopK, embedderBatchSize: defaultEmbedderBatchSize}
 
 	for _, option := range options {
@@ -118,6 +120,7 @@ func (s *RAG) ensureCollection(ctx context.Context) error {
 	}
 
 	s.ensureDone = true
+
 	return nil
 }
 
@@ -136,6 +139,7 @@ func (s *RAG) ingestBatch(ctx context.Context, docs []document.Document, offset 
 	if err != nil {
 		return &IngestError{Op: "embed", BatchStart: offset, BatchEnd: offset + len(docs), Cause: err}
 	}
+
 	if len(vectors) != len(docs) {
 		return &EmbedderVectorCountMismatchError{Got: len(vectors), Want: len(docs)}
 	}
@@ -146,6 +150,7 @@ func (s *RAG) ingestBatch(ctx context.Context, docs []document.Document, offset 
 		for k, v := range d.Metadata {
 			payload[k] = v
 		}
+
 		payload[contentKey] = d.Content
 		points = append(points, vectorstore.Point{
 			ID:      uuid.New().String(),
@@ -157,6 +162,7 @@ func (s *RAG) ingestBatch(ctx context.Context, docs []document.Document, offset 
 	if err := s.store.Upsert(ctx, points); err != nil {
 		return &IngestError{Op: "upsert", BatchStart: offset, BatchEnd: offset + len(docs), Cause: err}
 	}
+
 	return nil
 }
 
@@ -191,12 +197,14 @@ func (s *RAG) Ingest(ctx context.Context, splitter textsplitter.Splitter) error 
 		if err != nil {
 			return err
 		}
+
 		batch = append(batch, doc)
 		if len(batch) >= batchSize {
 			n := len(batch)
 			if err := s.ingestBatch(ctx, batch, offset); err != nil {
 				return err
 			}
+
 			offset += n
 			batch = batch[:0]
 		}
@@ -205,6 +213,7 @@ func (s *RAG) Ingest(ctx context.Context, splitter textsplitter.Splitter) error 
 	if len(batch) > 0 {
 		return s.ingestBatch(ctx, batch, offset)
 	}
+
 	return nil
 }
 
@@ -214,16 +223,20 @@ func (s *RAG) IngestOnce(ctx context.Context, splitter textsplitter.Splitter) er
 	if splitter == nil {
 		return ErrNoSplitter
 	}
+
 	if err := s.ensureCollection(ctx); err != nil {
 		return err
 	}
+
 	count, err := s.store.Count(ctx)
 	if err != nil {
 		return err
 	}
+
 	if count > 0 {
 		return nil
 	}
+
 	return s.Ingest(ctx, splitter)
 }
 
@@ -236,6 +249,7 @@ func (s *RAG) Query(ctx context.Context, queryText string, opts ...vectorstore.Q
 	if strings.TrimSpace(queryText) == "" {
 		return nil, ErrEmptyQueryText
 	}
+
 	if err := s.ensureCollection(ctx); err != nil {
 		return nil, err
 	}
@@ -244,6 +258,7 @@ func (s *RAG) Query(ctx context.Context, queryText string, opts ...vectorstore.Q
 	if err != nil {
 		return nil, &QueryError{Op: "embed", Cause: err}
 	}
+
 	if len(vectors) != 1 {
 		return nil, &EmbedderVectorCountMismatchError{Got: len(vectors), Want: 1, SingleQuery: true}
 	}
@@ -256,6 +271,7 @@ func (s *RAG) Query(ctx context.Context, queryText string, opts ...vectorstore.Q
 	if err != nil {
 		return nil, &QueryError{Op: "store query", Cause: err}
 	}
+
 	return results, nil
 }
 

@@ -45,6 +45,7 @@ func TestGuardrails_NoGuards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
+
 	if result.Message.TextContent() != "hello" {
 		t.Fatalf("got %q, want %q", result.Message.TextContent(), "hello")
 	}
@@ -77,15 +78,19 @@ func TestGuardrails_MessageGuard_Block(t *testing.T) {
 	if !errors.As(err, &gErr) {
 		t.Fatalf("got %T %v, want GuardrailError", err, err)
 	}
+
 	if gErr.Stage != "input" {
 		t.Fatalf("Stage=%q, want %q", gErr.Stage, "input")
 	}
+
 	if gErr.Name != "block" {
 		t.Fatalf("Name=%q, want %q", gErr.Name, "block")
 	}
+
 	if !errors.Is(err, errGuard) {
 		t.Fatal("Unwrap should yield errGuard")
 	}
+
 	if reached {
 		t.Fatal("inner LLM should not have been called")
 	}
@@ -100,6 +105,7 @@ func TestGuardrails_ResultGuard_Pass(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
+
 	if result.Message.TextContent() != "ok" {
 		t.Fatalf("got %q, want %q", result.Message.TextContent(), "ok")
 	}
@@ -116,12 +122,15 @@ func TestGuardrails_ResultGuard_Block(t *testing.T) {
 	if !errors.As(err, &gErr) {
 		t.Fatalf("got %T %v, want GuardrailError", err, err)
 	}
+
 	if gErr.Stage != "output" {
 		t.Fatalf("Stage=%q, want %q", gErr.Stage, "output")
 	}
+
 	if gErr.Name != "block" {
 		t.Fatalf("Name=%q, want %q", gErr.Name, "block")
 	}
+
 	if !errors.Is(err, errGuard) {
 		t.Fatal("Unwrap should yield errGuard")
 	}
@@ -160,6 +169,7 @@ func TestGuardrails_GuardOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
+
 	if len(order) != 2 || order[0] != "first" || order[1] != "second" {
 		t.Fatalf("guard order: %v", order)
 	}

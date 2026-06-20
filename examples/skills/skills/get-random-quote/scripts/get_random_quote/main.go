@@ -54,10 +54,12 @@ func main() {
 		Q string `json:"q"`
 		A string `json:"a"`
 	}
+
 	err = json.Unmarshal(body, &data)
 	if err != nil || len(data) == 0 {
 		fmt.Println("Invalid response from quote API")
 		return
 	}
+
 	fmt.Printf("%s - %s\n", data[0].Q, data[0].A)
 }

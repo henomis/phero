@@ -28,14 +28,17 @@ import (
 )
 
 func TestTranscribe(t *testing.T) {
-	var gotModel string
-	var gotLanguage string
-	var gotGranularities []string
+	var (
+		gotModel         string
+		gotLanguage      string
+		gotGranularities []string
+	)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/audio/transcriptions" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
+
 		if err := r.ParseMultipartForm(1 << 20); err != nil {
 			t.Fatalf("ParseMultipartForm: %v", err)
 		}
@@ -45,6 +48,7 @@ func TestTranscribe(t *testing.T) {
 		gotGranularities = append(gotGranularities, r.MultipartForm.Value["timestamp_granularities[]"]...)
 
 		w.Header().Set("Content-Type", "application/json")
+
 		if err := json.NewEncoder(w).Encode(map[string]any{
 			"task":     "transcribe",
 			"language": "it",
@@ -64,6 +68,7 @@ func TestTranscribe(t *testing.T) {
 	defer srv.Close()
 
 	c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"))
+
 	result, err := c.Transcribe(context.Background(), llm.TranscriptionRequest{
 		Input:    llm.AudioReader("sample.mp3", strings.NewReader("fake audio bytes")),
 		Language: "it",
@@ -75,18 +80,23 @@ func TestTranscribe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Transcribe: unexpected error: %v", err)
 	}
+
 	if gotModel != openai.DefaultTranscriptionModel {
 		t.Fatalf("expected model %q, got %q", openai.DefaultTranscriptionModel, gotModel)
 	}
+
 	if gotLanguage != "it" {
 		t.Fatalf("expected language %q, got %q", "it", gotLanguage)
 	}
+
 	if len(gotGranularities) != 1 || gotGranularities[0] != string(llm.TranscriptionTimestampGranularityWord) {
 		t.Fatalf("unexpected timestamp granularities: %#v", gotGranularities)
 	}
+
 	if result.Text != "ciao mondo" {
 		t.Fatalf("expected transcript %q, got %q", "ciao mondo", result.Text)
 	}
+
 	if len(result.Segments) != 1 || len(result.Words) != 1 {
 		t.Fatalf("expected segment and word timing data, got segments=%d words=%d", len(result.Segments), len(result.Words))
 	}
@@ -115,6 +125,7 @@ func TestSynthesizeSpeech(t *testing.T) {
 		if r.URL.Path != "/v1/audio/speech" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
+
 		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
 			t.Fatalf("decode payload: %v", err)
 		}
@@ -125,6 +136,7 @@ func TestSynthesizeSpeech(t *testing.T) {
 	defer srv.Close()
 
 	c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"))
+
 	result, err := c.SynthesizeSpeech(context.Background(), llm.SpeechRequest{
 		Input:        "ciao mondo",
 		Instructions: "speak calmly",
@@ -133,21 +145,27 @@ func TestSynthesizeSpeech(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SynthesizeSpeech: unexpected error: %v", err)
 	}
+
 	if gotPayload.Model != openai.DefaultSpeechModel {
 		t.Fatalf("expected model %q, got %q", openai.DefaultSpeechModel, gotPayload.Model)
 	}
+
 	if gotPayload.Voice != openai.DefaultSpeechVoice {
 		t.Fatalf("expected voice %q, got %q", openai.DefaultSpeechVoice, gotPayload.Voice)
 	}
+
 	if gotPayload.ResponseFormat != string(llm.SpeechResponseFormatMP3) {
 		t.Fatalf("expected default format %q, got %q", llm.SpeechResponseFormatMP3, gotPayload.ResponseFormat)
 	}
+
 	if string(result.Data) != "audio-bytes" {
 		t.Fatalf("unexpected speech payload: %q", string(result.Data))
 	}
+
 	if result.MIMEType != "audio/mpeg" {
 		t.Fatalf("expected MIME type %q, got %q", "audio/mpeg", result.MIMEType)
 	}
+
 	if result.Format != llm.SpeechResponseFormatMP3 {
 		t.Fatalf("expected format %q, got %q", llm.SpeechResponseFormatMP3, result.Format)
 	}

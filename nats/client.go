@@ -79,11 +79,13 @@ type Client struct {
 // NewClient creates a Client using an established NATS connection.
 func NewClient(nc *natsclient.Conn, opts ...ClientOption) *Client {
 	cfg := defaultClientConfig()
+
 	for _, opt := range opts {
 		if opt != nil {
 			opt(cfg)
 		}
 	}
+
 	return &Client{nc: nc, cfg: cfg}
 }
 
@@ -97,6 +99,7 @@ func NewClient(nc *natsclient.Conn, opts ...ClientOption) *Client {
 // Returns [ErrNoAgentsFound] if the filtered result set is empty.
 func (c *Client) Discover(ctx context.Context, opts ...DiscoverOption) ([]*AgentHandle, error) {
 	filter := &discoverFilter{}
+
 	for _, opt := range opts {
 		if opt != nil {
 			opt(filter)
@@ -104,6 +107,7 @@ func (c *Client) Discover(ctx context.Context, opts ...DiscoverOption) ([]*Agent
 	}
 
 	inbox := c.nc.NewInbox()
+
 	sub, err := c.nc.SubscribeSync(inbox)
 	if err != nil {
 		return nil, fmt.Errorf("nats: discovery subscribe: %w", err)
@@ -117,11 +121,13 @@ func (c *Client) Discover(ctx context.Context, opts ...DiscoverOption) ([]*Agent
 	deadline := time.Now().Add(c.cfg.discoveryTimeout)
 
 	var infos []*AgentHandle
+
 	for {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			break
 		}
+
 		timeout := min(c.cfg.stallTimeout, remaining)
 
 		msg, err := sub.NextMsg(timeout)
@@ -133,15 +139,18 @@ func (c *Client) Discover(ctx context.Context, opts ...DiscoverOption) ([]*Agent
 		if info == nil {
 			continue
 		}
+
 		if !matchFilter(info, filter) {
 			continue
 		}
+
 		infos = append(infos, &AgentHandle{AgentInfo: *info, client: c})
 	}
 
 	if len(infos) == 0 {
 		return nil, ErrNoAgentsFound
 	}
+
 	return infos, nil
 }
 
@@ -154,6 +163,7 @@ func (c *Client) Prompt(ctx context.Context, info *AgentInfo, text string) (*Str
 	}
 
 	env := envelope{Prompt: text}
+
 	body, err := json.Marshal(env)
 	if err != nil {
 		return nil, fmt.Errorf("nats: encode prompt: %w", err)
@@ -164,6 +174,7 @@ func (c *Client) Prompt(ctx context.Context, info *AgentInfo, text string) (*Str
 	}
 
 	inbox := c.nc.NewInbox()
+
 	sub, err := c.nc.SubscribeSync(inbox)
 	if err != nil {
 		return nil, fmt.Errorf("nats: subscribe reply: %w", err)
@@ -194,6 +205,7 @@ func (c *Client) AsTool(info *AgentInfo, toolName, toolDesc string) (*llm.Tool, 
 				return "", err
 			}
 			defer stream.Close()
+
 			return stream.Text(ctx)
 		},
 	)
@@ -212,12 +224,14 @@ func (s *Stream) Text(ctx context.Context) (string, error) {
 	defer s.sub.Unsubscribe() //nolint:errcheck
 
 	var sb strings.Builder
+
 	for {
 		msg, err := s.nextMsg(ctx)
 		if err != nil {
 			if errors.Is(err, natsclient.ErrTimeout) {
 				return "", ErrStreamTimeout
 			}
+
 			return "", err
 		}
 
@@ -254,7 +268,9 @@ func (s *Stream) nextMsg(ctx context.Context) (*natsclient.Msg, error) {
 	deadline := time.Now().Add(s.inactivityTimeout)
 	tctx, tcancel := context.WithDeadline(ctx, deadline)
 	msg, err := s.sub.NextMsgWithContext(tctx)
+
 	tcancel()
+
 	return msg, err
 }
 
@@ -267,9 +283,11 @@ func parseAgentInfo(data []byte) *AgentInfo {
 	if err := json.Unmarshal(data, &svc); err != nil {
 		return nil
 	}
+
 	if svc.Name != "agents" {
 		return nil
 	}
+
 	if svc.Metadata["protocol_version"] == "" {
 		return nil
 	}
@@ -291,9 +309,11 @@ func parseAgentInfo(data []byte) *AgentInfo {
 					info.MaxPayloadBytes = n
 				}
 			}
+
 			if v := ep.Metadata["attachments_ok"]; v == "true" {
 				info.AttachmentsOk = true
 			}
+
 			info.Name = instanceNameFromSubject(ep.Subject)
 		case "status":
 			info.StatusSubject = ep.Subject
@@ -303,6 +323,7 @@ func parseAgentInfo(data []byte) *AgentInfo {
 	if info.PromptSubject == "" {
 		return nil // no prompt endpoint — not compliant
 	}
+
 	return info
 }
 
@@ -313,6 +334,7 @@ func instanceNameFromSubject(subject string) string {
 	if len(parts) == 5 {
 		return parts[4]
 	}
+
 	return ""
 }
 
@@ -321,11 +343,14 @@ func matchFilter(info *AgentInfo, f *discoverFilter) bool {
 	if f.agent != "" && info.Agent != f.agent {
 		return false
 	}
+
 	if f.owner != "" && info.Owner != f.owner {
 		return false
 	}
+
 	if f.name != "" && info.Name != f.name {
 		return false
 	}
+
 	return true
 }

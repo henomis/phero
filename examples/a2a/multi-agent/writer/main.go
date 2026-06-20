@@ -96,6 +96,7 @@ Use active voice, avoid jargon, and make complex ideas accessible to a general a
 	fmt.Printf("agent card     http://localhost%s/.well-known/agent-card.json\n", addr)
 
 	<-ctx.Done()
+
 	if err := httpServer.Shutdown(context.Background()); err != nil {
 		log.Printf("shutdown: %v", err)
 	}

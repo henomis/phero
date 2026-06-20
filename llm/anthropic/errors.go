@@ -53,6 +53,7 @@ func (e *ToolArgumentsParseError) Error() string {
 	if e.ToolName == "" {
 		return fmt.Sprintf("anthropic: invalid tool arguments: %v", e.Err)
 	}
+
 	return fmt.Sprintf("anthropic: invalid tool arguments for %q: %v", e.ToolName, e.Err)
 }
 

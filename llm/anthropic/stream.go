@@ -44,6 +44,7 @@ func (c *Client) ExecuteStream(ctx context.Context, messages []llm.Message, tool
 		defer func() { _ = stream.Close() }()
 
 		var acc anthropicapi.Message
+
 		for stream.Next() {
 			event := stream.Current()
 			if accErr := acc.Accumulate(event); accErr != nil {
@@ -64,6 +65,7 @@ func (c *Client) ExecuteStream(ctx context.Context, messages []llm.Message, tool
 				}
 			}
 		}
+
 		if streamErr := stream.Err(); streamErr != nil {
 			yield(llm.StreamChunk{}, streamErr)
 			return

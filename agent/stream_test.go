@@ -40,10 +40,12 @@ func (s *streamingStub) ExecuteStream(_ context.Context, _ []llm.Message, _ []*l
 		var full strings.Builder
 		for _, d := range s.deltas {
 			full.WriteString(d)
+
 			if !yield(llm.StreamChunk{TextDelta: d}, nil) {
 				return
 			}
 		}
+
 		msg := &llm.Message{Role: llm.RoleAssistant, Parts: []llm.ContentPart{llm.Text(full.String())}}
 		yield(llm.StreamChunk{Done: true, Message: msg, Model: "test", Usage: &llm.Usage{InputTokens: 1, OutputTokens: 1}}, nil)
 	}
@@ -57,11 +59,14 @@ func TestRunStream_StreamsTextDeltasAndDone(t *testing.T) {
 		done    *agent.Result
 		nEvents int
 	)
+
 	for ev, err := range a.RunStream(context.Background(), llm.Text("hi")) {
 		if err != nil {
 			t.Fatalf("RunStream: %v", err)
 		}
+
 		nEvents++
+
 		switch ev.Type {
 		case agent.AgentEventTextDelta:
 			text.WriteString(ev.TextDelta)
@@ -73,12 +78,15 @@ func TestRunStream_StreamsTextDeltasAndDone(t *testing.T) {
 	if text.String() != "Hello, world" {
 		t.Fatalf("streamed text = %q, want %q", text.String(), "Hello, world")
 	}
+
 	if done == nil {
 		t.Fatal("expected an AgentEventDone with a result")
 	}
+
 	if done.TextContent() != "Hello, world" {
 		t.Fatalf("done result text = %q, want %q", done.TextContent(), "Hello, world")
 	}
+
 	if nEvents < 4 { // 3 deltas + done
 		t.Fatalf("expected at least 4 events, got %d", nEvents)
 	}
@@ -94,6 +102,7 @@ func TestRunStream_EmitsToolEventsViaBufferedFallback(t *testing.T) {
 		},
 		errs: []error{nil, nil},
 	}
+
 	a := mustNew(t, stub, "agent", "desc")
 	if err := a.AddTool(mustTool(t, "echo_tool", func(_ context.Context, _ *struct{}) (string, error) {
 		return "echoed", nil
@@ -106,10 +115,12 @@ func TestRunStream_EmitsToolEventsViaBufferedFallback(t *testing.T) {
 		sawToolResult bool
 		done          *agent.Result
 	)
+
 	for ev, err := range a.RunStream(context.Background(), llm.Text("go")) {
 		if err != nil {
 			t.Fatalf("RunStream: %v", err)
 		}
+
 		switch ev.Type {
 		case agent.AgentEventToolCall:
 			if ev.ToolName == "echo_tool" {
@@ -127,9 +138,11 @@ func TestRunStream_EmitsToolEventsViaBufferedFallback(t *testing.T) {
 	if !sawToolCall {
 		t.Error("expected an AgentEventToolCall for echo_tool")
 	}
+
 	if !sawToolResult {
 		t.Error("expected an AgentEventToolResult for echo_tool")
 	}
+
 	if done == nil || done.TextContent() != "done" {
 		t.Fatalf("done result = %v, want text %q", done, "done")
 	}
@@ -140,11 +153,13 @@ func TestRunStream_PropagatesError(t *testing.T) {
 	a := mustNew(t, stub, "agent", "desc")
 
 	var gotErr error
+
 	for _, err := range a.RunStream(context.Background(), llm.Text("go")) {
 		if err != nil {
 			gotErr = err
 		}
 	}
+
 	if gotErr == nil {
 		t.Fatal("expected an error from RunStream")
 	}

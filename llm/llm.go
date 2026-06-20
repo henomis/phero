@@ -115,6 +115,7 @@ func ImageFile(path string) (ContentPart, error) {
 	}
 
 	b64 := base64.StdEncoding.EncodeToString(data)
+
 	return ImageBase64(mimeType, b64), nil
 }
 
@@ -125,6 +126,7 @@ func detectImageMIMEType(data []byte, path string) string {
 	if len(sniff) > 512 {
 		sniff = sniff[:512]
 	}
+
 	mt := http.DetectContentType(sniff)
 	// http.DetectContentType returns "image/jpeg", "image/png", "image/gif",
 	// "image/webp" for the respective formats.
@@ -142,6 +144,7 @@ func detectImageMIMEType(data []byte, path string) string {
 	case ".webp":
 		return "image/webp"
 	}
+
 	return mt
 }
 
@@ -194,28 +197,34 @@ func (m Message) TextContent() string {
 // text parts in the message. Redacted reasoning is opaque and is not included.
 func (m Message) ReasoningContent() string {
 	var sb strings.Builder
+
 	for _, p := range m.Parts {
 		if p.Type == ContentTypeReasoning && p.Text != "" {
 			if sb.Len() > 0 {
 				sb.WriteByte('\n')
 			}
+
 			sb.WriteString(p.Text)
 		}
 	}
+
 	return sb.String()
 }
 
 // TextContent returns the concatenation of all text parts across the given ContentParts.
 func TextContent(parts ...ContentPart) string {
 	var sb strings.Builder
+
 	for i, p := range parts {
 		if p.Type == ContentTypeText {
 			if i > 0 && sb.Len() > 0 {
 				sb.WriteByte('\n')
 			}
+
 			sb.WriteString(p.Text)
 		}
 	}
+
 	return sb.String()
 }
 
@@ -305,5 +314,6 @@ func Use(base LLM, middlewares ...LLMMiddleware) LLM {
 	for i := len(middlewares) - 1; i >= 0; i-- {
 		result = middlewares[i](result)
 	}
+
 	return result
 }

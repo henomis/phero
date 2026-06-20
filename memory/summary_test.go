@@ -99,15 +99,19 @@ func TestFormatSummaryPrompt(t *testing.T) {
 	if result.Role != llm.RoleUser {
 		t.Fatalf("FormatSummaryPrompt role = %q, want %q", result.Role, llm.RoleUser)
 	}
+
 	if !strings.Contains(result.TextContent(), "hello") {
 		t.Fatalf("FormatSummaryPrompt content missing input text %q: %s", "hello", result.TextContent())
 	}
+
 	if !strings.Contains(result.TextContent(), "world") {
 		t.Fatalf("FormatSummaryPrompt content missing input text %q: %s", "world", result.TextContent())
 	}
+
 	if !strings.Contains(result.TextContent(), llm.RoleUser) {
 		t.Fatalf("FormatSummaryPrompt content missing role label %q: %s", llm.RoleUser, result.TextContent())
 	}
+
 	if !strings.Contains(result.TextContent(), llm.RoleAssistant) {
 		t.Fatalf("FormatSummaryPrompt content missing role label %q: %s", llm.RoleAssistant, result.TextContent())
 	}
@@ -119,6 +123,7 @@ func TestFormatSummaryPrompt_EmptyConversation(t *testing.T) {
 	if result.Role != llm.RoleUser {
 		t.Fatalf("FormatSummaryPrompt(nil) role = %q, want %q", result.Role, llm.RoleUser)
 	}
+
 	if result.TextContent() == "" {
 		t.Fatal("FormatSummaryPrompt(nil) returned empty content")
 	}

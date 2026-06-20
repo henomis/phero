@@ -43,14 +43,18 @@ type TimeOutput struct {
 
 func main() {
 	// Parse command-line flags
-	var topK uint64
-	var timeout time.Duration
+	var (
+		topK    uint64
+		timeout time.Duration
+	)
 
-	var qdrantHost string
-	var qdrantPort int
-	var qdrantAPIKey string
-	var qdrantUseTLS bool
-	var qdrantCollection string
+	var (
+		qdrantHost       string
+		qdrantPort       int
+		qdrantAPIKey     string
+		qdrantUseTLS     bool
+		qdrantCollection string
+	)
 
 	flag.Uint64Var(&topK, "topk", 5, "How many memory snippets to retrieve per turn")
 	flag.DurationVar(&timeout, "timeout", 2*time.Minute, "Timeout for each chat turn")
@@ -71,10 +75,12 @@ func main() {
 	qdrantHost = strings.TrimSpace(qdrantHost)
 	qdrantAPIKey = strings.TrimSpace(qdrantAPIKey)
 	qdrantCollection = strings.TrimSpace(qdrantCollection)
+
 	if qdrantHost == "" {
 		fmt.Fprintln(os.Stderr, "missing -qdrant-host")
 		os.Exit(2)
 	}
+
 	if qdrantCollection == "" {
 		fmt.Fprintln(os.Stderr, "missing -qdrant-collection")
 		os.Exit(2)
@@ -89,10 +95,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "failed to embed probe text (to infer vector size): %v\n", err)
 		return
 	}
+
 	if len(vecs) != 1 || len(vecs[0]) == 0 {
 		fmt.Fprintln(os.Stderr, "failed to infer vector size from embedder")
 		return
 	}
+
 	vectorSize := uint64(len(vecs[0]))
 
 	qc, err := qdrantapi.NewClient(&qdrantapi.Config{
@@ -151,6 +159,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	if err := a.AddTool(timeTool); err != nil {
 		panic(err)
 	}
@@ -190,12 +199,14 @@ func main() {
 		if strings.HasPrefix(line, "/") {
 			handleCommand(ctx, line, conversationMemory, topK, qdrantHost, qdrantPort, qdrantUseTLS, qdrantCollection, vectorSize)
 			fmt.Print("\n> ")
+
 			continue
 		}
 
 		// Run the agent
 		turnCtx, cancel := context.WithTimeout(ctx, timeout)
 		response, err := a.Run(turnCtx, llm.Text(line))
+
 		cancel()
 
 		if err != nil {
@@ -219,6 +230,7 @@ func handleCommand(ctx context.Context, cmd string, mem nestmemory.Memory, topK 
 	if len(fields) == 0 {
 		return
 	}
+
 	name := strings.ToLower(fields[0])
 	args := fields[1:]
 
@@ -231,15 +243,18 @@ func handleCommand(ctx context.Context, cmd string, mem nestmemory.Memory, topK 
 		if len(args) == 0 {
 			fmt.Println("\nUsage: /history <query>")
 			fmt.Println("Example: /history my favorite color")
+
 			return
 		}
 
 		query := strings.TrimSpace(strings.Join(args, " "))
+
 		messages, err := mem.Retrieve(ctx, query)
 		if err != nil {
 			fmt.Printf("Error retrieving memory: %v\n", err)
 			return
 		}
+
 		if len(messages) == 0 {
 			fmt.Println("\nNo relevant memory found.")
 			return
@@ -258,6 +273,7 @@ func handleCommand(ctx context.Context, cmd string, mem nestmemory.Memory, topK 
 			}
 
 			symbol := ""
+
 			switch role {
 			case llm.RoleUser:
 				symbol = "👤"
@@ -284,6 +300,7 @@ func handleCommand(ctx context.Context, cmd string, mem nestmemory.Memory, topK 
 			fmt.Printf("\n❌ Error clearing memory: %v\n", err)
 			return
 		}
+
 		fmt.Println("\n✨ Cleared semantic memory.")
 
 	case "/stats", "/s":
@@ -337,6 +354,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
+
 	client := openai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s base_url=%s", model, baseURL)
@@ -360,6 +378,7 @@ func buildEmbedderFromEnv() (*embeddingopenai.Client, string) {
 	if baseURL != "" {
 		opts = append(opts, embeddingopenai.WithBaseURL(baseURL))
 	}
+
 	client := embeddingopenai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s base_url=%s", embeddingopenai.DefaultModel, baseURL)

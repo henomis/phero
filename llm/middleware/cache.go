@@ -83,6 +83,7 @@ func NewSemanticCache(embedder embedding.Embedder, store vectorstore.Store, opts
 	if embedder == nil {
 		return nil, ErrNilEmbedder
 	}
+
 	if store == nil {
 		return nil, ErrNilStore
 	}
@@ -95,6 +96,7 @@ func NewSemanticCache(embedder embedding.Embedder, store vectorstore.Store, opts
 	for _, o := range opts {
 		o(cfg)
 	}
+
 	if cfg.threshold < 0 || cfg.threshold > 1 {
 		return nil, ErrInvalidThreshold
 	}
@@ -134,10 +136,12 @@ func (s *semanticCacheLLM) Execute(ctx context.Context, messages []llm.Message, 
 	}
 
 	key := cacheKey(messages, tools)
+
 	vectors, err := s.embedder.Embed(ctx, []string{key})
 	if err != nil || len(vectors) == 0 {
 		return s.inner.Execute(ctx, messages, tools)
 	}
+
 	vector := vectors[0]
 
 	if cached := s.lookup(ctx, vector); cached != nil {
@@ -150,13 +154,16 @@ func (s *semanticCacheLLM) Execute(ctx context.Context, messages []llm.Message, 
 	}
 
 	s.persist(ctx, vector, result)
+
 	return result, nil
 }
 
 // ensureCollection ensures the backing collection exists, at most once.
 func (s *semanticCacheLLM) ensureCollection(ctx context.Context) error {
 	var ensureErr error
+
 	s.ensure.Do(func() { ensureErr = s.store.EnsureCollection(ctx) })
+
 	return ensureErr
 }
 
@@ -167,6 +174,7 @@ func (s *semanticCacheLLM) lookup(ctx context.Context, vector vectorstore.Vector
 	if err != nil || len(scored) == 0 {
 		return nil
 	}
+
 	best := scored[0]
 	if best.Score < s.cfg.threshold {
 		return nil
@@ -176,6 +184,7 @@ func (s *semanticCacheLLM) lookup(ctx context.Context, vector vectorstore.Vector
 	if !ok {
 		return nil
 	}
+
 	var result llm.Result
 	if jsonErr := json.Unmarshal([]byte(raw), &result); jsonErr != nil {
 		return nil
@@ -184,6 +193,7 @@ func (s *semanticCacheLLM) lookup(ctx context.Context, vector vectorstore.Vector
 	if !s.cfg.reportUsage {
 		result.Usage = &llm.Usage{}
 	}
+
 	return &result
 }
 
@@ -193,10 +203,12 @@ func (s *semanticCacheLLM) persist(ctx context.Context, vector vectorstore.Vecto
 	if result == nil {
 		return
 	}
+
 	raw, err := json.Marshal(result)
 	if err != nil {
 		return
 	}
+
 	_ = s.store.Upsert(ctx, []vectorstore.Point{{
 		ID:      uuid.NewString(),
 		Vector:  vector,
@@ -215,6 +227,7 @@ func cacheKey(messages []llm.Message, tools []*llm.Tool) string {
 		sb.WriteString(m.TextContent())
 		sb.WriteByte('\n')
 	}
+
 	if len(tools) > 0 {
 		names := make([]string, 0, len(tools))
 		for _, t := range tools {
@@ -222,9 +235,11 @@ func cacheKey(messages []llm.Message, tools []*llm.Tool) string {
 				names = append(names, t.Name())
 			}
 		}
+
 		sort.Strings(names)
 		sb.WriteString("tools:")
 		sb.WriteString(strings.Join(names, ","))
 	}
+
 	return sb.String()
 }

@@ -55,6 +55,7 @@ func (r *Result) TextContent() string {
 	if r == nil {
 		return ""
 	}
+
 	return llm.TextContent(r.Parts...)
 }
 
@@ -103,6 +104,7 @@ func (a *Agent) AddTool(tool *llm.Tool) error {
 	}
 
 	a.tools = append(a.tools, tool)
+
 	return nil
 }
 
@@ -112,6 +114,7 @@ func (a *Agent) getTool(toolName string) (*llm.Tool, bool) {
 			return t, true
 		}
 	}
+
 	return nil, false
 }
 
@@ -195,6 +198,7 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 	ctx = trace.WithTracer(ctx, a.tracer)
 	ctx = trace.WithAgentName(ctx, a.name)
 	stats := newRunStats(a.name)
+
 	var handoffAgentNames []string
 
 	session, sessionIndex, err := a.prepareSession(ctx, parts, stats)
@@ -220,6 +224,7 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 		if result != nil {
 			output = result.TextContent()
 		}
+
 		a.tracer.Trace(trace.AgentEndEvent{
 			AgentName:  a.name,
 			Output:     output,
@@ -281,16 +286,19 @@ func partialResultFromSession(session []llm.Message) *Result {
 		if msg.Role != llm.RoleAssistant {
 			continue
 		}
+
 		textParts := make([]llm.ContentPart, 0, len(msg.Parts))
 		for _, p := range msg.Parts {
 			if p.Type == llm.ContentTypeText {
 				textParts = append(textParts, p)
 			}
 		}
+
 		if len(textParts) > 0 {
 			return &Result{Parts: textParts}
 		}
 	}
+
 	return nil
 }
 
@@ -303,6 +311,7 @@ func (a *Agent) saveSession(ctx context.Context, messages []llm.Message, session
 	start := time.Now()
 	count := len(messages) - sessionIndex
 	err := a.memory.Save(ctx, messages[sessionIndex:])
+
 	duration := time.Since(start)
 	if err == nil {
 		stats.recordMemorySave(count, duration)
@@ -314,6 +323,7 @@ func (a *Agent) saveSession(ctx context.Context, messages []llm.Message, session
 	} else {
 		stats.recordMemorySave(0, duration)
 	}
+
 	return err
 }
 
@@ -333,15 +343,18 @@ func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message,
 		msg *llm.Result
 		err error
 	)
+
 	if emit == nil {
 		tracedLLM := trace.NewLLM(a.llm, a.tracer)
 		start := time.Now()
 		msg, err = tracedLLM.Execute(ctx, session, a.tools)
+
 		duration := time.Since(start)
 		if err != nil {
 			stats.recordLLM(duration, "", nil)
 			return agentIteration{session: session}, err
 		}
+
 		stats.recordLLM(duration, msg.Model, msg.Usage)
 	} else {
 		msg, err = a.streamIteration(ctx, session, iteration, stats, emit)
@@ -351,6 +364,7 @@ func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message,
 	}
 
 	session = append(session, *msg.Message)
+
 	return a.processToolCalls(ctx, session, msg.Message, iteration, stats, emit)
 }
 
@@ -377,14 +391,18 @@ func (a *Agent) processToolCalls(ctx context.Context, session []llm.Message, mes
 
 	// Execute all tool calls concurrently, preserving order.
 	results := make([]*llm.Message, len(toolCalls))
+
 	var wg sync.WaitGroup
 	wg.Add(len(toolCalls))
+
 	for i, toolCall := range toolCalls {
 		go func() {
 			defer wg.Done()
+
 			results[i] = a.handleToolCall(ctx, toolCall, iteration, stats)
 		}()
 	}
+
 	wg.Wait()
 
 	if emit != nil {
@@ -400,12 +418,16 @@ func (a *Agent) processToolCalls(ctx context.Context, session []llm.Message, mes
 	}
 
 	// Append results in order; collect all handoffs (fan-out when more than one).
-	var handoffAgents []*Agent
-	var handoffMsg *llm.Message
+	var (
+		handoffAgents []*Agent
+		handoffMsg    *llm.Message
+	)
+
 	for i, result := range results {
 		session = append(session, *result)
 		if hAgent, ok := a.handoffs[toolCalls[i].Function.Name]; ok {
 			handoffAgents = append(handoffAgents, hAgent)
+
 			if handoffMsg == nil {
 				handoffMsg = result
 			}
@@ -441,6 +463,7 @@ func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, itera
 	if err != nil {
 		traceResult = err.Error()
 	}
+
 	a.tracer.Trace(trace.ToolResultEvent{
 		AgentName: a.name,
 		ToolName:  toolCall.Function.Name,
@@ -473,6 +496,7 @@ func (a *Agent) prepareSession(ctx context.Context, parts []llm.ContentPart, sta
 	if a.memory != nil {
 		start := time.Now()
 		memoryMessages, err := a.memory.Retrieve(ctx, inputText)
+
 		duration := time.Since(start)
 		if err != nil {
 			stats.recordMemoryRetrieve(0, duration)
@@ -523,16 +547,20 @@ func anyToContentParts(v any) []llm.ContentPart {
 	if v == nil {
 		return nil
 	}
+
 	if parts, ok := v.([]llm.ContentPart); ok {
 		return parts
 	}
+
 	if s, ok := v.(string); ok {
 		return []llm.ContentPart{llm.Text(s)}
 	}
+
 	b, err := json.Marshal(v)
 	if err != nil {
 		return []llm.ContentPart{llm.Text(fmt.Sprintf("failed to marshal tool result: %v", err))}
 	}
+
 	return []llm.ContentPart{llm.Text(string(b))}
 }
 
@@ -558,6 +586,7 @@ func (a *Agent) AsTool(toolName, toolDescription string) (*llm.Tool, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		return &ToolOutput{Output: response.TextContent()}, nil
 	}
 
@@ -577,13 +606,16 @@ func SanitizeToolName(name string) string {
 			(r >= '0' && r <= '9') || r == '_' || r == '-' {
 			return r
 		}
+
 		return '_'
 	}, name)
 	if len(s) > 64 {
 		s = s[:64]
 	}
+
 	if s == "" {
 		s = "agent"
 	}
+
 	return s
 }

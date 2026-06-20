@@ -43,6 +43,7 @@ type CalculatorOutput struct {
 // calculate performs basic arithmetic operations.
 func calculate(_ context.Context, input *CalculatorInput) (*CalculatorOutput, error) {
 	fmt.Printf("Tool called with input: %+v\n", input)
+
 	if input == nil {
 		return &CalculatorOutput{Error: "missing input"}, nil
 	}
@@ -58,6 +59,7 @@ func calculate(_ context.Context, input *CalculatorInput) (*CalculatorOutput, er
 		if input.B == 0 {
 			return &CalculatorOutput{Error: "division by zero"}, nil
 		}
+
 		return &CalculatorOutput{Result: input.A / input.B}, nil
 	default:
 		return &CalculatorOutput{Error: "unknown operation"}, nil
@@ -97,6 +99,7 @@ func main() {
 
 	// Run the agent with a user request
 	userRequest := "If I have 15 apples and give away 7, then buy 23 more, how many do I have?"
+
 	fmt.Printf("LLM: %s\n", llmInfo)
 	fmt.Printf("User: %s\n\n", userRequest)
 
@@ -147,6 +150,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
+
 	client := openai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s base_url=%s", model, baseURL)

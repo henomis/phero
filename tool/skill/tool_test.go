@@ -52,6 +52,7 @@ func TestNewExposesFixedToolIdentity(t *testing.T) {
 	if got := tool.Tool().Name(); got != toolName {
 		t.Fatalf("Tool().Name() = %q, want %q", got, toolName)
 	}
+
 	if got := tool.Tool().Description(); !strings.Contains(got, "<available_skills>") {
 		t.Fatalf("Tool().Description() does not contain available skills section: %q", got)
 	}
@@ -120,6 +121,7 @@ func TestHandleSkillNotFound(t *testing.T) {
 	}
 
 	_, err = tool.Tool().Handle(context.Background(), `{"command":"csv"}`)
+
 	var notFound *SkillNotFoundError
 	if !errors.As(err, &notFound) {
 		t.Fatalf("Handle() error = %v, want SkillNotFoundError", err)
@@ -128,13 +130,16 @@ func TestHandleSkillNotFound(t *testing.T) {
 
 func TestHandleSuccess(t *testing.T) {
 	parseCalls := 0
+
 	tool, err := New("", WithParser(&stubParser{
 		list: func() ([]string, error) { return []string{"pdf"}, nil },
 		parse: func(skillName string) (*skillpkg.Skill, error) {
 			parseCalls++
+
 			if skillName != "pdf" {
 				return nil, errors.New("unexpected skill")
 			}
+
 			return &skillpkg.Skill{
 				RootPath:    "/tmp/skills/pdf",
 				Name:        "pdf",
@@ -156,18 +161,23 @@ func TestHandleSuccess(t *testing.T) {
 	if !ok {
 		t.Fatalf("Handle() result type = %T, want *Output", res)
 	}
+
 	if out.CommandName != "pdf" {
 		t.Fatalf("CommandName = %q, want %q", out.CommandName, "pdf")
 	}
+
 	if out.BasePath != "/tmp/skills/pdf" {
 		t.Fatalf("BasePath = %q, want %q", out.BasePath, "/tmp/skills/pdf")
 	}
+
 	if !strings.Contains(out.Expansion, "Base Path: /tmp/skills/pdf") {
 		t.Fatalf("Expansion missing base path: %q", out.Expansion)
 	}
+
 	if len(out.AvailableSkills) != 1 {
 		t.Fatalf("AvailableSkills length = %d, want 1", len(out.AvailableSkills))
 	}
+
 	if parseCalls != 2 {
 		t.Fatalf("parseCalls = %d, want 2 (catalog + runtime)", parseCalls)
 	}
@@ -180,6 +190,7 @@ func TestBuildCatalogSortedByName(t *testing.T) {
 			if skillName == "b" {
 				return &skillpkg.Skill{Name: "zeta", Description: "z"}, nil
 			}
+
 			return &skillpkg.Skill{Name: "alpha", Description: "a"}, nil
 		},
 	}))
@@ -198,6 +209,7 @@ func TestBuildCatalogSortedByName(t *testing.T) {
 	}
 
 	got := []string{out.AvailableSkills[0].Name, out.AvailableSkills[1].Name}
+
 	want := []string{"alpha", "zeta"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("AvailableSkills order = %v, want %v", got, want)
@@ -234,7 +246,9 @@ func TestMiddlewareOrder(t *testing.T) {
 		return func(ctx context.Context, arguments string) (any, error) {
 			steps = append(steps, "m1-before")
 			res, err := next(ctx, arguments)
+
 			steps = append(steps, "m1-after")
+
 			return res, err
 		}
 	}
@@ -242,12 +256,15 @@ func TestMiddlewareOrder(t *testing.T) {
 		return func(ctx context.Context, arguments string) (any, error) {
 			steps = append(steps, "m2-before")
 			res, err := next(ctx, arguments)
+
 			steps = append(steps, "m2-after")
+
 			return res, err
 		}
 	}
 
 	tool.Tool().Use(m1, m2)
+
 	_, err = tool.Tool().Handle(context.Background(), `{"command":"pdf"}`)
 	if err != nil {
 		t.Fatalf("Handle() error = %v", err)
@@ -279,6 +296,7 @@ func TestDefaultAvailableSkillLocationUsesRootPathAndSkillDir(t *testing.T) {
 	if !ok {
 		t.Fatalf("Handle() result type = %T, want *Output", res)
 	}
+
 	if len(out.AvailableSkills) != 1 {
 		t.Fatalf("AvailableSkills length = %d, want 1", len(out.AvailableSkills))
 	}

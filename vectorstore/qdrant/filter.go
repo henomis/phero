@@ -26,11 +26,13 @@ func translateFilter(f *vectorstore.Filter) (*qdrantapi.Filter, error) {
 	if f == nil || len(f.Conditions) == 0 {
 		return nil, nil
 	}
+
 	if err := f.Validate(); err != nil {
 		return nil, err
 	}
 
 	out := &qdrantapi.Filter{}
+
 	for _, c := range f.Conditions {
 		switch c.Op {
 		case vectorstore.OpEq:
@@ -38,6 +40,7 @@ func translateFilter(f *vectorstore.Filter) (*qdrantapi.Filter, error) {
 			if err != nil {
 				return nil, err
 			}
+
 			out.Must = append(out.Must, cond)
 		case vectorstore.OpNe:
 			cond, err := eqCondition(c.Key, c.Value)
@@ -55,15 +58,19 @@ func translateFilter(f *vectorstore.Filter) (*qdrantapi.Filter, error) {
 				if err != nil {
 					return nil, err
 				}
+
 				conds = append(conds, cond)
 			}
+
 			out.Must = append(out.Must, qdrantapi.NewFilterAsCondition(&qdrantapi.Filter{Should: conds}))
 		case vectorstore.OpGt, vectorstore.OpGte, vectorstore.OpLt, vectorstore.OpLte:
 			value, ok := vectorstore.ToFloat64(c.Value)
 			if !ok {
 				return nil, vectorstore.ErrInvalidFilter
 			}
+
 			r := &qdrantapi.Range{}
+
 			switch c.Op {
 			case vectorstore.OpGt:
 				r.Gt = &value
@@ -74,11 +81,13 @@ func translateFilter(f *vectorstore.Filter) (*qdrantapi.Filter, error) {
 			default:
 				r.Lte = &value
 			}
+
 			out.Must = append(out.Must, qdrantapi.NewRange(c.Key, r))
 		default:
 			return nil, vectorstore.ErrUnsupportedFilterOp
 		}
 	}
+
 	return out, nil
 }
 
@@ -101,6 +110,7 @@ func eqCondition(key string, value any) (*qdrantapi.Condition, error) {
 		if !ok {
 			return nil, vectorstore.ErrInvalidFilter
 		}
+
 		return qdrantapi.NewMatchInt(key, int64(f)), nil
 	}
 }

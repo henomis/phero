@@ -32,6 +32,7 @@ func TestEnsureStrictJSONSchema_EmptySchema(t *testing.T) {
 	if result["type"] != "object" {
 		t.Errorf("expected type=object, got: %v", result["type"])
 	}
+
 	if result["additionalProperties"] != false {
 		t.Errorf("expected additionalProperties=false, got: %v", result["additionalProperties"])
 	}
@@ -40,6 +41,7 @@ func TestEnsureStrictJSONSchema_EmptySchema(t *testing.T) {
 	if !ok {
 		t.Errorf("expected properties to be a map, got: %T", result["properties"])
 	}
+
 	if len(props) != 0 {
 		t.Errorf("expected empty properties, got: %v", props)
 	}
@@ -48,6 +50,7 @@ func TestEnsureStrictJSONSchema_EmptySchema(t *testing.T) {
 	if !ok {
 		t.Errorf("expected required to be a slice, got: %T", result["required"])
 	}
+
 	if len(required) != 0 {
 		t.Errorf("expected empty required, got: %v", required)
 	}
@@ -110,12 +113,14 @@ func TestEnsureStrictJSONSchema_PropertiesBecomesRequired(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected required to be a slice, got: %T", result["required"])
 	}
+
 	if len(required) != 2 {
 		t.Errorf("expected 2 required fields, got: %v", len(required))
 	}
 
 	// Convert to map for easier checking
 	requiredMap := make(map[string]bool)
+
 	for _, r := range required {
 		if str, ok := r.(string); ok {
 			requiredMap[str] = true
@@ -227,6 +232,7 @@ func TestEnsureStrictJSONSchema_AnyOf(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected anyOf to be a slice, got: %T", result["anyOf"])
 	}
+
 	if len(anyOf) != 2 {
 		t.Errorf("expected 2 anyOf variants, got: %v", len(anyOf))
 	}
@@ -236,6 +242,7 @@ func TestEnsureStrictJSONSchema_AnyOf(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected first anyOf variant to be a map, got: %T", anyOf[0])
 	}
+
 	if first["additionalProperties"] != false {
 		t.Errorf("expected first anyOf variant to have additionalProperties=false, got: %v", first["additionalProperties"])
 	}
@@ -269,6 +276,7 @@ func TestEnsureStrictJSONSchema_OneOfConvertsToAnyOf(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected anyOf to exist, got: %T", result["anyOf"])
 	}
+
 	if len(anyOf) != 1 {
 		t.Errorf("expected 1 anyOf variant (converted from oneOf), got: %v", len(anyOf))
 	}
@@ -298,6 +306,7 @@ func TestEnsureStrictJSONSchema_OneOfMergesWithExistingAnyOf(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected anyOf to exist, got: %T", result["anyOf"])
 	}
+
 	if len(anyOf) != 2 {
 		t.Errorf("expected 2 anyOf variants (merged from anyOf + oneOf), got: %v", len(anyOf))
 	}
@@ -363,6 +372,7 @@ func TestEnsureStrictJSONSchema_AllOfMultipleEntries(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected allOf to remain with multiple entries, got: %T", result["allOf"])
 	}
+
 	if len(allOf) != 2 {
 		t.Errorf("expected 2 allOf entries, got: %v", len(allOf))
 	}
@@ -506,6 +516,7 @@ func TestEnsureStrictJSONSchema_RefExpansion(t *testing.T) {
 	}
 
 	props, _ := result["properties"].(map[string]any)
+
 	item, ok := props["item"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected item property to be a map, got: %T", props["item"])
@@ -592,6 +603,7 @@ func TestResolveRef(t *testing.T) {
 				if err != nil {
 					t.Errorf("expected no error for ref %q, got: %v", tt.ref, err)
 				}
+
 				if result == nil {
 					t.Errorf("expected non-nil result for ref %q", tt.ref)
 				}
@@ -606,9 +618,11 @@ func TestResolveRef_InvalidFormat(t *testing.T) {
 	_, err := resolveRef(root, "invalid/ref")
 
 	var refErr *SchemaUnexpectedRefFormatError
+
 	if !reflect.DeepEqual(err, &SchemaUnexpectedRefFormatError{Ref: "invalid/ref"}) {
 		t.Errorf("expected SchemaUnexpectedRefFormatError, got: %v", err)
 	}
+
 	_ = refErr // Just to satisfy linter if we add more checks
 }
 
@@ -620,16 +634,19 @@ func TestResolveRef_NonDictionaryInPath(t *testing.T) {
 	_, err := resolveRef(root, "#/$defs/Person")
 
 	var nonDictErr *SchemaNonDictionaryWhileResolvingRefError
+
 	if err == nil {
 		t.Errorf("expected error when resolving through non-dictionary, got nil")
 	} else {
 		// Check it's the right type of error
 		var ok bool
+
 		nonDictErr, ok = err.(*SchemaNonDictionaryWhileResolvingRefError)
 		if !ok {
 			t.Errorf("expected SchemaNonDictionaryWhileResolvingRefError, got: %T", err)
 		}
 	}
+
 	_ = nonDictErr // Satisfy linter
 }
 
@@ -764,6 +781,7 @@ func TestEnsureStrictJSONSchema_ComplexRealWorldExample(t *testing.T) {
 
 	// Check that $defs Address has been processed
 	defs, _ := result["$defs"].(map[string]any)
+
 	address, _ := defs["Address"].(map[string]any)
 	if address["additionalProperties"] != false {
 		t.Errorf("expected Address definition to have additionalProperties=false, got: %v", address["additionalProperties"])
@@ -800,14 +818,17 @@ func TestEnsureStrictJSONSchema_SchemaExpectedMapError(t *testing.T) {
 	_, err := ensureStrictJSONSchemaRecursive("not a map", []string{}, map[string]any{})
 
 	var mapErr *SchemaExpectedMapError
+
 	if err == nil {
 		t.Errorf("expected SchemaExpectedMapError, got nil")
 	} else {
 		var ok bool
+
 		mapErr, ok = err.(*SchemaExpectedMapError)
 		if !ok {
 			t.Errorf("expected SchemaExpectedMapError, got: %T", err)
 		}
+
 		if mapErr != nil && mapErr.Got != "not a map" {
 			t.Errorf("expected error to contain 'not a map', got: %v", mapErr.Got)
 		}
@@ -824,14 +845,17 @@ func TestEnsureStrictJSONSchema_NonStringRef(t *testing.T) {
 	_, err := ensureStrictJSONSchema(schema)
 
 	var refErr *SchemaNonStringRefError
+
 	if err == nil {
 		t.Errorf("expected SchemaNonStringRefError, got nil")
 	} else {
 		var ok bool
+
 		refErr, ok = err.(*SchemaNonStringRefError)
 		if !ok {
 			t.Errorf("expected SchemaNonStringRefError, got: %T", err)
 		}
+
 		if refErr != nil && refErr.RawRef != 123 {
 			t.Errorf("expected error RawRef to be 123, got: %v", refErr.RawRef)
 		}
@@ -865,6 +889,7 @@ func TestEnsureStrictJSONSchema_RefOnlyNoExpansion(t *testing.T) {
 	}
 
 	props, _ := result["properties"].(map[string]any)
+
 	person, ok := props["person"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected person property to be a map, got: %T", props["person"])
@@ -888,14 +913,17 @@ func TestEnsureStrictJSONSchema_DefsWithNonMapSchema(t *testing.T) {
 	_, err := ensureStrictJSONSchema(schema)
 
 	var mapErr *SchemaExpectedMapError
+
 	if err == nil {
 		t.Errorf("expected SchemaExpectedMapError for invalid $defs entry, got nil")
 	} else {
 		var ok bool
+
 		mapErr, ok = err.(*SchemaExpectedMapError)
 		if !ok {
 			t.Errorf("expected SchemaExpectedMapError, got: %T", err)
 		}
+
 		if mapErr != nil && mapErr.Got != "not a map" {
 			t.Errorf("expected error Got to be 'not a map', got: %v", mapErr.Got)
 		}
@@ -912,7 +940,6 @@ func TestEnsureStrictJSONSchema_DefinitionsWithNonMapSchema(t *testing.T) {
 	}
 
 	_, err := ensureStrictJSONSchema(schema)
-
 	if err == nil {
 		t.Errorf("expected SchemaExpectedMapError for invalid definitions entry, got nil")
 	} else {
@@ -941,7 +968,6 @@ func TestEnsureStrictJSONSchema_ArrayItemsNonMapSchema(t *testing.T) {
 	}
 
 	_, err := ensureStrictJSONSchema(schema)
-
 	if err == nil {
 		t.Errorf("expected SchemaExpectedMapError for invalid items anyOf entry, got nil")
 	} else {
@@ -961,7 +987,6 @@ func TestEnsureStrictJSONSchema_AnyOfWithNonMapVariant(t *testing.T) {
 	}
 
 	_, err := ensureStrictJSONSchema(schema)
-
 	if err == nil {
 		t.Errorf("expected SchemaExpectedMapError for invalid anyOf variant, got nil")
 	} else {
@@ -983,14 +1008,17 @@ func TestEnsureStrictJSONSchema_OneOfWithNonMapVariant(t *testing.T) {
 	_, err := ensureStrictJSONSchema(schema)
 
 	var mapErr *SchemaExpectedMapError
+
 	if err == nil {
 		t.Errorf("expected SchemaExpectedMapError for invalid oneOf variant, got nil")
 	} else {
 		var ok bool
+
 		mapErr, ok = err.(*SchemaExpectedMapError)
 		if !ok {
 			t.Errorf("expected SchemaExpectedMapError, got: %T", err)
 		}
+
 		if mapErr != nil && mapErr.Got != 42 {
 			t.Errorf("expected error Got to be 42, got: %v", mapErr.Got)
 		}
@@ -1006,7 +1034,6 @@ func TestEnsureStrictJSONSchema_AllOfSingleWithNonMapEntry(t *testing.T) {
 	}
 
 	_, err := ensureStrictJSONSchema(schema)
-
 	if err == nil {
 		t.Errorf("expected SchemaExpectedMapError for invalid single allOf entry, got nil")
 	} else {
@@ -1028,14 +1055,17 @@ func TestEnsureStrictJSONSchema_AllOfMultipleWithNonMapEntry(t *testing.T) {
 	_, err := ensureStrictJSONSchema(schema)
 
 	var mapErr *SchemaExpectedMapError
+
 	if err == nil {
 		t.Errorf("expected SchemaExpectedMapError for invalid allOf entry, got nil")
 	} else {
 		var ok bool
+
 		mapErr, ok = err.(*SchemaExpectedMapError)
 		if !ok {
 			t.Errorf("expected SchemaExpectedMapError, got: %T", err)
 		}
+
 		if mapErr != nil && mapErr.Got != 12345 {
 			t.Errorf("expected error Got to be 12345, got: %v", mapErr.Got)
 		}
@@ -1060,14 +1090,17 @@ func TestEnsureStrictJSONSchema_RefExpansionWithNonMapResolved(t *testing.T) {
 	_, err := ensureStrictJSONSchema(schema)
 
 	var mapErr *SchemaExpectedMapError
+
 	if err == nil {
 		t.Errorf("expected SchemaExpectedMapError when ref resolves to non-map, got nil")
 	} else {
 		var ok bool
+
 		mapErr, ok = err.(*SchemaExpectedMapError)
 		if !ok {
 			t.Errorf("expected SchemaExpectedMapError, got: %T", err)
 		}
+
 		if mapErr != nil && mapErr.Got != "just a string" {
 			t.Errorf("expected error Got to be 'just a string', got: %v", mapErr.Got)
 		}
@@ -1093,7 +1126,6 @@ func TestEnsureStrictJSONSchema_PropertiesRecursiveError(t *testing.T) {
 	}
 
 	_, err := ensureStrictJSONSchema(schema)
-
 	if err == nil {
 		t.Errorf("expected SchemaExpectedMapError from deeply nested property, got nil")
 	} else {

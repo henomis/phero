@@ -53,6 +53,7 @@ import (
 
 func main() {
 	topic := flag.String("topic", "quantum computing", "topic to research and write about")
+
 	flag.Parse()
 
 	ctx := context.Background()
@@ -154,10 +155,12 @@ func printCard(label string, card *sdka2a.AgentCard) {
 	for _, s := range card.Skills {
 		skills = append(skills, s.ID)
 	}
+
 	transports := make([]string, 0, len(card.SupportedInterfaces))
 	for _, iface := range card.SupportedInterfaces {
 		transports = append(transports, string(iface.ProtocolBinding))
 	}
+
 	fmt.Printf("%-12s v%-5s  skills=[%s]  transports=[%s]  streaming=%v  push=%v\n",
 		label,
 		card.Version,

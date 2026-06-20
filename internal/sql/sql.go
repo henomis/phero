@@ -51,6 +51,7 @@ func QuoteQualifiedIdent(name string) (string, error) {
 		if !safeIdent.MatchString(p) {
 			return "", ErrInvalidIdent
 		}
+
 		out = append(out, `"`+p+`"`)
 	}
 

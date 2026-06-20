@@ -41,8 +41,11 @@ type OutlineSection struct {
 }
 
 func main() {
-	var topic string
-	var timeout time.Duration
+	var (
+		topic   string
+		timeout time.Duration
+	)
+
 	flag.StringVar(&topic, "topic", "The impact of artificial intelligence on software development", "Document topic")
 	flag.DurationVar(&timeout, "timeout", 5*time.Minute, "Overall timeout for the run")
 	flag.Parse()
@@ -134,6 +137,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
+
 	client := openai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s base_url=%s", model, baseURL)
@@ -262,6 +266,7 @@ func buildExpansionPrompt(topic string, outline Outline) string {
 // extractJSONObject extracts the first {...} block from s.
 func extractJSONObject(s string) string {
 	start := strings.Index(s, "{")
+
 	end := strings.LastIndex(s, "}")
 	if start == -1 || end == -1 || end < start {
 		return s

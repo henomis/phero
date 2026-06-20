@@ -35,6 +35,7 @@ import (
 func main() {
 	sessionID := flag.String("session", "default", "Session ID — use the same value across runs to resume a conversation")
 	natsURL := flag.String("nats-url", "", "NATS server URL (overrides NATS_URL env var; default nats://localhost:4222)")
+
 	flag.Parse()
 
 	ctx := context.Background()
@@ -44,6 +45,7 @@ func main() {
 	if url == "" {
 		url = os.Getenv("NATS_URL")
 	}
+
 	if url == "" {
 		url = nats.DefaultURL
 	}
@@ -102,6 +104,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	a.SetMemory(mem)
 	a.SetMaxIterations(10)
 
@@ -111,9 +114,11 @@ func main() {
 	fmt.Printf("LLM:     %s\n", llmInfo)
 	fmt.Printf("NATS:    %s\n", url)
 	fmt.Printf("Session: %s\n", *sessionID)
+
 	if len(existing) > 0 {
 		fmt.Printf("Resumed: %d message(s) restored from NATS\n", len(existing))
 	}
+
 	fmt.Println()
 	fmt.Println("Commands: /history  /clear  /stats  /exit")
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -133,11 +138,13 @@ func main() {
 		if strings.HasPrefix(line, "/") {
 			handleCommand(ctx, line, mem)
 			fmt.Print("\n> ")
+
 			continue
 		}
 
 		turnCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		response, err := a.Run(turnCtx, llm.Text(line))
+
 		cancel()
 
 		if err != nil {
@@ -169,6 +176,7 @@ func handleCommand(ctx context.Context, cmd string, mem *natsmemory.Memory) {
 			fmt.Printf("Error: %v\n", err)
 			return
 		}
+
 		if len(messages) == 0 {
 			fmt.Println("\nNo conversation history yet.")
 			return
@@ -192,6 +200,7 @@ func handleCommand(ctx context.Context, cmd string, mem *natsmemory.Memory) {
 			fmt.Printf("Error clearing memory: %v\n", err)
 			return
 		}
+
 		fmt.Println("\nMemory cleared.")
 
 	case "/stats", "/s":
@@ -210,7 +219,9 @@ func handleCommand(ctx context.Context, cmd string, mem *natsmemory.Memory) {
 			for _, msg := range messages {
 				roleCount[msg.Role]++
 			}
+
 			fmt.Println("\nBy role:")
+
 			for role, count := range roleCount {
 				fmt.Printf("  %s: %d\n", role, count)
 			}
@@ -247,6 +258,7 @@ func printRunSummary(summary *trace.RunSummary) {
 	if summary == nil {
 		return
 	}
+
 	fmt.Printf(
 		"\n[summary: iter=%d llm=%d tools=%d mem=%d/%d tokens=%d/%d latency=%s]\n",
 		summary.Iterations,
@@ -281,6 +293,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
+
 	client := openai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s", model)

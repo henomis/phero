@@ -36,6 +36,7 @@ func (m mapEmbedder) Embed(_ context.Context, texts []string) ([]embedding.Vecto
 	for i, t := range texts {
 		out[i] = m.fn(t)
 	}
+
 	return out, nil
 }
 
@@ -57,15 +58,18 @@ func (s *memStore) Upsert(_ context.Context, points []vectorstore.Point) error {
 
 func (s *memStore) Query(_ context.Context, query vectorstore.Vector, limit uint64, _ ...vectorstore.QueryOption) ([]vectorstore.ScoredPoint, error) {
 	var best *vectorstore.ScoredPoint
+
 	for i := range s.points {
 		score := cosine(query, s.points[i].Vector)
 		if best == nil || score > best.Score {
 			best = &vectorstore.ScoredPoint{ID: s.points[i].ID, Score: score, Payload: s.points[i].Payload}
 		}
 	}
+
 	if best == nil || limit == 0 {
 		return nil, nil
 	}
+
 	return []vectorstore.ScoredPoint{*best}, nil
 }
 
@@ -80,9 +84,11 @@ func cosine(a, b vectorstore.Vector) float32 {
 		na += float64(a[i]) * float64(a[i])
 		nb += float64(b[i]) * float64(b[i])
 	}
+
 	if na == 0 || nb == 0 {
 		return 0
 	}
+
 	return float32(dot / (math.Sqrt(na) * math.Sqrt(nb)))
 }
 
@@ -95,6 +101,7 @@ type countingLLM struct {
 func (c *countingLLM) Execute(context.Context, []llm.Message, []*llm.Tool) (*llm.Result, error) {
 	c.calls++
 	msg := llm.AssistantMessage([]llm.ContentPart{llm.Text(c.text)})
+
 	return &llm.Result{
 		Message: &msg,
 		Usage:   &llm.Usage{InputTokens: 10, OutputTokens: 5},
@@ -108,6 +115,7 @@ func TestSemanticCache_HitAvoidsSecondCall(t *testing.T) {
 		if s == "" {
 			return embedding.Vector{0, 0, 1}
 		}
+
 		return embedding.Vector{1, 0, 0}
 	}}
 	store := &memStore{}
@@ -117,6 +125,7 @@ func TestSemanticCache_HitAvoidsSecondCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSemanticCache: %v", err)
 	}
+
 	client := llm.Use(inner, mw)
 
 	msgs := []llm.Message{llm.UserMessage(llm.Text("hello"))}
@@ -125,9 +134,11 @@ func TestSemanticCache_HitAvoidsSecondCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Execute: %v", err)
 	}
+
 	if inner.calls != 1 {
 		t.Fatalf("expected 1 inner call after miss, got %d", inner.calls)
 	}
+
 	if first.Usage.InputTokens != 10 {
 		t.Fatalf("expected original usage on miss, got %+v", first.Usage)
 	}
@@ -136,15 +147,19 @@ func TestSemanticCache_HitAvoidsSecondCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second Execute: %v", err)
 	}
+
 	if inner.calls != 1 {
 		t.Fatalf("expected inner NOT called on hit, got %d calls", inner.calls)
 	}
+
 	if got := second.Message.TextContent(); got != "cached answer" {
 		t.Fatalf("unexpected cached content: %q", got)
 	}
+
 	if second.Usage == nil || second.Usage.InputTokens != 0 || second.Usage.OutputTokens != 0 {
 		t.Fatalf("expected zeroed usage on hit, got %+v", second.Usage)
 	}
+
 	if store.ensureCalls != 1 {
 		t.Fatalf("expected EnsureCollection called once, got %d", store.ensureCalls)
 	}
@@ -169,6 +184,7 @@ func TestSemanticCache_BelowThresholdMisses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSemanticCache: %v", err)
 	}
+
 	client := llm.Use(inner, mw)
 
 	_, _ = client.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("a"))}, nil)
@@ -188,6 +204,7 @@ func TestSemanticCache_SkipsWhenToolsPresent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSemanticCache: %v", err)
 	}
+
 	client := llm.Use(inner, mw)
 
 	tool, err := llm.NewTool("noop", "does nothing", func(context.Context, *struct{}) (*struct{}, error) {
@@ -204,6 +221,7 @@ func TestSemanticCache_SkipsWhenToolsPresent(t *testing.T) {
 	if inner.calls != 2 {
 		t.Fatalf("expected tools to bypass cache (2 calls), got %d", inner.calls)
 	}
+
 	if len(store.points) != 0 {
 		t.Fatalf("expected nothing cached when tools present, got %d points", len(store.points))
 	}
@@ -216,9 +234,11 @@ func TestNewSemanticCache_Validation(t *testing.T) {
 	if _, err := middleware.NewSemanticCache(nil, store); !errors.Is(err, middleware.ErrNilEmbedder) {
 		t.Fatalf("expected ErrNilEmbedder, got %v", err)
 	}
+
 	if _, err := middleware.NewSemanticCache(emb, nil); !errors.Is(err, middleware.ErrNilStore) {
 		t.Fatalf("expected ErrNilStore, got %v", err)
 	}
+
 	if _, err := middleware.NewSemanticCache(emb, store, middleware.WithSimilarityThreshold(1.5)); !errors.Is(err, middleware.ErrInvalidThreshold) {
 		t.Fatalf("expected ErrInvalidThreshold, got %v", err)
 	}

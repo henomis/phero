@@ -110,6 +110,7 @@ func New(client *qdrantapi.Client, collection string, opts ...Option) (*Store, e
 	if client == nil {
 		return nil, ErrNilClient
 	}
+
 	if collection == "" {
 		return nil, ErrEmptyCollection
 	}
@@ -120,14 +121,17 @@ func New(client *qdrantapi.Client, collection string, opts ...Option) (*Store, e
 		distance:   defaultDistance,
 		batchSize:  defaultBatchSize,
 	}
+
 	for _, opt := range opts {
 		if opt != nil {
 			opt(s)
 		}
 	}
+
 	if s.vectorSize == 0 {
 		return nil, ErrInvalidVectorSize
 	}
+
 	return s, nil
 }
 
@@ -141,6 +145,7 @@ func (s *Store) EnsureCollection(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	if exists {
 		return nil
 	}
@@ -177,6 +182,7 @@ func (s *Store) Upsert(ctx context.Context, points []vectorstore.Point) error {
 		if end > len(points) {
 			end = len(points)
 		}
+
 		if err := s.upsertOnce(ctx, points[start:end]); err != nil {
 			return err
 		}
@@ -195,19 +201,23 @@ func (s *Store) upsertOnce(ctx context.Context, points []vectorstore.Point) erro
 		if p.ID == "" {
 			return ErrPointIDRequired
 		}
+
 		if len(p.Vector) == 0 {
 			return &EmptyVectorError{PointID: p.ID}
 		}
+
 		if uint64(len(p.Vector)) != s.vectorSize {
 			return &VectorSizeMismatchError{Expected: s.vectorSize, Got: len(p.Vector)}
 		}
 
 		var payload map[string]*qdrantapi.Value
+
 		if p.Payload != nil {
 			m, err := qdrantapi.TryValueMap(p.Payload)
 			if err != nil {
 				return &InvalidPayloadError{PointID: p.ID, Err: err}
 			}
+
 			payload = m
 		}
 
@@ -223,6 +233,7 @@ func (s *Store) upsertOnce(ctx context.Context, points []vectorstore.Point) erro
 		Points:         qPoints,
 		Wait:           s.wait,
 	})
+
 	return err
 }
 
@@ -239,14 +250,17 @@ func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint6
 	if len(query) == 0 {
 		return nil, vectorstore.ErrEmptyQuery
 	}
+
 	if limit == 0 {
 		return []vectorstore.ScoredPoint{}, nil
 	}
+
 	if uint64(len(query)) != s.vectorSize {
 		return nil, &VectorSizeMismatchError{Expected: s.vectorSize, Got: len(query)}
 	}
 
 	cfg := vectorstore.ApplyQueryOptions(opts)
+
 	filter, err := translateFilter(cfg.Filter)
 	if err != nil {
 		return nil, err
@@ -298,8 +312,10 @@ func (s *Store) Delete(ctx context.Context, ids []string) error {
 		if id == "" {
 			continue
 		}
+
 		qIDs = append(qIDs, idToPointID(id))
 	}
+
 	if len(qIDs) == 0 {
 		return vectorstore.ErrEmptyIDs
 	}
@@ -309,6 +325,7 @@ func (s *Store) Delete(ctx context.Context, ids []string) error {
 		Points:         qdrantapi.NewPointsSelectorIDs(qIDs),
 		Wait:           s.wait,
 	})
+
 	return err
 }
 
@@ -323,6 +340,7 @@ func (s *Store) Clear(ctx context.Context) error {
 		Points:         qdrantapi.NewPointsSelectorFilter(&qdrantapi.Filter{}),
 		Wait:           s.wait,
 	})
+
 	return err
 }
 
@@ -338,6 +356,7 @@ func idToPointID(id string) *qdrantapi.PointId {
 	if n, err := strconv.ParseUint(id, 10, 64); err == nil {
 		return qdrantapi.NewIDNum(n)
 	}
+
 	return qdrantapi.NewIDUUID(id)
 }
 
@@ -345,9 +364,11 @@ func pointIDToString(id *qdrantapi.PointId) string {
 	if id == nil {
 		return ""
 	}
+
 	if uuid := id.GetUuid(); uuid != "" {
 		return uuid
 	}
+
 	return strconv.FormatUint(id.GetNum(), 10)
 }
 
@@ -372,13 +393,16 @@ func decodeValue(v *qdrantapi.Value) any {
 		for fk, fv := range k.StructValue.GetFields() {
 			m[fk] = decodeValue(fv)
 		}
+
 		return m
 	case *qdrantapi.Value_ListValue:
 		vals := k.ListValue.GetValues()
+
 		out := make([]any, 0, len(vals))
 		for _, item := range vals {
 			out = append(out, decodeValue(item))
 		}
+
 		return out
 	default:
 		return nil
