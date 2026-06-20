@@ -72,6 +72,8 @@ func TestRunStream_StreamsTextDeltasAndDone(t *testing.T) {
 			text.WriteString(ev.TextDelta)
 		case agent.EventDone:
 			done = ev.Result
+		case agent.EventReasoningDelta, agent.EventToolCall, agent.EventToolResult:
+			// not checked in this test
 		}
 	}
 
@@ -132,6 +134,8 @@ func TestRunStream_EmitsToolEventsViaBufferedFallback(t *testing.T) {
 			}
 		case agent.EventDone:
 			done = ev.Result
+		case agent.EventTextDelta, agent.EventReasoningDelta:
+			// not checked in this test
 		}
 	}
 

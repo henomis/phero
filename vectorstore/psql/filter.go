@@ -114,7 +114,7 @@ func containmentDoc(key string, value any) (string, error) {
 }
 
 func sqlComparison(op vectorstore.Op) string {
-	switch op {
+	switch op { //nolint:exhaustive // callers only pass comparison operators; others are unreachable
 	case vectorstore.OpGt:
 		return ">"
 	case vectorstore.OpGte:

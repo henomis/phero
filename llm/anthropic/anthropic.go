@@ -274,6 +274,8 @@ func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam,
 					if p.Text != "" {
 						blocks = append(blocks, anthropicapi.NewRedactedThinkingBlock(p.Text))
 					}
+				case llm.ContentTypeText, llm.ContentTypeImageURL, llm.ContentTypeImageBase64:
+					// handled in the separate loop below
 				}
 			}
 
@@ -361,6 +363,8 @@ func contentBlocksToAnthropic(parts []llm.ContentPart) []anthropicapi.ContentBlo
 					MediaType: anthropicapi.Base64ImageSourceMediaType(p.MIMEType),
 				},
 			))
+		case llm.ContentTypeReasoning, llm.ContentTypeRedactedReasoning:
+			// not valid in tool content blocks; skip
 		}
 	}
 
@@ -401,6 +405,8 @@ func toolResultContentToAnthropic(parts []llm.ContentPart) []anthropicapi.ToolRe
 			content = append(content, anthropicapi.ToolResultBlockParamContentUnion{
 				OfImage: &imgBlock,
 			})
+		case llm.ContentTypeReasoning, llm.ContentTypeRedactedReasoning:
+			// not valid in tool result content; skip
 		}
 	}
 

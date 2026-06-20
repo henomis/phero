@@ -204,6 +204,10 @@ func (c *Client) AsTool() (*llm.Tool, error) {
 				return nil, ErrTaskFailed
 			case sdka2a.TaskStateCanceled:
 				return nil, ErrTaskCanceled
+			case sdka2a.TaskStateCompleted, sdka2a.TaskStateUnspecified, sdka2a.TaskStateAuthRequired,
+				sdka2a.TaskStateInputRequired, sdka2a.TaskStateRejected, sdka2a.TaskStateSubmitted,
+				sdka2a.TaskStateWorking:
+				// fall through to text extraction below
 			}
 		}
 

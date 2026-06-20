@@ -79,7 +79,7 @@ func TestEnsureStrictJSONSchema_ObjectAddsAdditionalPropertiesFalse(t *testing.T
 // TestEnsureStrictJSONSchema_ObjectWithAdditionalPropertiesTrue tests that setting additionalProperties: true returns an error.
 func TestEnsureStrictJSONSchema_ObjectWithAdditionalPropertiesTrue(t *testing.T) {
 	schema := map[string]any{
-		schemaKeyType:                 schemaTypeObject,
+		schemaKeyType:            schemaTypeObject,
 		schemaKeyAdditionalProps: true,
 	}
 
@@ -380,8 +380,8 @@ func TestEnsureStrictJSONSchema_AllOfMultipleEntries(t *testing.T) {
 // TestEnsureStrictJSONSchema_NilDefaultStripped tests that nil defaults are removed.
 func TestEnsureStrictJSONSchema_NilDefaultStripped(t *testing.T) {
 	schema := map[string]any{
-		schemaKeyType:    "string",
-		"default": nil,
+		schemaKeyType: "string",
+		"default":     nil,
 	}
 
 	result, err := ensureStrictJSONSchema(schema)
@@ -397,8 +397,8 @@ func TestEnsureStrictJSONSchema_NilDefaultStripped(t *testing.T) {
 // TestEnsureStrictJSONSchema_NonNilDefaultKept tests that non-nil defaults are kept.
 func TestEnsureStrictJSONSchema_NonNilDefaultKept(t *testing.T) {
 	schema := map[string]any{
-		schemaKeyType:    "string",
-		"default": "hello",
+		schemaKeyType: "string",
+		"default":     "hello",
 	}
 
 	result, err := ensureStrictJSONSchema(schema)
@@ -747,8 +747,8 @@ func TestEnsureStrictJSONSchema_ComplexRealWorldExample(t *testing.T) {
 		},
 		schemaKeyType: schemaTypeObject,
 		schemaKeyProperties: map[string]any{
-			"name": map[string]any{schemaKeyType: "string"},
-			"age":  map[string]any{schemaKeyType: "integer"},
+			"name":    map[string]any{schemaKeyType: "string"},
+			"age":     map[string]any{schemaKeyType: "integer"},
 			"address": map[string]any{"$ref": "#/$defs/Address"},
 			"tags": map[string]any{
 				schemaKeyType: "array",
@@ -794,7 +794,7 @@ func TestEnsureStrictJSONSchema_ErrorPropagation(t *testing.T) {
 		schemaKeyType: schemaTypeObject,
 		schemaKeyProperties: map[string]any{
 			"nested": map[string]any{
-				schemaKeyType:                 schemaTypeObject,
+				schemaKeyType:            schemaTypeObject,
 				schemaKeyAdditionalProps: true,
 			},
 		},

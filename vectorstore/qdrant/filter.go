@@ -73,7 +73,7 @@ func translateFilter(f *vectorstore.Filter) (*qdrantapi.Filter, error) {
 
 			r := &qdrantapi.Range{}
 
-			switch c.Op {
+			switch c.Op { //nolint:exhaustive // outer case restricts to OpGt/Gte/Lt/Lte; others are unreachable
 			case vectorstore.OpGt:
 				r.Gt = &value
 			case vectorstore.OpGte:

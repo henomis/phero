@@ -91,6 +91,8 @@ func translateResultToA2A(result *agent.Result) []*sdka2a.Part {
 				a2aPart.MediaType = p.MIMEType
 				parts = append(parts, a2aPart)
 			}
+		case llm.ContentTypeReasoning, llm.ContentTypeRedactedReasoning:
+			// A2A has no reasoning part type; skip.
 		}
 	}
 

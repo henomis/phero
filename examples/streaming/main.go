@@ -52,6 +52,8 @@ func main() {
 		case agent.EventTextDelta:
 			// Print tokens as they arrive.
 			fmt.Print(ev.TextDelta)
+		case agent.EventReasoningDelta:
+			// reasoning tokens are not displayed in this example
 		case agent.EventToolCall:
 			fmt.Printf("\n[calling tool %s(%s)]\n", ev.ToolName, ev.ToolArgs)
 		case agent.EventToolResult:

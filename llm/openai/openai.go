@@ -178,6 +178,8 @@ func messageToOpenAI(m llm.Message) openai.ChatCompletionMessage {
 					URL: dataURI,
 				},
 			})
+		case llm.ContentTypeReasoning, llm.ContentTypeRedactedReasoning:
+			// OpenAI has no reasoning content type; skip
 		}
 	}
 

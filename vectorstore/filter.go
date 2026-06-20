@@ -213,7 +213,7 @@ func matchCondition(c Condition, payload map[string]any) bool {
 			return false
 		}
 
-		switch c.Op {
+		switch c.Op { //nolint:exhaustive // outer case restricts to OpGt/Gte/Lt/Lte; others are unreachable
 		case OpGt:
 			return got > want
 		case OpGte:
