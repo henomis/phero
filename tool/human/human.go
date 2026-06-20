@@ -143,6 +143,7 @@ func (h *Tool) ask(ctx context.Context, input *Input) (*Output, error) {
 	return &Output{Answers: answers}, nil
 }
 
+//nolint:gocognit
 func validateInput(input *Input) error {
 	questions := input.Questions
 	if len(questions) < minQuestions {

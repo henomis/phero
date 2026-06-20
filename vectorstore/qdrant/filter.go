@@ -22,6 +22,8 @@ import (
 
 // translateFilter converts a portable vectorstore.Filter into a native Qdrant
 // filter evaluated server-side. A nil filter yields a nil Qdrant filter.
+//
+//nolint:gocognit
 func translateFilter(f *vectorstore.Filter) (*qdrantapi.Filter, error) {
 	if f == nil || len(f.Conditions) == 0 {
 		return nil, nil

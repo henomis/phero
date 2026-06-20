@@ -118,6 +118,7 @@ func (r *Splitter) Split(_ context.Context) iter.Seq2[document.Document, error] 
 	}
 }
 
+//nolint:gocognit
 func (r *Splitter) splitStream(text string, yield func(string) bool) bool {
 	separator := r.separators[len(r.separators)-1]
 	newSeparators := []string{}

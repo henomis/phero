@@ -102,6 +102,8 @@ func translateResultToA2A(result *agent.Result) []*sdka2a.Part {
 // A result is either a *sdka2a.Message (agent responds inline) or a *sdka2a.Task
 // (server creates a task to track the work). Both are handled. Artifacts are also
 // checked if neither the status message nor inline parts contain text.
+//
+//nolint:gocognit
 func extractTextFromResult(result sdka2a.SendMessageResult) (string, error) {
 	switch v := result.(type) {
 	case *sdka2a.Message:

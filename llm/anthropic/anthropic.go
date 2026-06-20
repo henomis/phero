@@ -200,6 +200,8 @@ func applyPromptCaching(params *anthropicapi.MessageNewParams) {
 // tool_use turn and that user turn. Without merging, parallel tool calls produce
 // separate consecutive user messages, which Anthropic rejects (or which silently
 // degrades future parallel tool use).
+//
+//nolint:gocognit
 func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam, []anthropicapi.MessageParam, error) {
 	var systemParts []string
 

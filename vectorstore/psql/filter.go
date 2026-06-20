@@ -31,6 +31,8 @@ import (
 // bind parameters, never interpolated into the SQL text.
 //
 // A nil or empty filter yields an empty clause string.
+//
+//nolint:gocognit
 func filterSQL(f *vectorstore.Filter) (string, []any, error) {
 	if f == nil || len(f.Conditions) == 0 {
 		return "", nil, nil

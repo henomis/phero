@@ -37,7 +37,7 @@ import (
 type Input struct {
 	Command         string `json:"command" jsonschema:"description=The command to execute."`
 	Description     string `json:"description,omitempty" jsonschema:"description=Clear, concise command description (5-10 words)."` //nolint:lll
-	Timeout         int    `json:"timeout,omitempty" jsonschema:"description=Optional timeout in milliseconds (max 600000)."` //nolint:lll
+	Timeout         int    `json:"timeout,omitempty" jsonschema:"description=Optional timeout in milliseconds (max 600000)."`       //nolint:lll
 	RunInBackground bool   `json:"run_in_background,omitempty" jsonschema:"description=Set true to run the command in background."` //nolint:lll
 }
 
@@ -281,6 +281,7 @@ func WithSafeMode() Option {
 	}
 }
 
+//nolint:gocognit
 func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 	if input == nil {
 		return nil, ErrNilInput

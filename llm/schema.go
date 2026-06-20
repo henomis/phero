@@ -30,7 +30,7 @@ const (
 
 var emptySchema = map[string]any{
 	schemaKeyAdditionalProps: false,
-	schemaKeyType:                   schemaTypeObject,
+	schemaKeyType:            schemaTypeObject,
 	schemaKeyProperties:      map[string]any{},
 	"required":               []any{},
 }
@@ -54,6 +54,8 @@ func ensureStrictJSONSchema(schema map[string]any) (map[string]any, error) {
 }
 
 // ensureStrictJSONSchemaRecursive recursively processes a JSON schema to make it strict.
+//
+//nolint:gocognit
 func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[string]any) (map[string]any, error) {
 	schema, ok := jsonSchema.(map[string]any)
 	if !ok {

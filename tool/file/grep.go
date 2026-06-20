@@ -35,8 +35,8 @@ const (
 
 // GrepInput is the input schema for the grep tool.
 type GrepInput struct {
-	Pattern    string `json:"pattern" jsonschema:"description=The regular expression pattern to search for in file contents"` //nolint:lll
-	Path       string `json:"path,omitempty" jsonschema:"description=File or directory to search in. Defaults to current working directory"` //nolint:lll
+	Pattern    string `json:"pattern" jsonschema:"description=The regular expression pattern to search for in file contents"`                                 //nolint:lll
+	Path       string `json:"path,omitempty" jsonschema:"description=File or directory to search in. Defaults to current working directory"`                  //nolint:lll
 	OutputMode string `json:"output_mode,omitempty" jsonschema:"description=Output mode: content, files_with_matches, count. Defaults to files_with_matches"` //nolint:lll
 	Glob       string `json:"glob,omitempty" jsonschema:"description=Glob pattern to filter files"`
 	Type       string `json:"type,omitempty" jsonschema:"description=File type to search (go, js, py, etc.)"`
@@ -85,6 +85,7 @@ func (g *GrepTool) Tool() *llm.Tool {
 	return g.tool
 }
 
+//nolint:gocognit
 func (g *GrepTool) grep(_ context.Context, input *GrepInput) (*GrepOutput, error) {
 	if input == nil {
 		return nil, fmt.Errorf("nil input")
@@ -255,6 +256,7 @@ func countMatches(re *regexp.Regexp, content string, multiline bool) int {
 	return count
 }
 
+//nolint:gocognit
 func grepContentMatches(
 	path, content string, re *regexp.Regexp, multiline, lineNumbers bool, after, before int,
 ) []string {

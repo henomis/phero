@@ -126,6 +126,7 @@ linters:
           - goconst
           - mnd
           - govet
+          - gocognit
 
 formatters:
   enable: [gofumpt, goimports]

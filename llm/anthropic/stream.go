@@ -32,6 +32,8 @@ var _ llm.StreamingLLM = (*Client)(nil)
 //
 // The terminal chunk (Done == true) carries the complete assistant message, the
 // model name, and token usage (including cache token counts).
+//
+//nolint:gocognit
 func (c *Client) ExecuteStream(
 	ctx context.Context, messages []llm.Message, tools []*llm.Tool,
 ) iter.Seq2[llm.StreamChunk, error] {

@@ -84,6 +84,7 @@ func resolveSearchRoot(workingDir, inputPath string) (string, error) {
 	return resolvedCandidate, nil
 }
 
+//nolint:gocognit
 func compileGlobMatcher(pattern string) (*regexp.Regexp, error) {
 	p := filepath.ToSlash(strings.TrimSpace(pattern))
 	if p == "" {
