@@ -50,6 +50,8 @@ type Tracer struct {
 
 // rootSpan holds an agent run's root span together with the context that
 // carries it, so child spans can be parented correctly.
+//
+//nolint:containedctx // intentionally stores context to preserve span parentage
 type rootSpan struct {
 	ctx  context.Context
 	span oteltrace.Span

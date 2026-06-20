@@ -205,6 +205,7 @@ func TestRAGEnsureCollectionConcurrentCallersShareSuccess(t *testing.T) {
 
 type countingStore struct {
 	stubStore
+
 	count       uint64
 	upsertCalls int
 }

@@ -82,7 +82,7 @@ func (r *Splitter) Split(_ context.Context) iter.Seq2[document.Document, error] 
 	return func(yield func(document.Document, error) bool) {
 		data, err := os.ReadFile(r.source)
 		if err != nil {
-			yield(document.Document{}, &ErrReadFile{Source: r.source, Err: err})
+			yield(document.Document{}, &ReadFileError{Source: r.source, Err: err})
 			return
 		}
 

@@ -60,6 +60,7 @@ type AgentInfo struct {
 // call Prompt and AsTool without threading the client separately.
 type AgentHandle struct {
 	AgentInfo
+
 	client *Client
 }
 

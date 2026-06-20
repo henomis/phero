@@ -115,7 +115,17 @@ linters:
       # examples/ is demo code; flag defaults and buffer sizes there are self-documenting.
       - path: examples/
         linters:
+          - gocyclo
+          - gocognit
+          - funlen
+          - errcheck
+          - dupl
+          - gosec
+          - bodyclose
+          - lll
+          - goconst
           - mnd
+          - govet
 
 formatters:
   enable: [gofumpt, goimports]
