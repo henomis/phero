@@ -85,7 +85,7 @@ func (g *GrepTool) Tool() *llm.Tool {
 	return g.tool
 }
 
-//nolint:gocognit
+//nolint:gocognit,gocyclo,funlen
 func (g *GrepTool) grep(_ context.Context, input *GrepInput) (*GrepOutput, error) {
 	if input == nil {
 		return nil, fmt.Errorf("nil input")

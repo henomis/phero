@@ -28,7 +28,7 @@ import (
 type EditInput struct {
 	FilePath   string `json:"file_path" jsonschema:"description=The absolute path to the file to modify"`
 	OldString  string `json:"old_string" jsonschema:"description=The text to replace"`
-	NewString  string `json:"new_string" jsonschema:"description=The text to replace it with (must be different from old_string)"` //nolint:lll
+	NewString  string `json:"new_string" jsonschema:"description=The text to replace it with (must be different from old_string)"`  //nolint:lll
 	ReplaceAll bool   `json:"replace_all,omitempty" jsonschema:"description=Replace all occurrences of old_string (default false)"` //nolint:lll
 }
 

@@ -201,7 +201,7 @@ func applyPromptCaching(params *anthropicapi.MessageNewParams) {
 // separate consecutive user messages, which Anthropic rejects (or which silently
 // degrades future parallel tool use).
 //
-//nolint:gocognit
+//nolint:gocognit,funlen
 func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam, []anthropicapi.MessageParam, error) {
 	var systemParts []string
 

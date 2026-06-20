@@ -33,7 +33,7 @@ const (
 type ReadInput struct {
 	FilePath string `json:"file_path" jsonschema:"description=The absolute path to the file to read"`
 	Offset   int    `json:"offset,omitempty" jsonschema:"description=The line number to start reading from. Only provide if the file is too large to read at once"` //nolint:lll
-	Limit    int    `json:"limit,omitempty" jsonschema:"description=The number of lines to read. Only provide if the file is too large to read at once"` //nolint:lll
+	Limit    int    `json:"limit,omitempty" jsonschema:"description=The number of lines to read. Only provide if the file is too large to read at once"`            //nolint:lll
 }
 
 // ReadOutput is the output schema for the read tool.

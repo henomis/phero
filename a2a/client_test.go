@@ -87,7 +87,11 @@ func TestAsTool_Success(t *testing.T) {
 	}
 
 	// Serialize to JSON and check the output field — toolOutput is unexported.
-	b, _ := json.Marshal(result)
+	b, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("json.Marshal result: %v", err)
+	}
+
 	if !strings.Contains(string(b), "pong") {
 		t.Errorf("serialized result = %s, want to contain %q", b, "pong")
 	}
@@ -118,7 +122,11 @@ func TestAsTool_RESTTransport(t *testing.T) {
 		t.Fatalf("Handle: %v", err)
 	}
 
-	b, _ := json.Marshal(result)
+	b, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("json.Marshal result: %v", err)
+	}
+
 	if !strings.Contains(string(b), "rest-pong") {
 		t.Errorf("serialized result = %s, want to contain %q", b, "rest-pong")
 	}

@@ -25,8 +25,8 @@ import (
 const (
 	defaultInitialBackoff = 500 * time.Millisecond
 	defaultMaxBackoff     = 30 * time.Second
-	jitterHalfDivisor    = 2
-	jitterQuarterDivisor = 4
+	jitterHalfDivisor     = 2
+	jitterQuarterDivisor  = 4
 )
 
 // RetryOption configures a Retry middleware.

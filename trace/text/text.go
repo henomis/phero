@@ -81,7 +81,7 @@ func (t *Tracer) Trace(event trace.Event) {
 	t.mu.Unlock()
 }
 
-//nolint:gocognit
+//nolint:gocognit,funlen
 func (t *Tracer) format(event trace.Event) string {
 	switch e := event.(type) {
 	case trace.AgentStartEvent:

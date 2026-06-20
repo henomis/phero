@@ -81,7 +81,7 @@ func (t *Tracer) Trace(event trace.Event) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	_ = t.enc.Encode(r)
+	_ = t.enc.Encode(r) //nolint:errchkjson // tracer intentionally swallows encode errors to avoid disrupting the agent
 }
 
 // toRecord maps a typed Event to a JSON-serialisable record.

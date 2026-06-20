@@ -51,8 +51,8 @@ const (
 	defaultTableName = "vector_store"
 	// firstIDArg is the placeholder index for the first element ID in DELETE
 	// queries; $1 is reserved for the collection name.
-	firstIDArg     = 2
-	avgFloatChars  = 10
+	firstIDArg    = 2
+	avgFloatChars = 10
 )
 
 // Store is a PostgreSQL-backed implementation of vectorstore.Store.

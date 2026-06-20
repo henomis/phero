@@ -24,14 +24,14 @@ import (
 )
 
 const (
-	defaultSkillsRootPath  = "skills"
-	skillFileName          = "SKILL.md"
-	yamlFrontmatterDelim   = "---"
+	defaultSkillsRootPath   = "skills"
+	skillFileName           = "SKILL.md"
+	yamlFrontmatterDelim    = "---"
 	yamlFrontmatterSections = 3
-	toolNameRead           = "read"
-	toolNameWrite         = "write"
-	toolNameEdit          = "edit"
-	toolNameBash          = "bash"
+	toolNameRead            = "read"
+	toolNameWrite           = "write"
+	toolNameEdit            = "edit"
+	toolNameBash            = "bash"
 )
 
 // Parser discovers and parses skills under a root directory.

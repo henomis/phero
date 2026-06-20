@@ -129,7 +129,7 @@ func encodeResponseChunk(text string) []byte {
 		Data string `json:"data"`
 	}
 
-	b, _ := json.Marshal(chunk{Type: chunkTypeResponse, Data: text})
+	b, _ := json.Marshal(chunk{Type: chunkTypeResponse, Data: text}) //nolint:errchkjson,lll // struct contains only string fields
 
 	return b
 }
@@ -141,14 +141,14 @@ func encodeStatusChunk(status string) []byte {
 		Data string `json:"data"`
 	}
 
-	b, _ := json.Marshal(chunk{Type: chunkTypeStatus, Data: status})
+	b, _ := json.Marshal(chunk{Type: chunkTypeStatus, Data: status}) //nolint:errchkjson,lll // struct contains only string fields
 
 	return b
 }
 
 // encodeHeartbeat serialises a heartbeat payload to JSON (§8.3).
 func encodeHeartbeat(p heartbeatPayload) []byte {
-	b, _ := json.Marshal(p)
+	b, _ := json.Marshal(p) //nolint:errchkjson // heartbeatPayload contains only string and int fields
 	return b
 }
 
@@ -230,7 +230,7 @@ func encodeErrorBody(errCode, message string) []byte {
 		Message string `json:"message"`
 	}
 
-	b, _ := json.Marshal(body{Error: errCode, Message: message})
+	b, _ := json.Marshal(body{Error: errCode, Message: message}) //nolint:errchkjson // struct contains only string fields
 
 	return b
 }

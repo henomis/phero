@@ -37,8 +37,8 @@ var _ vectorstore.Store = (*Store)(nil)
 var idNamespace = uuid.MustParse("1b671a64-40d5-491e-99b0-da01ff1f3341")
 
 const (
-	propID          = "pheroId"
-	propPayload     = "pheroPayload"
+	propID           = "pheroId"
+	propPayload      = "pheroPayload"
 	weaviateTypeText = "text"
 )
 

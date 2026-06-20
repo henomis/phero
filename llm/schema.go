@@ -55,7 +55,7 @@ func ensureStrictJSONSchema(schema map[string]any) (map[string]any, error) {
 
 // ensureStrictJSONSchemaRecursive recursively processes a JSON schema to make it strict.
 //
-//nolint:gocognit
+//nolint:gocognit,gocyclo,funlen
 func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[string]any) (map[string]any, error) {
 	schema, ok := jsonSchema.(map[string]any)
 	if !ok {
