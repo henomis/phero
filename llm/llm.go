@@ -27,6 +27,9 @@ import (
 // ContentType identifies the kind of content within a ContentPart.
 type ContentType string
 
+// mimeSniffBytes is the number of bytes used for MIME type sniffing (matches http.DetectContentType).
+const mimeSniffBytes = 512
+
 const (
 	// ContentTypeText is a plain-text content part.
 	ContentTypeText ContentType = "text"
@@ -123,8 +126,8 @@ func ImageFile(path string) (ContentPart, error) {
 // falls back to the file extension.
 func detectImageMIMEType(data []byte, path string) string {
 	sniff := data
-	if len(sniff) > 512 {
-		sniff = sniff[:512]
+	if len(sniff) > mimeSniffBytes {
+		sniff = sniff[:mimeSniffBytes]
 	}
 
 	mt := http.DetectContentType(sniff)

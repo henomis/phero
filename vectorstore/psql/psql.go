@@ -47,7 +47,13 @@ const (
 	DistanceDot
 )
 
-const defaultTableName = "vector_store"
+const (
+	defaultTableName = "vector_store"
+	// firstIDArg is the placeholder index for the first element ID in DELETE
+	// queries; $1 is reserved for the collection name.
+	firstIDArg     = 2
+	avgFloatChars  = 10
+)
 
 // Store is a PostgreSQL-backed implementation of vectorstore.Store.
 //
@@ -341,7 +347,7 @@ func (s *Store) Delete(ctx context.Context, ids []string) error {
 
 	args = append(args, s.collection)
 	for i, id := range filtered {
-		placeholders = append(placeholders, fmt.Sprintf("$%d", i+2))
+		placeholders = append(placeholders, fmt.Sprintf("$%d", i+firstIDArg))
 		args = append(args, id)
 	}
 
@@ -397,7 +403,7 @@ func vectorLiteral(vec []float32) (string, error) {
 	}
 
 	b := strings.Builder{}
-	b.Grow(len(vec) * 10)
+	b.Grow(len(vec) * avgFloatChars)
 	b.WriteByte('[')
 
 	for i, v := range vec {

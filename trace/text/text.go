@@ -38,6 +38,9 @@ const (
 	ansiWhite     = "\033[37m"
 	ansiBoldWhite = "\033[1;37m"
 	ansiBoldRed   = "\033[1;31m"
+
+	truncateShortLen = 120
+	truncateLongLen  = 200
 )
 
 // Tracer writes human-readable, colour-coded trace lines to an io.Writer.
@@ -84,7 +87,7 @@ func (t *Tracer) format(event trace.Event) string {
 		return fmt.Sprintf("%s%s %s[%s]%s %s▶  AgentStart%s  input=%q",
 			ansiBoldWhite, ts, ansiDim, e.AgentName, ansiReset,
 			ansiBoldWhite, ansiReset,
-			truncate(e.Input, 120))
+			truncate(e.Input, truncateShortLen))
 
 	case trace.AgentEndEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
@@ -98,7 +101,7 @@ func (t *Tracer) format(event trace.Event) string {
 		return fmt.Sprintf("%s%s %s[%s]%s %s■  AgentEnd%s  iterations=%d output=%q",
 			ansiBoldWhite, ts, ansiDim, e.AgentName, ansiReset,
 			ansiBoldWhite, ansiReset,
-			e.Iterations, truncate(e.Output, 120))
+			e.Iterations, truncate(e.Output, truncateShortLen))
 
 	case trace.AgentIterationEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
@@ -128,7 +131,7 @@ func (t *Tracer) format(event trace.Event) string {
 
 		errText := ""
 		if summary.Error != "" {
-			errText = fmt.Sprintf(" error=%q", truncate(summary.Error, 120))
+			errText = fmt.Sprintf(" error=%q", truncate(summary.Error, truncateShortLen))
 		}
 
 		cost := ""
@@ -168,7 +171,7 @@ func (t *Tracer) format(event trace.Event) string {
 		toolCalls := 0
 
 		if e.Message != nil {
-			content = truncate(e.Message.TextContent(), 120)
+			content = truncate(e.Message.TextContent(), truncateShortLen)
 			toolCalls = len(e.Message.ToolCalls)
 		}
 
@@ -190,7 +193,7 @@ func (t *Tracer) format(event trace.Event) string {
 		return fmt.Sprintf("%s%s%s %s🧠 Reasoning%s%s  %q",
 			ansiMagenta, ts, agent,
 			ansiBold, ansiReset, iter,
-			truncate(e.Content, 200))
+			truncate(e.Content, truncateLongLen))
 
 	case trace.ToolCallEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
@@ -198,7 +201,7 @@ func (t *Tracer) format(event trace.Event) string {
 		return fmt.Sprintf("%s%s %s[%s]%s %s⚙  ToolCall%s  iter=%d tool=%s args=%s",
 			ansiYellow, ts, ansiDim, e.AgentName, ansiReset,
 			ansiYellow, ansiReset,
-			e.Iteration, e.ToolName, truncate(e.Arguments, 200))
+			e.Iteration, e.ToolName, truncate(e.Arguments, truncateLongLen))
 
 	case trace.ToolResultEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
@@ -212,7 +215,7 @@ func (t *Tracer) format(event trace.Event) string {
 		return fmt.Sprintf("%s%s %s[%s]%s %s✓  ToolResult%s  iter=%d tool=%s result=%s",
 			ansiGreen, ts, ansiDim, e.AgentName, ansiReset,
 			ansiGreen, ansiReset,
-			e.Iteration, e.ToolName, truncate(e.Result, 200))
+			e.Iteration, e.ToolName, truncate(e.Result, truncateLongLen))
 
 	case trace.MemorySaveEvent:
 		ts := e.Timestamp.Format("15:04:05.000")

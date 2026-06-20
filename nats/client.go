@@ -27,6 +27,10 @@ import (
 	"github.com/henomis/phero/llm"
 )
 
+// natsSubjectParts is the number of dot-separated tokens in a verb-first NATS subject:
+// agents.{verb}.{agent}.{owner}.{name}.
+const natsSubjectParts = 5
+
 // AgentInfo holds the parsed discovery record for a single agent instance.
 type AgentInfo struct {
 	// InstanceID is the framework-assigned per-instance identifier (§3.4).
@@ -330,8 +334,8 @@ func parseAgentInfo(data []byte) *AgentInfo {
 // instanceNameFromSubject extracts the 5th token from a verb-first subject
 // agents.{verb}.{agent}.{owner}.{name}.
 func instanceNameFromSubject(subject string) string {
-	parts := strings.SplitN(subject, ".", 5)
-	if len(parts) == 5 {
+	parts := strings.SplitN(subject, ".", natsSubjectParts)
+	if len(parts) == natsSubjectParts {
 		return parts[4]
 	}
 

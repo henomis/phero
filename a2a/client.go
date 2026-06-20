@@ -28,6 +28,8 @@ import (
 	"github.com/henomis/phero/llm"
 )
 
+const defaultPollingInterval = 500 * time.Millisecond
+
 // ClientOption configures a [Client].
 type ClientOption func(*clientConfig)
 
@@ -108,7 +110,7 @@ func NewClient(ctx context.Context, baseURL string, opts ...ClientOption) (*Clie
 
 	cfg := &clientConfig{
 		resolver:        agentcard.DefaultResolver,
-		pollingInterval: 500 * time.Millisecond,
+		pollingInterval: defaultPollingInterval,
 	}
 
 	for _, o := range opts {

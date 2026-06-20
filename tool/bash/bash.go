@@ -88,6 +88,8 @@ const MaxTimeout = 600 * time.Second
 // single tool call before truncation.
 const MaxOutputChars = 30000
 
+const randomIDBytes = 8
+
 // safeModeBlocklist contains substring patterns that are blocked when safe mode is enabled.
 var safeModeBlocklist = []string{
 	"rm -rf /",
@@ -555,7 +557,7 @@ func (t *Tool) startBackground(command string, timeout time.Duration) (string, e
 }
 
 func randomID() (string, error) {
-	b := make([]byte, 8)
+	b := make([]byte, randomIDBytes)
 	if _, err := io.ReadFull(rand.Reader, b); err != nil {
 		return "", err
 	}

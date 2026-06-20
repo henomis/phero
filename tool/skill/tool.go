@@ -26,7 +26,8 @@ import (
 )
 
 const (
-	toolName = "skill"
+	toolName            = "skill"
+	catalogSizeMultiple = 2
 )
 
 // Parser defines the minimal skill discovery/parsing contract used by this tool.
@@ -130,7 +131,7 @@ func (t *Tool) buildCatalog(skillsRootPath string) ([]catalogEntry, map[string]c
 	}
 
 	entries := make([]catalogEntry, 0, len(dirs))
-	commands := make(map[string]catalogEntry, len(dirs)*2)
+	commands := make(map[string]catalogEntry, len(dirs)*catalogSizeMultiple)
 
 	for _, dir := range dirs {
 		skillItem, err := t.parser.Parse(dir)

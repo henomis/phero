@@ -72,6 +72,7 @@ linters:
         - os.MkdirAll
         - os.OpenFile
         - os.WriteFile
+        - os.Exit
         - prometheus.ExponentialBuckets
         - prometheus.ExponentialBucketsRange
         - prometheus.LinearBuckets
@@ -81,6 +82,8 @@ linters:
         - strconv.ParseFloat
         - strconv.ParseInt
         - strconv.ParseUint
+      ignored-files:
+        - "llm/pricing.go"
 
     govet:
       enable-all: true
@@ -109,6 +112,10 @@ linters:
           - mnd
       - path: (.+)_test\.go
         text: 'dot-imports: '
+      # examples/ is demo code; flag defaults and buffer sizes there are self-documenting.
+      - path: examples/
+        linters:
+          - mnd
 
 formatters:
   enable: [gofumpt, goimports]

@@ -25,6 +25,8 @@ import (
 const (
 	defaultInitialBackoff = 500 * time.Millisecond
 	defaultMaxBackoff     = 30 * time.Second
+	jitterHalfDivisor    = 2
+	jitterQuarterDivisor = 4
 )
 
 // RetryOption configures a Retry middleware.
@@ -118,8 +120,8 @@ func (r *retryLLM) Execute(ctx context.Context, messages []llm.Message, tools []
 		}
 
 		sleep := backoff
-		if half := int64(backoff) / 2; half > 0 {
-			jitter := time.Duration(rand.Int63n(half)) - backoff/4 //nolint:gosec
+		if half := int64(backoff) / jitterHalfDivisor; half > 0 {
+			jitter := time.Duration(rand.Int63n(half)) - backoff/jitterQuarterDivisor //nolint:gosec
 
 			sleep += jitter
 			if sleep < 0 {

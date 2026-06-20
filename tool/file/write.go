@@ -25,6 +25,8 @@ import (
 	"github.com/henomis/phero/llm"
 )
 
+const defaultFileMode = 0o644
+
 // WriteInput is the input schema for the write tool.
 type WriteInput struct {
 	FilePath string `json:"file_path" jsonschema:"description=The absolute path to the file to write"`
@@ -85,7 +87,7 @@ func (w *WriteTool) write(_ context.Context, input *WriteInput) (*WriteOutput, e
 		return nil, err
 	}
 
-	perm := os.FileMode(0o644)
+	perm := os.FileMode(defaultFileMode)
 
 	if info, statErr := os.Stat(resolvedPath); statErr == nil {
 		if w.noOverwrite {

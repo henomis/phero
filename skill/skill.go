@@ -24,10 +24,11 @@ import (
 )
 
 const (
-	defaultSkillsRootPath = "skills"
-	skillFileName         = "SKILL.md"
-	yamlFrontmatterDelim  = "---"
-	toolNameRead          = "read"
+	defaultSkillsRootPath  = "skills"
+	skillFileName          = "SKILL.md"
+	yamlFrontmatterDelim   = "---"
+	yamlFrontmatterSections = 3
+	toolNameRead           = "read"
 	toolNameWrite         = "write"
 	toolNameEdit          = "edit"
 	toolNameBash          = "bash"
@@ -132,8 +133,8 @@ func Parse(r io.Reader) (*Skill, error) {
 		return nil, ErrMissingYAMLFrontmatter
 	}
 
-	parts := strings.SplitN(content, yamlFrontmatterDelim, 3)
-	if len(parts) < 3 {
+	parts := strings.SplitN(content, yamlFrontmatterDelim, yamlFrontmatterSections)
+	if len(parts) < yamlFrontmatterSections {
 		return nil, ErrInvalidSkillFormat
 	}
 

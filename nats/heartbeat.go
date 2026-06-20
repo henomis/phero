@@ -23,6 +23,10 @@ import (
 	natsclient "github.com/nats-io/nats.go"
 )
 
+// heartbeatMissedFactor is the number of missed heartbeat intervals before an
+// agent is considered stale (§8.2).
+const heartbeatMissedFactor = 3
+
 // HeartbeatTracker subscribes to the heartbeat wildcard agents.hb.*.*.* and
 // tracks the liveness of each agent instance by instance_id (§8.1–§8.2).
 //
@@ -73,7 +77,7 @@ func (t *HeartbeatTracker) IsOnline(instanceID string) bool {
 		return false
 	}
 
-	threshold := time.Duration(e.payload.IntervalS) * time.Second * 3
+	threshold := time.Duration(e.payload.IntervalS) * time.Second * heartbeatMissedFactor
 
 	return time.Since(e.lastSeen) <= threshold
 }

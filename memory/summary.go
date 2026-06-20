@@ -44,7 +44,10 @@ Analyze the dialogue below and generate a concise summary based on these four pi
 
 // SummarySystemMessagePrefix is the prefix prepended to the generated summary
 // when it is stored as a system message in memory.
-const SummarySystemMessagePrefix = "Summary of previous conversation:\n"
+const (
+	SummarySystemMessagePrefix = "Summary of previous conversation:\n"
+	summaryDefaultHalve        = 2
+)
 
 // ClampSummarySize validates and normalises a (summarizeThreshold, summarySize)
 // pair for use by WithSummarization options across all memory backends.
@@ -55,7 +58,7 @@ const SummarySystemMessagePrefix = "Summary of previous conversation:\n"
 //     (minimum 1) to prevent an infinite summarization loop.
 func ClampSummarySize(summarizeThreshold, summarySize uint) uint {
 	if summarySize == 0 && summarizeThreshold > 0 {
-		summarySize = summarizeThreshold / 2
+		summarySize = summarizeThreshold / summaryDefaultHalve
 		if summarySize == 0 {
 			summarySize = 1
 		}

@@ -28,6 +28,8 @@ import (
 	"github.com/henomis/phero/trace"
 )
 
+const maxToolNameLength = 64
+
 // Agent runs a chat loop using an llm.LLM, optionally with tools and memory.
 type Agent struct {
 	llm         llm.LLM
@@ -609,8 +611,8 @@ func SanitizeToolName(name string) string {
 
 		return '_'
 	}, name)
-	if len(s) > 64 {
-		s = s[:64]
+	if len(s) > maxToolNameLength {
+		s = s[:maxToolNameLength]
 	}
 
 	if s == "" {
