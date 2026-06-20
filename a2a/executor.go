@@ -101,7 +101,7 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 // will then pick up the Canceled status emitted by Execute.
 func (e *agentExecutor) Cancel(_ context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[sdka2a.Event, error] {
 	return func(yield func(sdka2a.Event, error) bool) {
-		if fn, ok := e.cancels.Load(execCtx.TaskID); ok {
+		if fn, hasCancelFunction := e.cancels.Load(execCtx.TaskID); hasCancelFunction {
 			if cancelFn, ok := fn.(context.CancelFunc); ok {
 				cancelFn()
 			}
