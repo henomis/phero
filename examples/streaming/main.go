@@ -49,14 +49,14 @@ func main() {
 		}
 
 		switch ev.Type {
-		case agent.AgentEventTextDelta:
+		case agent.EventTextDelta:
 			// Print tokens as they arrive.
 			fmt.Print(ev.TextDelta)
-		case agent.AgentEventToolCall:
+		case agent.EventToolCall:
 			fmt.Printf("\n[calling tool %s(%s)]\n", ev.ToolName, ev.ToolArgs)
-		case agent.AgentEventToolResult:
+		case agent.EventToolResult:
 			fmt.Printf("\n[tool %s -> %s]\n", ev.ToolName, ev.ToolResult)
-		case agent.AgentEventDone:
+		case agent.EventDone:
 			fmt.Println()
 
 			if s := ev.Result.Summary; s != nil {

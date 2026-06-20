@@ -23,64 +23,64 @@ import (
 	"github.com/henomis/phero/trace"
 )
 
-// AgentEventType identifies the kind of an AgentEvent emitted by RunStream.
-type AgentEventType int
+// EventType identifies the kind of an Event emitted by RunStream.
+type EventType int
 
 const (
-	// AgentEventTextDelta carries an incremental piece of the assistant's text answer.
-	AgentEventTextDelta AgentEventType = iota
-	// AgentEventReasoningDelta carries an incremental piece of extended-thinking text.
-	AgentEventReasoningDelta
-	// AgentEventToolCall is emitted just before a tool call is executed.
-	AgentEventToolCall
-	// AgentEventToolResult is emitted after a tool call returns.
-	AgentEventToolResult
-	// AgentEventDone is the terminal event; its Result holds the final run result.
-	AgentEventDone
+	// EventTextDelta carries an incremental piece of the assistant's text answer.
+	EventTextDelta EventType = iota
+	// EventReasoningDelta carries an incremental piece of extended-thinking text.
+	EventReasoningDelta
+	// EventToolCall is emitted just before a tool call is executed.
+	EventToolCall
+	// EventToolResult is emitted after a tool call returns.
+	EventToolResult
+	// EventDone is the terminal event; its Result holds the final run result.
+	EventDone
 )
 
-// AgentEvent is a single streaming event produced by Agent.RunStream.
-type AgentEvent struct {
+// Event is a single streaming event produced by Agent.RunStream.
+type Event struct {
 	// Type identifies which kind of event this is and therefore which fields are set.
-	Type AgentEventType
-	// TextDelta holds incremental assistant text (AgentEventTextDelta).
+	Type EventType
+	// TextDelta holds incremental assistant text (EventTextDelta).
 	TextDelta string
-	// ReasoningDelta holds incremental reasoning text (AgentEventReasoningDelta).
+	// ReasoningDelta holds incremental reasoning text (EventReasoningDelta).
 	ReasoningDelta string
-	// ToolName is the tool being called or that returned (AgentEventToolCall / AgentEventToolResult).
+	// ToolName is the tool being called or that returned (EventToolCall / EventToolResult).
 	ToolName string
-	// ToolArgs is the raw JSON argument string of a tool call (AgentEventToolCall).
+	// ToolArgs is the raw JSON argument string of a tool call (EventToolCall).
 	ToolArgs string
-	// ToolResult is the text result of a tool call (AgentEventToolResult).
+	// ToolResult is the text result of a tool call (EventToolResult).
 	ToolResult string
-	// ToolError reports whether the tool call failed (AgentEventToolResult).
+	// ToolError reports whether the tool call failed (EventToolResult).
 	ToolError bool
 	// Iteration is the 1-based agent loop iteration this event belongs to.
 	Iteration int
-	// Result holds the final agent result (AgentEventDone only).
+	// Result holds the final agent result (EventDone only).
 	Result *Result
 }
 
-// emitFunc pushes an AgentEvent to a streaming consumer. It returns false once
+// emitFunc pushes an Event to a streaming consumer. It returns false once
 // the consumer has stopped iterating, after which further calls are no-ops.
-type emitFunc func(AgentEvent) bool
+type emitFunc func(Event) bool
 
 // RunStream runs the agent like Run, but streams progress as a sequence of
-// AgentEvents instead of returning only the final result.
+// Events instead of returning only the final result.
 //
 // It yields text and reasoning deltas as the model produces them, a ToolCall and
 // ToolResult event around each tool invocation, and finally a single
-// AgentEventDone whose Result mirrors what Run would have returned. If the run
+// EventDone whose Result mirrors what Run would have returned. If the run
 // fails, the iterator yields the error and stops.
 //
 // Streaming uses the underlying LLM's incremental API when it implements
 // llm.StreamingLLM; otherwise it transparently falls back to a single buffered
 // response (see llm.StreamOrBuffer). The trace.Tracer continues to receive the
 // usual lifecycle events.
-func (a *Agent) RunStream(ctx context.Context, parts ...llm.ContentPart) iter.Seq2[AgentEvent, error] {
-	return func(yield func(AgentEvent, error) bool) {
+func (a *Agent) RunStream(ctx context.Context, parts ...llm.ContentPart) iter.Seq2[Event, error] {
+	return func(yield func(Event, error) bool) {
 		stopped := false
-		emit := func(ev AgentEvent) bool {
+		emit := func(ev Event) bool {
 			if stopped {
 				return false
 			}
@@ -100,11 +100,11 @@ func (a *Agent) RunStream(ctx context.Context, parts ...llm.ContentPart) iter.Se
 		}
 
 		if err != nil {
-			yield(AgentEvent{}, err)
+			yield(Event{}, err)
 			return
 		}
 
-		emit(AgentEvent{Type: AgentEventDone, Result: result})
+		emit(Event{Type: EventDone, Result: result})
 	}
 }
 
@@ -141,11 +141,11 @@ func (a *Agent) streamIteration(
 		}
 
 		if chunk.TextDelta != "" {
-			emit(AgentEvent{Type: AgentEventTextDelta, TextDelta: chunk.TextDelta, Iteration: iteration})
+			emit(Event{Type: EventTextDelta, TextDelta: chunk.TextDelta, Iteration: iteration})
 		}
 
 		if chunk.ReasoningDelta != "" {
-			emit(AgentEvent{Type: AgentEventReasoningDelta, ReasoningDelta: chunk.ReasoningDelta, Iteration: iteration})
+			emit(Event{Type: EventReasoningDelta, ReasoningDelta: chunk.ReasoningDelta, Iteration: iteration})
 		}
 
 		if chunk.Done {

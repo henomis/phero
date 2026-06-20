@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package main demonstrates human-in-the-loop tool confirmation.
 package main
 
 import (

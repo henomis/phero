@@ -51,14 +51,14 @@ type Output struct {
 	Truncated bool   `json:"truncated"`
 }
 
-// BashOutputInput represents input for retrieving background shell output.
-type BashOutputInput struct {
+// OutputInput represents input for retrieving background shell output.
+type OutputInput struct {
 	BashID string `json:"bash_id" jsonschema:"description=ID of the background shell to read."`
 	Filter string `json:"filter,omitempty" jsonschema:"description=Optional regular expression to include only matching lines."` //nolint:lll
 }
 
-// BashOutputOutput represents incremental output from a background shell.
-type BashOutputOutput struct {
+// OutputOutput represents incremental output from a background shell.
+type OutputOutput struct {
 	Output    string `json:"output"`
 	Running   bool   `json:"running"`
 	Truncated bool   `json:"truncated"`
@@ -375,7 +375,7 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 	return nil, err
 }
 
-func (t *Tool) output(_ context.Context, input *BashOutputInput) (*BashOutputOutput, error) {
+func (t *Tool) output(_ context.Context, input *OutputInput) (*OutputOutput, error) {
 	if input == nil {
 		return nil, ErrNilInput
 	}
@@ -430,7 +430,7 @@ func (t *Tool) output(_ context.Context, input *BashOutputInput) (*BashOutputOut
 
 	trimmed, truncated := t.truncateOutput(incremental)
 
-	return &BashOutputOutput{Output: trimmed, Running: running, Truncated: truncated}, nil
+	return &OutputOutput{Output: trimmed, Running: running, Truncated: truncated}, nil
 }
 
 func (t *Tool) kill(_ context.Context, input *KillShellInput) (*KillShellOutput, error) {

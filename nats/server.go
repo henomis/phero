@@ -247,7 +247,7 @@ func (s *Server) processPrompt(ctx context.Context, req natsio.Request) {
 
 // handleStatus replies with a heartbeat-shaped JSON payload (§8.7).
 // The request body is ignored per the spec.
-func (s *Server) handleStatus(ctx context.Context, req natsio.Request) {
+func (s *Server) handleStatus(_ context.Context, req natsio.Request) {
 	instanceID := ""
 	if s.svc != nil {
 		instanceID = s.svc.Info().ID

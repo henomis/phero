@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package openai provides an OpenAI-backed Embedder implementation.
 package openai
 
 import (

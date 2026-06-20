@@ -160,7 +160,7 @@ func TestExecute_WithToolUse(t *testing.T) {
 		Location string `json:"location"`
 	}
 
-	tool, err := llm.NewTool("get_weather", "returns weather", func(_ context.Context, in *weatherInput) (string, error) {
+	tool, err := llm.NewTool("get_weather", "returns weather", func(_ context.Context, _ *weatherInput) (string, error) {
 		return "cloudy", nil
 	})
 	if err != nil {

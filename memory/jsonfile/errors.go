@@ -16,4 +16,5 @@ package jsonfile
 
 import "errors"
 
+// ErrEmptyFilePath is returned when the file path is empty.
 var ErrEmptyFilePath = errors.New("empty file path")

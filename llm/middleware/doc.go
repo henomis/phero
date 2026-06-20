@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package middleware provides built-in llm.LLMMiddleware implementations for
+// Package middleware provides built-in llm.Middleware implementations for
 // the phero framework.
 //
 // Middlewares are composed using llm.Use:

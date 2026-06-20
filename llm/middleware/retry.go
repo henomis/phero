@@ -57,7 +57,7 @@ func WithShouldRetry(fn func(error) bool) RetryOption {
 	return func(c *retryConfig) { c.shouldRetry = fn }
 }
 
-// NewRetry returns an llm.LLMMiddleware that automatically retries failed
+// NewRetry returns an llm.Middleware that automatically retries failed
 // Execute calls up to maxAttempts times using exponential back-off with jitter.
 //
 // Context cancellation is honoured between retries: if ctx is cancelled while
@@ -66,7 +66,7 @@ func WithShouldRetry(fn func(error) bool) RetryOption {
 //	mw, err := middleware.NewRetry(3, middleware.WithInitialBackoff(200*time.Millisecond))
 //	if err != nil { ... }
 //	client := llm.Use(base, mw)
-func NewRetry(maxAttempts int, opts ...RetryOption) (llm.LLMMiddleware, error) {
+func NewRetry(maxAttempts int, opts ...RetryOption) (llm.Middleware, error) {
 	if maxAttempts < 1 {
 		return nil, ErrInvalidMaxAttempts
 	}

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package main demonstrates how to compose multiple llm.LLMMiddleware values
+// Package main demonstrates how to compose multiple llm.Middleware values
 // around an LLM backend.
 package main
 

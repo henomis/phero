@@ -68,9 +68,9 @@ func TestRunStream_StreamsTextDeltasAndDone(t *testing.T) {
 		nEvents++
 
 		switch ev.Type {
-		case agent.AgentEventTextDelta:
+		case agent.EventTextDelta:
 			text.WriteString(ev.TextDelta)
-		case agent.AgentEventDone:
+		case agent.EventDone:
 			done = ev.Result
 		}
 	}
@@ -80,7 +80,7 @@ func TestRunStream_StreamsTextDeltasAndDone(t *testing.T) {
 	}
 
 	if done == nil {
-		t.Fatal("expected an AgentEventDone with a result")
+		t.Fatal("expected an EventDone with a result")
 	}
 
 	if done.TextContent() != "Hello, world" {
@@ -122,25 +122,25 @@ func TestRunStream_EmitsToolEventsViaBufferedFallback(t *testing.T) {
 		}
 
 		switch ev.Type {
-		case agent.AgentEventToolCall:
+		case agent.EventToolCall:
 			if ev.ToolName == "echo_tool" {
 				sawToolCall = true
 			}
-		case agent.AgentEventToolResult:
+		case agent.EventToolResult:
 			if ev.ToolName == "echo_tool" && ev.ToolResult == "echoed" && !ev.ToolError {
 				sawToolResult = true
 			}
-		case agent.AgentEventDone:
+		case agent.EventDone:
 			done = ev.Result
 		}
 	}
 
 	if !sawToolCall {
-		t.Error("expected an AgentEventToolCall for echo_tool")
+		t.Error("expected an EventToolCall for echo_tool")
 	}
 
 	if !sawToolResult {
-		t.Error("expected an AgentEventToolResult for echo_tool")
+		t.Error("expected an EventToolResult for echo_tool")
 	}
 
 	if done == nil || done.TextContent() != "done" {

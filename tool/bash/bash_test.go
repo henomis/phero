@@ -263,7 +263,7 @@ func TestBashTool_RunInBackground_WithOutputTool(t *testing.T) {
 	var got string
 
 	for i := 0; i < 20; i++ {
-		out, outputErr := tool.output(context.Background(), &BashOutputInput{BashID: start.BashID})
+		out, outputErr := tool.output(context.Background(), &OutputInput{BashID: start.BashID})
 		if outputErr != nil {
 			t.Fatalf("output: %v", outputErr)
 		}

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package main demonstrates a RAG-powered chatbot.
 package main
 
 import (

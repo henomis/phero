@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package memory defines the Memory interface for conversational context storage.
 package memory
 
 import (

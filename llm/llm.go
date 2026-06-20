@@ -308,18 +308,18 @@ type LLM interface {
 	Execute(context.Context, []Message, []*Tool) (*Result, error)
 }
 
-// LLMMiddleware wraps an LLM, decorating its Execute method with additional behavior.
+// Middleware wraps an LLM, decorating its Execute method with additional behavior.
 //
 // Use Use to compose multiple middlewares around a base LLM.
 // Middleware order is preserved: Use(base, m1, m2) means m1 is the outermost layer and
 // runs first, delegating to m2, which delegates to base.
-type LLMMiddleware func(next LLM) LLM
+type Middleware func(next LLM) LLM
 
 // Use wraps base with the provided middlewares, returning a new LLM.
 //
 // Middlewares are applied in order: the first middleware listed is the outermost layer.
 // For example, Use(base, logging, ratelimit) produces logging(ratelimit(base)).
-func Use(base LLM, middlewares ...LLMMiddleware) LLM {
+func Use(base LLM, middlewares ...Middleware) LLM {
 	result := base
 	for i := len(middlewares) - 1; i >= 0; i-- {
 		result = middlewares[i](result)

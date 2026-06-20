@@ -76,7 +76,7 @@ func runLimiterTokenProducer(tokens chan struct{}, interval time.Duration, stopC
 	}
 }
 
-// NewLimiter returns an llm.LLMMiddleware that enforces two constraints on
+// NewLimiter returns an llm.Middleware that enforces two constraints on
 // Execute calls:
 //
 //   - At most requestsPerSecond calls are started per second (token bucket).
@@ -92,7 +92,7 @@ func runLimiterTokenProducer(tokens chan struct{}, interval time.Duration, stopC
 //	if err != nil { ... }
 //	defer stop()
 //	client := llm.Use(openaiClient, mw)
-func NewLimiter(requestsPerSecond float64, maxConcurrentRequests int) (llm.LLMMiddleware, func(), error) {
+func NewLimiter(requestsPerSecond float64, maxConcurrentRequests int) (llm.Middleware, func(), error) {
 	if requestsPerSecond <= 0 {
 		return nil, nil, ErrInvalidRate
 	}

@@ -122,9 +122,9 @@ func TestHandleSkillNotFound(t *testing.T) {
 
 	_, err = tool.Tool().Handle(context.Background(), `{"command":"csv"}`)
 
-	var notFound *SkillNotFoundError
+	var notFound *NotFoundError
 	if !errors.As(err, &notFound) {
-		t.Fatalf("Handle() error = %v, want SkillNotFoundError", err)
+		t.Fatalf("Handle() error = %v, want NotFoundError", err)
 	}
 }
 

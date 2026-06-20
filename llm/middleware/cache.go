@@ -67,7 +67,7 @@ func WithSkipToolCalls(skip bool) SemanticCacheOption {
 	return func(c *semanticCacheConfig) { c.skipWithTools = skip }
 }
 
-// NewSemanticCache returns an llm.LLMMiddleware that caches LLM responses keyed
+// NewSemanticCache returns an llm.Middleware that caches LLM responses keyed
 // by the semantic similarity of the conversation.
 //
 // On each Execute the conversation is embedded with embedder and the nearest
@@ -81,7 +81,7 @@ func WithSkipToolCalls(skip bool) SemanticCacheOption {
 //	client := llm.Use(base, cacheMW)
 func NewSemanticCache(
 	embedder embedding.Embedder, store vectorstore.Store, opts ...SemanticCacheOption,
-) (llm.LLMMiddleware, error) {
+) (llm.Middleware, error) {
 	if embedder == nil {
 		return nil, ErrNilEmbedder
 	}

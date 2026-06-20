@@ -72,7 +72,7 @@ type usage struct {
 func newTestServer(t *testing.T, resp chatCompletionResponse) *httptest.Server {
 	t.Helper()
 
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
@@ -258,7 +258,7 @@ func TestExecute_WithToolCalls(t *testing.T) {
 		Location string `json:"location"`
 	}
 
-	tool, err := llm.NewTool("get_weather", "returns weather", func(_ context.Context, in *weatherInput) (string, error) {
+	tool, err := llm.NewTool("get_weather", "returns weather", func(_ context.Context, _ *weatherInput) (string, error) {
 		return "sunny", nil
 	})
 	if err != nil {

@@ -29,13 +29,13 @@ var (
 	ErrSkillDescriptionRequired = errors.New("skill tool: skill description is required")
 )
 
-// SkillNotFoundError is returned when a command references an unknown skill.
-type SkillNotFoundError struct {
+// NotFoundError is returned when a command references an unknown skill.
+type NotFoundError struct {
 	Command string
 }
 
 // Error returns the formatted error message.
-func (e *SkillNotFoundError) Error() string {
+func (e *NotFoundError) Error() string {
 	return "skill tool: skill not found: " + e.Command
 }
 

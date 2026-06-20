@@ -15,7 +15,6 @@
 package llm
 
 import (
-	"encoding/json"
 	"reflect"
 	"testing"
 )
@@ -736,31 +735,26 @@ func TestHasMoreThanNKeys(t *testing.T) {
 
 // TestEnsureStrictJSONSchema_ComplexRealWorldExample tests a complex real-world schema.
 func TestEnsureStrictJSONSchema_ComplexRealWorldExample(t *testing.T) {
-	schemaJSON := `{
-		"$defs": {
-			"Address": {
+	schema := map[string]any{
+		"$defs": map[string]any{
+			"Address": map[string]any{
 				schemaKeyType: schemaTypeObject,
-				schemaKeyProperties: {
-					"street": {schemaKeyType: "string"},
-					"city": {schemaKeyType: "string"}
-				}
-			}
+				schemaKeyProperties: map[string]any{
+					"street": map[string]any{schemaKeyType: "string"},
+					"city":   map[string]any{schemaKeyType: "string"},
+				},
+			},
 		},
 		schemaKeyType: schemaTypeObject,
-		schemaKeyProperties: {
-			"name": {schemaKeyType: "string"},
-			"age": {schemaKeyType: "integer"},
-			"address": {"$ref": "#/$defs/Address"},
-			"tags": {
+		schemaKeyProperties: map[string]any{
+			"name": map[string]any{schemaKeyType: "string"},
+			"age":  map[string]any{schemaKeyType: "integer"},
+			"address": map[string]any{"$ref": "#/$defs/Address"},
+			"tags": map[string]any{
 				schemaKeyType: "array",
-				"items": {schemaKeyType: "string"}
-			}
-		}
-	}`
-
-	var schema map[string]any
-	if err := json.Unmarshal([]byte(schemaJSON), &schema); err != nil {
-		t.Fatalf("failed to parse test schema: %v", err)
+				"items":       map[string]any{schemaKeyType: "string"},
+			},
+		},
 	}
 
 	result, err := ensureStrictJSONSchema(schema)

@@ -236,7 +236,7 @@ func (t *Tool) handle(_ context.Context, input *Input) (*Output, error) {
 
 	entry, ok := t.commands[strings.ToLower(command)]
 	if !ok {
-		return nil, &SkillNotFoundError{Command: command}
+		return nil, &NotFoundError{Command: command}
 	}
 
 	skillItem, err := t.parser.Parse(entry.dir)

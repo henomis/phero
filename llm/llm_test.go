@@ -157,10 +157,8 @@ func TestToolMiddleware_InputValidation_ShortCircuits(t *testing.T) {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
-	tool.Use(func(_ *Tool, next ToolHandler) ToolHandler {
-		return func(ctx context.Context, arguments string) (any, error) {
-			// For this test we don't need to decode JSON; just reject based on raw args.
-			_ = arguments
+	tool.Use(func(_ *Tool, _ ToolHandler) ToolHandler {
+		return func(_ context.Context, _ string) (any, error) {
 			return nil, errors.New("invalid")
 		}
 	})

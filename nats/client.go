@@ -102,7 +102,7 @@ func NewClient(nc *natsclient.Conn, opts ...ClientOption) *Client {
 // [WithDiscoveryTimeout]). Any DiscoverOption filters are applied client-side.
 //
 // Returns [ErrNoAgentsFound] if the filtered result set is empty.
-func (c *Client) Discover(ctx context.Context, opts ...DiscoverOption) ([]*AgentHandle, error) {
+func (c *Client) Discover(_ context.Context, opts ...DiscoverOption) ([]*AgentHandle, error) {
 	filter := &discoverFilter{}
 
 	for _, opt := range opts {
@@ -162,7 +162,7 @@ func (c *Client) Discover(ctx context.Context, opts ...DiscoverOption) ([]*Agent
 // Prompt sends a plain-text prompt to the agent described by info and returns
 // a [Stream] for consuming the streamed response.  The caller must call
 // [Stream.Close] when done.
-func (c *Client) Prompt(ctx context.Context, info *AgentInfo, text string) (*Stream, error) {
+func (c *Client) Prompt(_ context.Context, info *AgentInfo, text string) (*Stream, error) {
 	if strings.TrimSpace(text) == "" {
 		return nil, ErrEmptyPrompt
 	}

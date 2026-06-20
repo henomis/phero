@@ -23,7 +23,7 @@ import (
 	"github.com/henomis/phero/textsplitter"
 )
 
-func TestSplitter_ImplementsSplitter(t *testing.T) {
+func TestSplitter_ImplementsSplitter(_ *testing.T) {
 	var _ textsplitter.Splitter = New("", 100, 0)
 }
 

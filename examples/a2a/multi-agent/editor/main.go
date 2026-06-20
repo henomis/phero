@@ -52,7 +52,7 @@ type methodLogger struct {
 	a2asrv.PassthroughCallInterceptor
 }
 
-func (methodLogger) Before(ctx context.Context, callCtx *a2asrv.CallContext, req *a2asrv.Request) (context.Context, any, error) {
+func (methodLogger) Before(ctx context.Context, callCtx *a2asrv.CallContext, _ *a2asrv.Request) (context.Context, any, error) {
 	log.Printf("a2a call: method=%s", callCtx.Method())
 	return ctx, nil, nil
 }

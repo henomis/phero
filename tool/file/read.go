@@ -100,7 +100,7 @@ func (r *ReadTool) read(_ context.Context, input *ReadInput) (*ReadOutput, error
 	}
 
 	if r.maxFileSize > 0 && info.Size() > r.maxFileSize {
-		return nil, &FileTooLargeError{Path: resolvedPath, Size: info.Size(), Limit: r.maxFileSize}
+		return nil, &TooLargeError{Path: resolvedPath, Size: info.Size(), Limit: r.maxFileSize}
 	}
 
 	contentBytes, err := os.ReadFile(resolvedPath)

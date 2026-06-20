@@ -88,7 +88,7 @@ func WithResultGuard(name string, guard ResultGuard) GuardrailOption {
 	}
 }
 
-// NewGuardrails returns an llm.LLMMiddleware that executes message guards
+// NewGuardrails returns an llm.Middleware that executes message guards
 // before the model call and result guards after a successful response.
 //
 // Guards are executed in the order they are added. The first failing guard stops
@@ -99,7 +99,7 @@ func WithResultGuard(name string, guard ResultGuard) GuardrailOption {
 //			return nil
 //		}),
 //	)
-func NewGuardrails(opts ...GuardrailOption) llm.LLMMiddleware {
+func NewGuardrails(opts ...GuardrailOption) llm.Middleware {
 	cfg := &guardrailConfig{}
 	for _, o := range opts {
 		o(cfg)

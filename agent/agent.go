@@ -120,12 +120,12 @@ func (a *Agent) getTool(toolName string) (*llm.Tool, bool) {
 	return nil, false
 }
 
-// AgentHandoffInput is the structured argument passed to a handoff tool.
-type AgentHandoffInput struct {
+// HandoffInput is the structured argument passed to a handoff tool.
+type HandoffInput struct {
 	Context string `json:"context" jsonschema:"The contextual data gathered by the source agent to be passed to the receiving agent."` //nolint:lll
 }
 
-// AddTool registers a function tool.
+// AddHandoff registers another agent as a handoff target, exposing it as a tool named handoff_to_<name>.
 //
 // It returns ToolAlreadyExistsError if a tool with the same name is already present.
 func (a *Agent) AddHandoff(handoffAgent *Agent) error {
@@ -138,7 +138,7 @@ func (a *Agent) AddHandoff(handoffAgent *Agent) error {
 	tool, err := llm.NewTool(
 		toolName,
 		handoffAgent.Description(),
-		func(ctx context.Context, i *AgentHandoffInput) (string, error) {
+		func(_ context.Context, _ *HandoffInput) (string, error) {
 			return fmt.Sprintf("%s: success", toolName), nil
 		},
 	)
@@ -191,7 +191,7 @@ func (a *Agent) Run(ctx context.Context, parts ...llm.ContentPart) (*Result, err
 	return a.run(ctx, nil, parts...)
 }
 
-// run executes the agent loop, optionally emitting streaming AgentEvents.
+// run executes the agent loop, optionally emitting streaming Events.
 //
 // When emit is nil the agent runs in buffered mode (identical to the original
 // Run). When emit is non-nil, each LLM call is streamed and text/reasoning deltas
@@ -387,8 +387,8 @@ func (a *Agent) processToolCalls(
 
 	if emit != nil {
 		for _, toolCall := range toolCalls {
-			emit(AgentEvent{
-				Type:      AgentEventToolCall,
+			emit(Event{
+				Type:      EventToolCall,
 				ToolName:  toolCall.Function.Name,
 				ToolArgs:  toolCall.Function.Arguments,
 				Iteration: iteration,
@@ -414,8 +414,8 @@ func (a *Agent) processToolCalls(
 
 	if emit != nil {
 		for i, result := range results {
-			emit(AgentEvent{
-				Type:       AgentEventToolResult,
+			emit(Event{
+				Type:       EventToolResult,
 				ToolName:   toolCalls[i].Function.Name,
 				ToolResult: llm.TextContent(result.Parts...),
 				ToolError:  result.ToolError,
