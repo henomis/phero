@@ -111,7 +111,7 @@ func ImageBase64(mimeType, data string) ContentPart {
 // those accepted by OpenAI and Anthropic: image/jpeg, image/png, image/gif,
 // and image/webp.
 func ImageFile(path string) (ContentPart, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // path is controlled by caller
 	if err != nil {
 		return ContentPart{}, fmt.Errorf("llm.ImageFile: read %q: %w", path, err)
 	}

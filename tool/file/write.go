@@ -99,7 +99,7 @@ func (w *WriteTool) write(_ context.Context, input *WriteInput) (*WriteOutput, e
 		return nil, statErr
 	}
 
-	if mkdirErr := os.MkdirAll(filepath.Dir(resolvedPath), 0o755); mkdirErr != nil {
+	if mkdirErr := os.MkdirAll(filepath.Dir(resolvedPath), 0o750); mkdirErr != nil {
 		return nil, mkdirErr
 	}
 

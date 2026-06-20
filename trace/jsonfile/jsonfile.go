@@ -58,7 +58,7 @@ func New(filePath string) (*Tracer, error) {
 		return nil, ErrEmptyFilePath
 	}
 
-	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // path is supplied by the caller at construction time
 	if err != nil {
 		return nil, err
 	}

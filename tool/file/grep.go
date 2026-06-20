@@ -174,7 +174,7 @@ func (g *GrepTool) grep(_ context.Context, input *GrepInput) (*GrepOutput, error
 	out := make([]string, 0)
 
 	for _, path := range files {
-		contentBytes, readErr := os.ReadFile(path)
+		contentBytes, readErr := os.ReadFile(path) //nolint:gosec // path comes from glob results within the working dir
 		if readErr != nil {
 			continue
 		}

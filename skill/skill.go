@@ -92,7 +92,7 @@ func (p *Parser) List() ([]string, error) {
 func (p *Parser) Parse(skillName string) (*Skill, error) {
 	skillFile := filepath.Join(p.root, skillName, skillFileName)
 
-	f, err := os.Open(skillFile)
+	f, err := os.Open(skillFile) //nolint:gosec // path is constructed from a trusted root and skill name
 	if err != nil {
 		return nil, err
 	}

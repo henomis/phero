@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"unicode"
 
 	"github.com/go-openapi/strfmt"
@@ -275,6 +276,10 @@ func (s *Store) Query(
 	filtered := cfg.Filter != nil && len(cfg.Filter.Conditions) > 0
 	if filtered {
 		fetchLimit = min(limit*overfetchFactor, overfetchCap)
+	}
+
+	if fetchLimit > uint64(math.MaxInt) {
+		fetchLimit = uint64(math.MaxInt)
 	}
 
 	nearVec := s.client.GraphQL().NearVectorArgBuilder().WithVector(query)

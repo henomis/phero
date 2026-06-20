@@ -103,7 +103,7 @@ func (r *ReadTool) read(_ context.Context, input *ReadInput) (*ReadOutput, error
 		return nil, &TooLargeError{Path: resolvedPath, Size: info.Size(), Limit: r.maxFileSize}
 	}
 
-	contentBytes, err := os.ReadFile(resolvedPath)
+	contentBytes, err := os.ReadFile(resolvedPath) //nolint:gosec // path is resolved and validated above
 	if err != nil {
 		return nil, err
 	}

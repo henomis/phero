@@ -97,7 +97,7 @@ func (e *EditTool) edit(_ context.Context, input *EditInput) (*EditOutput, error
 
 	mode := info.Mode().Perm()
 
-	content, err := os.ReadFile(resolvedPath)
+	content, err := os.ReadFile(resolvedPath) //nolint:gosec // path is resolved and validated above
 	if err != nil {
 		return nil, err
 	}
