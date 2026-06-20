@@ -11,6 +11,7 @@
 <body>
   <nav class="navbar">
     <ul>
+      <li><a href="../index.html">ð Phero</a></li>
       <li><a href="index.html">Home</a></li>
       <li><a href="llm.html">LLM</a></li>
       <li><a href="agent.html">Agent</a></li>
@@ -219,7 +220,7 @@ fmt.Println(result.TextContent())</code></pre>
     <section>
       <h2>LLM middleware</h2>
       <p>
-        Just as tools support middleware, the <code>llm</code> package provides an <code>LLMMiddleware</code> type and a
+        Just as tools support middleware, the <code>llm</code> package provides a <code>Middleware</code> type and a
         <code>llm.Use</code> function to compose decorators around any <code>llm.LLM</code>.
         This is the right place to add caching, rate limiting, logging, or automatic retries without modifying individual backends.
       </p>

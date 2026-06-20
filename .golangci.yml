@@ -1,0 +1,172 @@
+version: "2"
+
+linters:
+  default: none
+
+  enable:
+    - asasalint
+    - bodyclose
+    - containedctx
+    - copyloopvar
+    - dogsled
+    - dupl
+    - embeddedstructfieldcheck
+    - errcheck
+    - errchkjson
+    - errname
+    - exhaustive
+    - fatcontext
+    - funlen
+    - gocheckcompilerdirectives
+    - gocognit
+    - goconst
+    - gocyclo
+    - gosec
+    - govet
+    - ineffassign
+    - lll
+    - prealloc
+    - predeclared
+    - recvcheck
+    - revive
+    - sloglint
+    - staticcheck
+    - unconvert
+    - unparam
+    - unused
+    - wsl_v5
+    - mnd
+
+  settings:
+    staticcheck:
+      checks: ["all"]
+
+    lll:
+      line-length: 120
+      tab-width: 1
+
+    goconst:
+      min-len: 2
+      min-occurrences: 2
+
+    errcheck:
+      check-type-assertions: true
+
+    asasalint:
+      use-builtin-exclusions: true
+
+    funlen:
+      # Default: 60
+      lines: 100
+      # Default: 40
+      statements: 50
+
+    gocognit:
+      # Default: 30 (but we recommend 10-20)
+      min-complexity: 20
+
+    mnd:
+      ignored-functions:
+        - os.Chmod
+        - os.Mkdir
+        - os.MkdirAll
+        - os.OpenFile
+        - os.WriteFile
+        - os.Exit
+        - prometheus.ExponentialBuckets
+        - prometheus.ExponentialBucketsRange
+        - prometheus.LinearBuckets
+        - strconv.FormatFloat
+        - strconv.FormatInt
+        - strconv.FormatUint
+        - strconv.ParseFloat
+        - strconv.ParseInt
+        - strconv.ParseUint
+      ignored-files:
+        - "llm/pricing.go"
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+      settings:
+        shadow:
+          # Default: false
+          strict: true
+
+  exclusions:
+    generated: lax
+    rules:
+      # Exclude some linters from running on tests files.
+      - path: (.+)_test\.go
+        linters:
+          - gocyclo
+          - gocognit
+          - funlen
+          - errcheck
+          - dupl
+          - gosec
+          - bodyclose
+          - lll
+          - goconst
+          - mnd
+      - path: (.+)_test\.go
+        text: 'dot-imports: '
+      # examples/ is demo code; flag defaults and buffer sizes there are self-documenting.
+      - path: examples/
+        linters:
+          - gocyclo
+          - gocognit
+          - funlen
+          - errcheck
+          - dupl
+          - gosec
+          - bodyclose
+          - lll
+          - goconst
+          - mnd
+          - govet
+          - gocognit
+
+formatters:
+  enable: [gofumpt, goimports]
+  settings:
+    gofumpt:
+      extra-rules: true
+
+    # If you want local imports grouped separately, uncomment and set your module path.
+    # goimports:
+    #   local-prefixes:
+    #     - github.com/cybusio/yourmodule
+
+  exclusions:
+    # exclude all *_test.go files everywhere
+    paths:
+      - ".*_test\\.go$"
+
+run:
+  timeout: 0s            # no lint timeout
+  tests: true            # lint *_test.go (per-linter exclusions still apply)
+  concurrency: 0         # auto (based on CPUs/quota)
+  issues-exit-code: 1
+  relative-path-mode: cfg
+
+issues:
+  max-issues-per-linter: 0  # no cap
+  max-same-issues: 0        # no cap
+  uniq-by-line: true
+  new: false
+  fix: false                # set to true to apply supported autofixes
+
+output:
+  formats:
+    text:
+      path: stdout
+      print-linter-name: true
+      print-issued-lines: true
+      colors: true
+  sort-order: [linter, severity, file]
+  show-stats: true
+
+severity:
+  default: "@linter"        # keep each linter's native severity

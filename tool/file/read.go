@@ -32,8 +32,8 @@ const (
 // ReadInput is the input schema for the read tool.
 type ReadInput struct {
 	FilePath string `json:"file_path" jsonschema:"description=The absolute path to the file to read"`
-	Offset   int    `json:"offset,omitempty" jsonschema:"description=The line number to start reading from. Only provide if the file is too large to read at once"`
-	Limit    int    `json:"limit,omitempty" jsonschema:"description=The number of lines to read. Only provide if the file is too large to read at once"`
+	Offset   int    `json:"offset,omitempty" jsonschema:"description=The line number to start reading from. Only provide if the file is too large to read at once"` //nolint:lll
+	Limit    int    `json:"limit,omitempty" jsonschema:"description=The number of lines to read. Only provide if the file is too large to read at once"`            //nolint:lll
 }
 
 // ReadOutput is the output schema for the read tool.
@@ -65,6 +65,7 @@ func NewReadTool(opts ...Option) (*ReadTool, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	r.tool = tool
 
 	return r, nil
@@ -79,6 +80,7 @@ func (r *ReadTool) read(_ context.Context, input *ReadInput) (*ReadOutput, error
 	if input == nil {
 		return nil, fmt.Errorf("nil input")
 	}
+
 	if strings.TrimSpace(input.FilePath) == "" {
 		return nil, ErrPathRequired
 	}
@@ -92,14 +94,16 @@ func (r *ReadTool) read(_ context.Context, input *ReadInput) (*ReadOutput, error
 	if err != nil {
 		return nil, err
 	}
+
 	if info.IsDir() {
 		return nil, fmt.Errorf("%s is a directory", resolvedPath)
 	}
+
 	if r.maxFileSize > 0 && info.Size() > r.maxFileSize {
-		return nil, &FileTooLargeError{Path: resolvedPath, Size: info.Size(), Limit: r.maxFileSize}
+		return nil, &TooLargeError{Path: resolvedPath, Size: info.Size(), Limit: r.maxFileSize}
 	}
 
-	contentBytes, err := os.ReadFile(resolvedPath)
+	contentBytes, err := os.ReadFile(resolvedPath) //nolint:gosec // path is resolved and validated above
 	if err != nil {
 		return nil, err
 	}
@@ -111,6 +115,7 @@ func (r *ReadTool) read(_ context.Context, input *ReadInput) (*ReadOutput, error
 	if offset < 0 {
 		offset = 0
 	}
+
 	limit := input.Limit
 	if limit <= 0 {
 		limit = defaultReadLimit
@@ -119,12 +124,14 @@ func (r *ReadTool) read(_ context.Context, input *ReadInput) (*ReadOutput, error
 	if offset >= len(lines) {
 		return &ReadOutput{Content: ""}, nil
 	}
+
 	end := offset + limit
 	if end > len(lines) {
 		end = len(lines)
 	}
 
 	var b strings.Builder
+
 	for i := offset; i < end; i++ {
 		line := truncateRunes(lines[i], maxLineChars)
 		fmt.Fprintf(&b, "%6d\t%s\n", i+1, line)
@@ -140,26 +147,33 @@ func bytesToUTF8WithHexEscapes(b []byte) string {
 
 	var out strings.Builder
 	out.Grow(len(b))
+
 	for len(b) > 0 {
 		r, size := utf8.DecodeRune(b)
 		if r == utf8.RuneError && size == 1 {
 			fmt.Fprintf(&out, "\\x%02x", b[0])
 			b = b[1:]
+
 			continue
 		}
+
 		out.WriteRune(r)
+
 		b = b[size:]
 	}
+
 	return out.String()
 }
 
-func truncateRunes(s string, max int) string {
-	if max <= 0 {
+func truncateRunes(s string, limit int) string {
+	if limit <= 0 {
 		return ""
 	}
+
 	r := []rune(s)
-	if len(r) <= max {
+	if len(r) <= limit {
 		return s
 	}
-	return string(r[:max])
+
+	return string(r[:limit])
 }

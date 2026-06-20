@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phero Project Homepage</title>
+  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css?family=Space+Grotesk:700|Inter:400,500|JetBrains+Mono:400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+</head>
+<body>
+  <nav class="navbar">
+    <ul>
+      <li><a href="../index.html">ð Phero</a></li>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="llm.html">LLM</a></li>
+      <li><a href="agent.html">Agent</a></li>
+      <li><a href="trace.html">Trace</a></li>
+      <li><a href="tool.html">Tool</a></li>
+      <li><a href="mcp.html">MCP</a></li>
+      <li><a href="a2a.html">A2A</a></li>
+      <li><a href="nats.html">NATS</a></li>
+      <li><a href="embedding.html">Embedding</a></li>
+      <li><a href="textsplitter.html">Textsplitter</a></li>
+      <li><a href="vectorstore.html">Vectorstore</a></li>
+      <li><a href="rag.html">RAG</a></li>
+      <li><a href="memory.html">Memory</a></li>
+      <li><a href="skill.html">Skill</a></li>
+    </ul>
+  </nav>
+  <header>
+    <img class="logo" src="images/phero-logo.png" alt="Phero Logo">
+    <h1>🐜 Phero</h1>
+    <p class="subtitle">The chemical language of AI agents.</p>
+  </header>
+  <main>
+    <section>
+      <h2>Why Phero?</h2>
+      <ul>
+        <li>🎯 <strong>Purpose-built for agents</strong>: Not an LLM wrapper; a framework for orchestrating cooperative agent systems</li>
+        <li>🧩 <strong>Composable primitives</strong>: Small, focused packages that solve specific problems</li>
+        <li>🔧 <strong>Tool-first design</strong>: Built-in support for function tools, skills, RAG, and MCP</li>
+        <li>🎨 <strong>Developer-friendly</strong>: Clean APIs, opt-in tracing, OpenAI-compatible + Anthropic support</li>
+        <li>🪶 <strong>Lightweight</strong>: No heavy dependencies; just Go and your choice of LLM provider</li>
+      </ul>
+    </section>
+    <section>
+      <h2>Features</h2>
+      <ul>
+        <li>🤝 <strong>Agent orchestration</strong>: Multi-agent workflows with role specialization, coordination, and handoffs</li>
+        <li>🌐 <strong>A2A protocol</strong>: Expose any agent as an HTTP A2A server, or call remote A2A agents as local tools</li>
+        <li>🔀 <strong>NATS Agent Protocol</strong>: Register agents as NATS micro services and discover/call them over pub/sub; wire-compatible with TypeScript and Python SDKs</li>
+        <li>🧩 <strong>LLM abstraction</strong>: Work with OpenAI-compatible endpoints (OpenAI, Ollama, etc.) and Anthropic</li>
+        <li>🛠️ <strong>Function tools</strong>: Expose Go functions as callable tools with automatic JSON Schema generation</li>
+        <li>📚 <strong>RAG (Retrieval-Augmented Generation)</strong>: Built-in vector storage and semantic search</li>
+        <li>🧠 <strong>Skills system</strong>: Define reusable agent capabilities in SKILL.md files</li>
+        <li>🔌 <strong>MCP support</strong>: Integrate Model Context Protocol servers as agent tools</li>
+        <li>🧾 <strong>Memory management</strong>: Conversational context storage for agents</li>
+        <li>🔍 <strong>Tracing</strong>: Observe agent, LLM, tool, and memory lifecycle events with colorized terminal output</li>
+        <li>✂️ <strong>Text splitting</strong>: Document chunking for RAG workflows</li>
+        <li>🧬 <strong>Embeddings</strong>: Semantic search capabilities via OpenAI embeddings</li>
+        <li>🗄️ <strong>Vector stores</strong>: Vector database integration</li>
+      </ul>
+    </section>
+    <section>
+      <h2>Architecture</h2>
+      <ul>
+        <li><strong>Agent Layer</strong>
+          <ul>
+            <li><code>agent</code>: Core orchestration for LLM-based agents with tool execution and chat loops</li>
+            <li><code>memory</code>: Conversational context management for multi-turn interactions (in-process, file-backed, PostgreSQL-backed, NATS JetStream KV-backed, or semantic RAG-backed)</li>
+          </ul>
+        </li>
+        <li><strong>LLM Layer</strong>
+          <ul>
+            <li><code>llm</code>: Clean LLM interface with function tool support and JSON Schema utilities</li>
+            <li><code>llm/openai</code>: OpenAI-compatible client (works with OpenAI, Ollama, and compatible endpoints)</li>
+            <li><code>llm/anthropic</code>: Anthropic API client</li>
+          </ul>
+        </li>
+        <li><strong>Observability</strong>
+          <ul>
+            <li><code>trace</code>: Typed lifecycle events; human-readable text tracer (<code>trace/text</code>) and NDJSON file tracer (<code>trace/jsonfile</code>); also wraps raw LLM calls</li>
+          </ul>
+        </li>
+        <li><strong>Knowledge Layer</strong>
+          <ul>
+            <li><code>embedding</code>: Embedding interface for semantic operations</li>
+            <li><code>embedding/openai</code>: OpenAI embeddings implementation</li>
+            <li><code>vectorstore</code>: Vector storage interface for similarity search</li>
+            <li><code>vectorstore/qdrant</code>: Qdrant vector database integration</li>
+            <li><code>vectorstore/psql</code>: PostgreSQL + pgvector integration</li>
+            <li><code>vectorstore/weaviate</code>: Weaviate vector database integration</li>
+            <li><code>textsplitter/recursive</code>: Recursive character-based chunking</li>
+            <li><code>textsplitter/markdown</code>: Markdown-aware chunking (heading-first separators)</li>
+            <li><code>rag</code>: Complete RAG pipeline combining embeddings and vector stores</li>
+          </ul>
+        </li>
+        <li><strong>Tools & Integration</strong>
+          <ul>
+            <li><code>skill</code>: Parse SKILL.md files and expose them as agent capabilities</li>
+            <li><code>mcp</code>: Model Context Protocol adapter for external tool integration</li>
+            <li><code>tool/agent</code>: Create and run a sub-agent at runtime as a delegated tool</li>
+            <li><code>tool/file</code>: Filesystem tools (<code>read</code>, <code>write</code>, <code>edit</code>, <code>glob</code>, <code>grep</code>)</li>
+            <li><code>tool/bash</code>: Bash command execution with guardrails (blocklist, allowlist, timeout, safe mode) and background execution</li>
+            <li><code>tool/human</code>: Structured user-interaction checkpoints with validated questions and options</li>
+            <li><code>a2a</code>: Agent-to-Agent (A2A) protocol server and client for inter-agent networking over HTTP</li>
+            <li><code>nats</code>: NATS Agent Protocol v0.3 server and client for inter-agent networking over NATS pub/sub</li>
+          </ul>
+        </li>
+      </ul>
+    </section>
+    <section>
+      <h2>Examples</h2>
+      <table style="width:100%;background:#1A1A2E;color:#E8E8E8;border-radius:8px;">
+        <thead>
+          <tr><th>Example</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/simple-agent">Simple Agent</a></td><td><strong>Start here!</strong> Minimal example showing one agent with one custom tool perfect for learning the basics</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/multimodal">Multimodal</a></td><td>Send text + image inputs to a vision-capable model using typed content parts</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/audio">Audio</a></td><td>End-to-end speech-to-text and text-to-speech using the OpenAI backend</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/llm-middleware">LLM Middleware</a></td><td>Wrap an LLM with composable middleware for logging and other cross-cutting concerns</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/conversational-agent">Conversational Agent</a></td><td>REPL-style chatbot with short-term conversational memory and a simple built-in tool</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/long-term-memory">Long-Term Memory</a></td><td>REPL-style chatbot with semantic long-term memory (RAG) backed by Qdrant</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/nats-memory">NATS Memory</a></td><td>Persistent chatbot backed by NATS JetStream KV; conversation survives process restarts and supports named sessions</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/handoff">Handoff</a></td><td>One agent hands work off to a specialist agent at runtime using the built-in handoff mechanism</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/a2a/server">A2A Server</a></td><td>Expose a Phero agent as an A2A-compliant HTTP server for cross-process agent calls</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/a2a/client">A2A Client</a></td><td>Connect to a remote A2A agent and use it as a local tool inside an orchestrator</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/a2a/multi-agent">A2A Multi-Agent Newsroom</a></td><td>Three specialised agents (researcher, writer, editor) each running as an independent A2A server, coordinated by a local orchestrator</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/nats-agent">NATS Agent</a></td><td>Register a Phero agent as a NATS micro service and interact with it from an interactive client using the NATS Agent Protocol</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/nats-agent/multi-agent">NATS Multi-Agent Newsroom</a></td><td>Three specialised agents running as NATS micro services, orchestrated via service discovery and <code>Client.AsTool()</code></td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/debate-committee">Debate Committee</a></td><td>Multi-agent architecture where committee members debate independently and a judge synthesizes the final decision</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/evaluator-optimizer">Evaluator-Optimizer</a></td><td>Iterative generation loop where an optimizer proposes drafts and an evaluator critiques them until quality criteria are met</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/human-in-the-loop">Human-in-the-Loop</a></td><td>Multi-agent flow that pauses for explicit human approval before continuing each action</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/multi-agent-workflow">Multi-Agent Workflow</a></td><td>Classic Plan → Execute → Analyze → Critique pattern with specialized agent roles</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/orchestrator-workers">Orchestrator-Workers</a></td><td>Dynamic task decomposition where an orchestrator delegates sub-tasks to worker agents</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/parallel-research">Parallel Research</a></td><td>Fan-out/fan-in workflow that runs multiple specialist researchers in parallel and merges their findings</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/prompt-chaining">Prompt Chaining</a></td><td>Sequential multi-step prompting with a programmatic gate between stages</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/rag-chatbot">RAG Chatbot</a></td><td>Terminal chatbot with semantic search over local documents using Qdrant</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/skills">Skill</a></td><td>Use the tool/skill dispatcher to load SKILL.md instructions into the current conversation</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/social-simulation">Social Simulation</a></td><td>Multi-agent social simulation with persona-driven actors and emergent interactions</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/mcp">MCP Integration</a></td><td>Run an MCP server as a subprocess and expose its tools to agents</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/playwright-mcp">Playwright MCP</a></td><td>Connect browser automation tools through MCP and orchestrate them from an agent</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/supervisor-blackboard">Supervisor Blackboard</a></td><td>Supervisor-worker pattern with a shared blackboard for coordination</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/tracing">Tracing</a></td><td>Attach a colorized tracer to an agent and inspect LLM requests, tool calls, and memory events in real time</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Tracing</h2>
+      <p>
+        Tracing is opt-in. Attach a tracer to an agent with <code>SetTracer</code> to observe typed events for agent lifecycle,
+        LLM requests and responses, tool calls and results, and memory operations.
+      </p>
+
+      <pre><code class="language-go">a.SetTracer(text.New(os.Stderr))</code></pre>
+
+      <p>
+        The built-in text tracer writes colorized, human-readable lines to the terminal.
+        An NDJSON file tracer (<code>jsonfile.New</code>) is also available for structured log ingestion.
+        See <a href="trace.html">Trace</a> for the full package overview and usage examples.
+      </p>
+    </section>
+    <section>
+      <h2>Design Philosophy</h2>
+      <ol>
+        <li>Composability over monoliths: Each package does one thing well</li>
+        <li>Interfaces over implementations: Swap LLMs, vector stores, or embeddings easily</li>
+        <li>Explicit over implicit: No hidden magic; clear control flow</li>
+        <li>Tools are first-class: Function tools are the primary integration point</li>
+        <li>Developer experience matters: Clean APIs, helpful tracing, good error messages</li>
+      </ol>
+    </section>
+    <section>
+      <h2>Contributing</h2>
+      <p>Contributions are welcome! Please feel free to submit issues, feature requests, or pull requests.</p>
+    </section>
+    <section>
+      <h2>License</h2>
+      <p>This project is licensed under the Apache License 2.0. See the <a href="LICENSE">LICENSE</a> file for details.</p>
+    </section>
+    <section>
+      <h2>Acknowledgments</h2>
+      <p>Built with ❤️ by <a href="https://github.com/henomis">Simone Vellei</a>.</p>
+      <p>Inspired by the collaborative intelligence of ant colonies where independent agents work together toward shared goals, recognizing one another and coordinating through clear protocols.</p>
+      <p><strong>The ant is not just a mascot. It is the philosophy.</strong> 🐜</p>
+    </section>
+    <section>
+      <h2>Links</h2>
+      <ul>
+        <li><strong>Documentation</strong>: <a href="https://pkg.go.dev/github.com/henomis/phero">pkg.go.dev/github.com/henomis/phero</a></li>
+        <li><strong>Issues</strong>: <a href="https://github.com/henomis/phero/issues">github.com/henomis/phero/issues</a></li>
+        <li><strong>Discussions</strong>: <a href="https://github.com/henomis/phero/discussions">github.com/henomis/phero/discussions</a></li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

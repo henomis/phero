@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package main demonstrates the supervisor-blackboard coordination pattern.
 package main
 
 import (
@@ -41,8 +42,11 @@ type GoRunResult struct {
 }
 
 func main() {
-	var goal string
-	var timeout time.Duration
+	var (
+		goal    string
+		timeout time.Duration
+	)
+
 	flag.StringVar(&goal, "goal", "Do a quick health-check of this repo: list Go packages and run Go tests, then summarize.", "High-level goal for the multi-agent workflow")
 	flag.DurationVar(&timeout, "timeout", 8*time.Minute, "Overall timeout for the run")
 	flag.Parse()
@@ -92,6 +96,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
+
 	client := openai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s base_url=%s", model, baseURL)
@@ -129,7 +134,9 @@ Be factual; do not speculate.`))
 	if err != nil {
 		return nil, err
 	}
+
 	researcher.SetMemory(shared)
+
 	if err := researcher.AddTool(goTool); err != nil {
 		return nil, err
 	}
@@ -145,6 +152,7 @@ Do not invent details. If the findings are missing, ask to re-run research.`))
 	if err != nil {
 		return nil, err
 	}
+
 	drafter.SetMemory(shared)
 
 	critic, err := agent.New(llmClient, "Critic Agent", strings.TrimSpace(`You are a critic / verifier agent.
@@ -159,6 +167,7 @@ Be direct and practical.`))
 	if err != nil {
 		return nil, err
 	}
+
 	critic.SetMemory(shared)
 
 	researchTool, err := researcher.AsTool(
@@ -205,14 +214,17 @@ Constraints:
 	if err != nil {
 		return nil, err
 	}
+
 	supervisor.SetMemory(shared)
 
 	if err := supervisor.AddTool(researchTool); err != nil {
 		return nil, err
 	}
+
 	if err := supervisor.AddTool(draftTool); err != nil {
 		return nil, err
 	}
+
 	if err := supervisor.AddTool(critiqueTool); err != nil {
 		return nil, err
 	}
@@ -232,6 +244,7 @@ func runGo(ctx context.Context, in *GoRunInput) (*GoRunResult, error) {
 	if in == nil {
 		return &GoRunResult{ExitCode: 2, Error: "missing input"}, nil
 	}
+
 	if len(in.Args) == 0 {
 		return &GoRunResult{ExitCode: 2, Error: "missing args"}, nil
 	}
@@ -240,6 +253,7 @@ func runGo(ctx context.Context, in *GoRunInput) (*GoRunResult, error) {
 	if sub != "test" && sub != "list" {
 		return &GoRunResult{ExitCode: 2, Error: fmt.Sprintf("unsupported go subcommand: %s", sub)}, nil
 	}
+
 	for _, a := range in.Args {
 		if strings.Contains(a, "\n") || strings.Contains(a, "\r") {
 			return &GoRunResult{ExitCode: 2, Error: "invalid args"}, nil
@@ -254,6 +268,7 @@ func runGo(ctx context.Context, in *GoRunInput) (*GoRunResult, error) {
 
 	cmd := exec.CommandContext(ctx, goPath, in.Args...)
 	out, err := cmd.CombinedOutput()
+
 	res := &GoRunResult{ExitCode: 0, Output: string(out)}
 	if err == nil {
 		return res, nil
@@ -263,10 +278,12 @@ func runGo(ctx context.Context, in *GoRunInput) (*GoRunResult, error) {
 	if errors.As(err, &ee) {
 		res.ExitCode = ee.ExitCode()
 		res.Error = err.Error()
+
 		return res, nil
 	}
 
 	res.ExitCode = 1
 	res.Error = err.Error()
+
 	return res, nil
 }

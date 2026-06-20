@@ -46,7 +46,7 @@ func TestEventTypes_ImplementEvent(t *testing.T) {
 
 // --- NoopTracer ---
 
-func TestNoopTracer_DiscardEvents(t *testing.T) {
+func TestNoopTracer_DiscardEvents(_ *testing.T) {
 	// Should not panic for any event type.
 	n := trace.Noop
 	n.Trace(trace.AgentStartEvent{AgentName: "x", Timestamp: time.Now()})
@@ -57,6 +57,7 @@ func TestNoopTracer_DiscardEvents(t *testing.T) {
 
 func TestWithTracer_FromContext(t *testing.T) {
 	var got []trace.Event
+
 	spy := &spyTracer{fn: func(e trace.Event) { got = append(got, e) }}
 
 	ctx := trace.WithTracer(context.Background(), spy)
@@ -66,12 +67,13 @@ func TestWithTracer_FromContext(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(got))
 	}
+
 	if _, ok := got[0].(trace.AgentStartEvent); !ok {
 		t.Errorf("expected AgentStartEvent, got %T", got[0])
 	}
 }
 
-func TestFromContext_NoTracer_ReturnsNoop(t *testing.T) {
+func TestFromContext_NoTracer_ReturnsNoop(_ *testing.T) {
 	tracer := trace.FromContext(context.Background())
 	// Should not panic.
 	tracer.Trace(trace.AgentEndEvent{AgentName: "a"})

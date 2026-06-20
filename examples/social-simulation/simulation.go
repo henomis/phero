@@ -42,6 +42,7 @@ type WorldFeed struct {
 func (f *WorldFeed) Append(e FeedEntry) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
 	f.entries = append(f.entries, e)
 }
 

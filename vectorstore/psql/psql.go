@@ -47,7 +47,13 @@ const (
 	DistanceDot
 )
 
-const defaultTableName = "vector_store"
+const (
+	defaultTableName = "vector_store"
+	// firstIDArg is the placeholder index for the first element ID in DELETE
+	// queries; $1 is reserved for the collection name.
+	firstIDArg    = 2
+	avgFloatChars = 10
+)
 
 // Store is a PostgreSQL-backed implementation of vectorstore.Store.
 //
@@ -117,6 +123,7 @@ func New(db *sql.DB, collection string, opts ...Option) (*Store, error) {
 	if db == nil {
 		return nil, ErrNilDB
 	}
+
 	if strings.TrimSpace(collection) == "" {
 		return nil, ErrEmptyCollection
 	}
@@ -128,6 +135,7 @@ func New(db *sql.DB, collection string, opts ...Option) (*Store, error) {
 		distance:        DistanceCosine,
 		ensureExtension: true,
 	}
+
 	for _, opt := range opts {
 		if opt != nil {
 			opt(s)
@@ -137,12 +145,15 @@ func New(db *sql.DB, collection string, opts ...Option) (*Store, error) {
 	if s.vectorSize == 0 {
 		return nil, ErrInvalidVectorSize
 	}
+
 	if strings.TrimSpace(s.tableName) == "" {
 		return nil, ErrEmptyTableName
 	}
+
 	if _, err := sqlutil.QuoteQualifiedIdent(s.tableName); err != nil {
 		return nil, ErrInvalidTableName
 	}
+
 	return s, nil
 }
 
@@ -165,6 +176,7 @@ func (s *Store) EnsureCollection(ctx context.Context) error {
 	stmt := fmt.Sprintf(createTableSQLTemplate, table, s.vectorSize)
 
 	_, err = s.db.ExecContext(ctx, stmt)
+
 	return err
 }
 
@@ -191,31 +203,35 @@ func (s *Store) Upsert(ctx context.Context, points []vectorstore.Point) error {
 		if p.ID == "" {
 			return ErrPointIDRequired
 		}
+
 		if len(p.Vector) == 0 {
 			return &EmptyVectorError{PointID: p.ID}
 		}
+
 		if uint64(len(p.Vector)) != s.vectorSize {
 			return &VectorSizeMismatchError{Expected: s.vectorSize, Got: len(p.Vector)}
 		}
 
-		vecLit, err := vectorLiteral(p.Vector)
-		if err != nil {
-			return err
+		vecLit, litErr := vectorLiteral(p.Vector)
+		if litErr != nil {
+			return litErr
 		}
 
 		var payload any
+
 		if p.Payload != nil {
-			b, err := json.Marshal(p.Payload)
-			if err != nil {
-				return err
+			b, marshalErr := json.Marshal(p.Payload)
+			if marshalErr != nil {
+				return marshalErr
 			}
+
 			payload = string(b)
 		} else {
 			payload = nil
 		}
 
-		if _, err := tx.ExecContext(ctx, stmt, s.collection, p.ID, vecLit, payload); err != nil {
-			return err
+		if _, execErr := tx.ExecContext(ctx, stmt, s.collection, p.ID, vecLit, payload); execErr != nil {
+			return execErr
 		}
 	}
 
@@ -227,13 +243,17 @@ func (s *Store) Upsert(ctx context.Context, points []vectorstore.Point) error {
 // A vectorstore.Filter passed via vectorstore.WithFilter is translated to
 // parameterized JSONB predicates over the payload column and evaluated by
 // PostgreSQL.
-func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint64, opts ...vectorstore.QueryOption) ([]vectorstore.ScoredPoint, error) {
+func (s *Store) Query(
+	ctx context.Context, query vectorstore.Vector, limit uint64, opts ...vectorstore.QueryOption,
+) ([]vectorstore.ScoredPoint, error) {
 	if len(query) == 0 {
 		return nil, vectorstore.ErrEmptyQuery
 	}
+
 	if limit == 0 {
 		return []vectorstore.ScoredPoint{}, nil
 	}
+
 	if uint64(len(query)) != s.vectorSize {
 		return nil, &VectorSizeMismatchError{Expected: s.vectorSize, Got: len(query)}
 	}
@@ -254,7 +274,8 @@ func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint6
 	}
 
 	cfg := vectorstore.ApplyQueryOptions(opts)
-	filterClause, filterArgs, err := filterSQL(cfg.Filter, 4)
+
+	filterClause, filterArgs, err := filterSQL(cfg.Filter)
 	if err != nil {
 		return nil, err
 	}
@@ -262,34 +283,40 @@ func (s *Store) Query(ctx context.Context, query vectorstore.Vector, limit uint6
 	stmt := fmt.Sprintf(querySQLTemplate, scoreExpr, table, filterClause, op)
 
 	args := append([]any{vecLit, s.collection, limit}, filterArgs...)
+
 	rows, err := s.db.QueryContext(ctx, stmt, args...)
 	if err != nil {
 		return nil, err
 	}
+
 	defer func() {
 		_ = rows.Close()
 	}()
 
 	out := make([]vectorstore.ScoredPoint, 0)
+
 	for rows.Next() {
-		var id string
-		var score64 float64
-		var payloadBytes []byte
-		if err := rows.Scan(&id, &score64, &payloadBytes); err != nil {
-			return nil, err
+		var (
+			id           string
+			score64      float64
+			payloadBytes []byte
+		)
+		if scanErr := rows.Scan(&id, &score64, &payloadBytes); scanErr != nil {
+			return nil, scanErr
 		}
 
 		payload := map[string]any{}
 		if len(payloadBytes) > 0 {
-			if err := json.Unmarshal(payloadBytes, &payload); err != nil {
-				return nil, &PayloadDecodeError{PointID: id, Cause: err}
+			if unmarshalErr := json.Unmarshal(payloadBytes, &payload); unmarshalErr != nil {
+				return nil, &PayloadDecodeError{PointID: id, Cause: unmarshalErr}
 			}
 		}
 
 		out = append(out, vectorstore.ScoredPoint{ID: id, Score: float32(score64), Payload: payload})
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+
+	if rowsErr := rows.Err(); rowsErr != nil {
+		return nil, rowsErr
 	}
 
 	return out, nil
@@ -307,6 +334,7 @@ func (s *Store) Delete(ctx context.Context, ids []string) error {
 			filtered = append(filtered, id)
 		}
 	}
+
 	if len(filtered) == 0 {
 		return vectorstore.ErrEmptyIDs
 	}
@@ -318,14 +346,16 @@ func (s *Store) Delete(ctx context.Context, ids []string) error {
 
 	placeholders := make([]string, 0, len(filtered))
 	args := make([]any, 0, len(filtered)+1)
+
 	args = append(args, s.collection)
 	for i, id := range filtered {
-		placeholders = append(placeholders, fmt.Sprintf("$%d", i+2))
+		placeholders = append(placeholders, fmt.Sprintf("$%d", i+firstIDArg))
 		args = append(args, id)
 	}
 
 	stmt := fmt.Sprintf(deleteByIDsSQLTemplate, table, strings.Join(placeholders, ","))
 	_, err = s.db.ExecContext(ctx, stmt, args...)
+
 	return err
 }
 
@@ -335,8 +365,11 @@ func (s *Store) Count(ctx context.Context) (uint64, error) {
 	if err != nil {
 		return 0, ErrInvalidTableName
 	}
+
 	var count uint64
+
 	err = s.db.QueryRowContext(ctx, fmt.Sprintf(countSQLTemplate, table), s.collection).Scan(&count)
+
 	return count, err
 }
 
@@ -349,6 +382,7 @@ func (s *Store) Clear(ctx context.Context) error {
 
 	stmt := fmt.Sprintf(clearSQLTemplate, table)
 	_, err = s.db.ExecContext(ctx, stmt, s.collection)
+
 	return err
 }
 
@@ -371,17 +405,22 @@ func vectorLiteral(vec []float32) (string, error) {
 	}
 
 	b := strings.Builder{}
-	b.Grow(len(vec) * 10)
+	b.Grow(len(vec) * avgFloatChars)
 	b.WriteByte('[')
+
 	for i, v := range vec {
 		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
 			return "", &InvalidVectorValueError{Index: i, Value: v}
 		}
+
 		if i > 0 {
 			b.WriteByte(',')
 		}
+
 		b.WriteString(strconv.FormatFloat(float64(v), 'g', -1, 32))
 	}
+
 	b.WriteByte(']')
+
 	return b.String(), nil
 }

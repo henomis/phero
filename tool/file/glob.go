@@ -29,7 +29,7 @@ import (
 // GlobInput is the input schema for the glob tool.
 type GlobInput struct {
 	Pattern string `json:"pattern" jsonschema:"description=The glob pattern to match files against"`
-	Path    string `json:"path,omitempty" jsonschema:"description=The directory to search in. If omitted, the current working directory is used"`
+	Path    string `json:"path,omitempty" jsonschema:"description=The directory to search in. If omitted, the current working directory is used"` //nolint:lll
 }
 
 // GlobOutput is the output schema for the glob tool.
@@ -57,6 +57,7 @@ func NewGlobTool(opts ...Option) (*GlobTool, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	g.tool = tool
 
 	return g, nil
@@ -76,6 +77,7 @@ func (g *GlobTool) glob(_ context.Context, input *GlobInput) (*GlobOutput, error
 	if input == nil {
 		return nil, fmt.Errorf("nil input")
 	}
+
 	if strings.TrimSpace(input.Pattern) == "" {
 		return nil, ErrPatternRequired
 	}
@@ -91,25 +93,30 @@ func (g *GlobTool) glob(_ context.Context, input *GlobInput) (*GlobOutput, error
 	}
 
 	entries := make([]globEntry, 0)
+
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
 		}
+
 		if d.IsDir() {
 			return nil
 		}
 
-		rel, err := normalizeRelativePath(root, path)
-		if err != nil {
+		rel, relErr := normalizeRelativePath(root, path)
+		if relErr != nil {
 			return nil
 		}
+
 		if matcher.MatchString(rel) {
-			info, err := d.Info()
-			if err != nil {
+			info, infoErr := d.Info()
+			if infoErr != nil {
 				return nil
 			}
+
 			entries = append(entries, globEntry{path: path, modTime: info.ModTime()})
 		}
+
 		return nil
 	})
 	if err != nil {
@@ -120,6 +127,7 @@ func (g *GlobTool) glob(_ context.Context, input *GlobInput) (*GlobOutput, error
 		if entries[i].modTime.Equal(entries[j].modTime) {
 			return entries[i].path < entries[j].path
 		}
+
 		return entries[i].modTime.After(entries[j].modTime)
 	})
 

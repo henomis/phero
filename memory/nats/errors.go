@@ -17,6 +17,8 @@ package natsmemory
 import "errors"
 
 var (
-	ErrNilKeyValue    = errors.New("nil key-value store")
+	// ErrNilKeyValue is returned when the NATS key-value store is nil.
+	ErrNilKeyValue = errors.New("nil key-value store")
+	// ErrEmptySessionID is returned when the session ID is empty.
 	ErrEmptySessionID = errors.New("empty session id")
 )

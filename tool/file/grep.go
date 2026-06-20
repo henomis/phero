@@ -35,9 +35,9 @@ const (
 
 // GrepInput is the input schema for the grep tool.
 type GrepInput struct {
-	Pattern    string `json:"pattern" jsonschema:"description=The regular expression pattern to search for in file contents"`
-	Path       string `json:"path,omitempty" jsonschema:"description=File or directory to search in. Defaults to current working directory"`
-	OutputMode string `json:"output_mode,omitempty" jsonschema:"description=Output mode: content, files_with_matches, count. Defaults to files_with_matches"`
+	Pattern    string `json:"pattern" jsonschema:"description=The regular expression pattern to search for in file contents"`                                 //nolint:lll
+	Path       string `json:"path,omitempty" jsonschema:"description=File or directory to search in. Defaults to current working directory"`                  //nolint:lll
+	OutputMode string `json:"output_mode,omitempty" jsonschema:"description=Output mode: content, files_with_matches, count. Defaults to files_with_matches"` //nolint:lll
 	Glob       string `json:"glob,omitempty" jsonschema:"description=Glob pattern to filter files"`
 	Type       string `json:"type,omitempty" jsonschema:"description=File type to search (go, js, py, etc.)"`
 	I          bool   `json:"-i,omitempty" jsonschema:"description=Case insensitive search"`
@@ -74,6 +74,7 @@ func NewGrepTool(opts ...Option) (*GrepTool, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	g.tool = tool
 
 	return g, nil
@@ -84,10 +85,12 @@ func (g *GrepTool) Tool() *llm.Tool {
 	return g.tool
 }
 
+//nolint:gocognit,gocyclo,funlen
 func (g *GrepTool) grep(_ context.Context, input *GrepInput) (*GrepOutput, error) {
 	if input == nil {
 		return nil, fmt.Errorf("nil input")
 	}
+
 	if strings.TrimSpace(input.Pattern) == "" {
 		return nil, ErrPatternRequired
 	}
@@ -96,6 +99,7 @@ func (g *GrepTool) grep(_ context.Context, input *GrepInput) (*GrepOutput, error
 	if mode == "" {
 		mode = grepModeFilesWithMatches
 	}
+
 	if mode != grepModeContent && mode != grepModeFilesWithMatches && mode != grepModeCount {
 		return nil, ErrInvalidOutputMode
 	}
@@ -104,6 +108,7 @@ func (g *GrepTool) grep(_ context.Context, input *GrepInput) (*GrepOutput, error
 		input.A = input.C
 		input.B = input.C
 	}
+
 	if mode != grepModeContent && (input.A > 0 || input.B > 0 || input.C > 0 || input.N) {
 		return nil, ErrContextFlagsRequireContentMode
 	}
@@ -112,6 +117,7 @@ func (g *GrepTool) grep(_ context.Context, input *GrepInput) (*GrepOutput, error
 	if input.I {
 		pattern = "(?i)" + pattern
 	}
+
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return nil, err
@@ -131,10 +137,12 @@ func (g *GrepTool) grep(_ context.Context, input *GrepInput) (*GrepOutput, error
 	}
 
 	files := make([]string, 0)
+
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
 		}
+
 		if d.IsDir() {
 			return nil
 		}
@@ -144,29 +152,34 @@ func (g *GrepTool) grep(_ context.Context, input *GrepInput) (*GrepOutput, error
 		}
 
 		if globMatcher != nil {
-			rel, err := normalizeRelativePath(root, path)
-			if err != nil {
+			rel, relErr := normalizeRelativePath(root, path)
+			if relErr != nil {
 				return nil
 			}
+
 			if !globMatcher.MatchString(rel) {
 				return nil
 			}
 		}
 
 		files = append(files, path)
+
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+
 	sort.Strings(files)
 
 	out := make([]string, 0)
+
 	for _, path := range files {
-		contentBytes, err := os.ReadFile(path)
-		if err != nil {
+		contentBytes, readErr := os.ReadFile(path) //nolint:gosec // path comes from glob results within the working dir
+		if readErr != nil {
 			continue
 		}
+
 		content := string(contentBytes)
 
 		switch mode {
@@ -223,6 +236,7 @@ func matchType(path, t string) bool {
 	if !ok {
 		return true
 	}
+
 	return ext == wantExt
 }
 
@@ -232,37 +246,47 @@ func countMatches(re *regexp.Regexp, content string, multiline bool) int {
 	}
 
 	count := 0
+
 	for _, line := range strings.Split(content, "\n") {
 		if re.MatchString(line) {
 			count++
 		}
 	}
+
 	return count
 }
 
-func grepContentMatches(path, content string, re *regexp.Regexp, multiline, lineNumbers bool, after, before int) []string {
+//nolint:gocognit
+func grepContentMatches(
+	path, content string, re *regexp.Regexp, multiline, lineNumbers bool, after, before int,
+) []string {
 	if multiline {
 		idxs := re.FindAllStringIndex(content, -1)
+
 		out := make([]string, 0, len(idxs))
 		for _, idx := range idxs {
 			match := content[idx[0]:idx[1]]
 			out = append(out, fmt.Sprintf("%s:%s", path, match))
 		}
+
 		return out
 	}
 
 	lines := strings.Split(content, "\n")
 	matched := make(map[int]struct{})
+
 	for i, line := range lines {
 		if re.MatchString(line) {
 			start := i - before
 			if start < 0 {
 				start = 0
 			}
+
 			end := i + after
 			if end >= len(lines) {
 				end = len(lines) - 1
 			}
+
 			for j := start; j <= end; j++ {
 				matched[j] = struct{}{}
 			}
@@ -277,6 +301,7 @@ func grepContentMatches(path, content string, re *regexp.Regexp, multiline, line
 	for idx := range matched {
 		indexes = append(indexes, idx)
 	}
+
 	sort.Ints(indexes)
 
 	out := make([]string, 0, len(indexes))

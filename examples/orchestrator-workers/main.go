@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package main demonstrates the orchestrator-workers pattern.
 package main
 
 import (
@@ -29,8 +30,11 @@ import (
 )
 
 func main() {
-	var goal string
-	var timeout time.Duration
+	var (
+		goal    string
+		timeout time.Duration
+	)
+
 	flag.StringVar(&goal, "goal",
 		"Produce a comprehensive briefing on the current state of quantum computing: cover the technology, recent breakthroughs, business landscape, and key challenges.",
 		"High-level goal for the orchestrator to decompose and delegate")
@@ -82,6 +86,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
+
 	client := openai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s base_url=%s", model, baseURL)
@@ -94,6 +99,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 
 func buildOrchestrator(llmClient llm.LLM) (*agent.Agent, error) {
 	textTracer := text.New(os.Stdout)
+
 	researcher, err := agent.New(llmClient, "Researcher", strings.TrimSpace(`You are a research specialist agent.
 
 You receive a focused research question or subtask. Produce a concise, factual summary.
@@ -103,6 +109,7 @@ You receive a focused research question or subtask. Produce a concise, factual s
 	if err != nil {
 		return nil, err
 	}
+
 	researcher.SetTracer(textTracer)
 
 	writer, err := agent.New(llmClient, "Writer", strings.TrimSpace(`You are a technical writing specialist agent.
@@ -115,7 +122,9 @@ Produce a clear, engaging, well-structured narrative.
 	if err != nil {
 		return nil, err
 	}
+
 	writer.SetTracer(textTracer)
+
 	critic, err := agent.New(llmClient, "Critic", strings.TrimSpace(`You are a critical review specialist agent.
 
 You receive a draft document and a review request.
@@ -127,6 +136,7 @@ Keep feedback direct and actionable.`))
 	if err != nil {
 		return nil, err
 	}
+
 	critic.SetTracer(textTracer)
 
 	researchTool, err := researcher.AsTool(

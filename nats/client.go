@@ -27,6 +27,10 @@ import (
 	"github.com/henomis/phero/llm"
 )
 
+// natsSubjectParts is the number of dot-separated tokens in a verb-first NATS subject:
+// agents.{verb}.{agent}.{owner}.{name}.
+const natsSubjectParts = 5
+
 // AgentInfo holds the parsed discovery record for a single agent instance.
 type AgentInfo struct {
 	// InstanceID is the framework-assigned per-instance identifier (§3.4).
@@ -56,6 +60,7 @@ type AgentInfo struct {
 // call Prompt and AsTool without threading the client separately.
 type AgentHandle struct {
 	AgentInfo
+
 	client *Client
 }
 
@@ -79,11 +84,13 @@ type Client struct {
 // NewClient creates a Client using an established NATS connection.
 func NewClient(nc *natsclient.Conn, opts ...ClientOption) *Client {
 	cfg := defaultClientConfig()
+
 	for _, opt := range opts {
 		if opt != nil {
 			opt(cfg)
 		}
 	}
+
 	return &Client{nc: nc, cfg: cfg}
 }
 
@@ -95,8 +102,9 @@ func NewClient(nc *natsclient.Conn, opts ...ClientOption) *Client {
 // [WithDiscoveryTimeout]). Any DiscoverOption filters are applied client-side.
 //
 // Returns [ErrNoAgentsFound] if the filtered result set is empty.
-func (c *Client) Discover(ctx context.Context, opts ...DiscoverOption) ([]*AgentHandle, error) {
+func (c *Client) Discover(_ context.Context, opts ...DiscoverOption) ([]*AgentHandle, error) {
 	filter := &discoverFilter{}
+
 	for _, opt := range opts {
 		if opt != nil {
 			opt(filter)
@@ -104,28 +112,31 @@ func (c *Client) Discover(ctx context.Context, opts ...DiscoverOption) ([]*Agent
 	}
 
 	inbox := c.nc.NewInbox()
+
 	sub, err := c.nc.SubscribeSync(inbox)
 	if err != nil {
 		return nil, fmt.Errorf("nats: discovery subscribe: %w", err)
 	}
 	defer sub.Unsubscribe() //nolint:errcheck
 
-	if err := c.nc.PublishRequest("$SRV.INFO.agents", inbox, nil); err != nil {
-		return nil, fmt.Errorf("nats: discovery publish: %w", err)
+	if pubErr := c.nc.PublishRequest("$SRV.INFO.agents", inbox, nil); pubErr != nil {
+		return nil, fmt.Errorf("nats: discovery publish: %w", pubErr)
 	}
 
 	deadline := time.Now().Add(c.cfg.discoveryTimeout)
 
 	var infos []*AgentHandle
+
 	for {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			break
 		}
+
 		timeout := min(c.cfg.stallTimeout, remaining)
 
-		msg, err := sub.NextMsg(timeout)
-		if err != nil {
+		msg, msgErr := sub.NextMsg(timeout)
+		if msgErr != nil {
 			break // stall or deadline — stop collecting
 		}
 
@@ -133,27 +144,31 @@ func (c *Client) Discover(ctx context.Context, opts ...DiscoverOption) ([]*Agent
 		if info == nil {
 			continue
 		}
+
 		if !matchFilter(info, filter) {
 			continue
 		}
+
 		infos = append(infos, &AgentHandle{AgentInfo: *info, client: c})
 	}
 
 	if len(infos) == 0 {
 		return nil, ErrNoAgentsFound
 	}
+
 	return infos, nil
 }
 
 // Prompt sends a plain-text prompt to the agent described by info and returns
 // a [Stream] for consuming the streamed response.  The caller must call
 // [Stream.Close] when done.
-func (c *Client) Prompt(ctx context.Context, info *AgentInfo, text string) (*Stream, error) {
+func (c *Client) Prompt(_ context.Context, info *AgentInfo, text string) (*Stream, error) {
 	if strings.TrimSpace(text) == "" {
 		return nil, ErrEmptyPrompt
 	}
 
 	env := envelope{Prompt: text}
+
 	body, err := json.Marshal(env)
 	if err != nil {
 		return nil, fmt.Errorf("nats: encode prompt: %w", err)
@@ -164,14 +179,15 @@ func (c *Client) Prompt(ctx context.Context, info *AgentInfo, text string) (*Str
 	}
 
 	inbox := c.nc.NewInbox()
+
 	sub, err := c.nc.SubscribeSync(inbox)
 	if err != nil {
 		return nil, fmt.Errorf("nats: subscribe reply: %w", err)
 	}
 
-	if err := c.nc.PublishRequest(info.PromptSubject, inbox, body); err != nil {
+	if pubErr := c.nc.PublishRequest(info.PromptSubject, inbox, body); pubErr != nil {
 		_ = sub.Unsubscribe()
-		return nil, fmt.Errorf("nats: publish prompt: %w", err)
+		return nil, fmt.Errorf("nats: publish prompt: %w", pubErr)
 	}
 
 	return &Stream{
@@ -194,6 +210,7 @@ func (c *Client) AsTool(info *AgentInfo, toolName, toolDesc string) (*llm.Tool, 
 				return "", err
 			}
 			defer stream.Close()
+
 			return stream.Text(ctx)
 		},
 	)
@@ -212,12 +229,14 @@ func (s *Stream) Text(ctx context.Context) (string, error) {
 	defer s.sub.Unsubscribe() //nolint:errcheck
 
 	var sb strings.Builder
+
 	for {
 		msg, err := s.nextMsg(ctx)
 		if err != nil {
 			if errors.Is(err, natsclient.ErrTimeout) {
 				return "", ErrStreamTimeout
 			}
+
 			return "", err
 		}
 
@@ -230,11 +249,11 @@ func (s *Stream) Text(ctx context.Context) (string, error) {
 		}
 
 		var chunk rawChunk
-		if err := json.Unmarshal(msg.Data, &chunk); err != nil {
+		if unmarshalErr := json.Unmarshal(msg.Data, &chunk); unmarshalErr != nil {
 			continue // §6.6: silently ignore unknown or unparseable chunks
 		}
 
-		if chunk.Type == "response" {
+		if chunk.Type == chunkTypeResponse {
 			sb.WriteString(decodeResponseText(chunk.Data))
 		}
 		// "status" ack chunks and unknown types are silently ignored (§6.4, §6.6).
@@ -254,7 +273,9 @@ func (s *Stream) nextMsg(ctx context.Context) (*natsclient.Msg, error) {
 	deadline := time.Now().Add(s.inactivityTimeout)
 	tctx, tcancel := context.WithDeadline(ctx, deadline)
 	msg, err := s.sub.NextMsgWithContext(tctx)
+
 	tcancel()
+
 	return msg, err
 }
 
@@ -267,9 +288,11 @@ func parseAgentInfo(data []byte) *AgentInfo {
 	if err := json.Unmarshal(data, &svc); err != nil {
 		return nil
 	}
-	if svc.Name != "agents" {
+
+	if svc.Name != svcNameAgents {
 		return nil
 	}
+
 	if svc.Metadata["protocol_version"] == "" {
 		return nil
 	}
@@ -291,11 +314,13 @@ func parseAgentInfo(data []byte) *AgentInfo {
 					info.MaxPayloadBytes = n
 				}
 			}
-			if v := ep.Metadata["attachments_ok"]; v == "true" {
+
+			if v := ep.Metadata["attachments_ok"]; v == attachmentsOkTrue {
 				info.AttachmentsOk = true
 			}
+
 			info.Name = instanceNameFromSubject(ep.Subject)
-		case "status":
+		case chunkTypeStatus:
 			info.StatusSubject = ep.Subject
 		}
 	}
@@ -303,16 +328,18 @@ func parseAgentInfo(data []byte) *AgentInfo {
 	if info.PromptSubject == "" {
 		return nil // no prompt endpoint — not compliant
 	}
+
 	return info
 }
 
 // instanceNameFromSubject extracts the 5th token from a verb-first subject
 // agents.{verb}.{agent}.{owner}.{name}.
 func instanceNameFromSubject(subject string) string {
-	parts := strings.SplitN(subject, ".", 5)
-	if len(parts) == 5 {
+	parts := strings.SplitN(subject, ".", natsSubjectParts)
+	if len(parts) == natsSubjectParts {
 		return parts[4]
 	}
+
 	return ""
 }
 
@@ -321,11 +348,14 @@ func matchFilter(info *AgentInfo, f *discoverFilter) bool {
 	if f.agent != "" && info.Agent != f.agent {
 		return false
 	}
+
 	if f.owner != "" && info.Owner != f.owner {
 		return false
 	}
+
 	if f.name != "" && info.Name != f.name {
 		return false
 	}
+
 	return true
 }

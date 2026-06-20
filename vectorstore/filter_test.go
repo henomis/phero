@@ -109,12 +109,15 @@ func TestToFloat64(t *testing.T) {
 	if v, ok := ToFloat64(int32(7)); !ok || v != 7 {
 		t.Fatalf("ToFloat64(int32(7)) = %v, %v", v, ok)
 	}
+
 	if v, ok := ToFloat64(uint8(3)); !ok || v != 3 {
 		t.Fatalf("ToFloat64(uint8(3)) = %v, %v", v, ok)
 	}
+
 	if _, ok := ToFloat64("7"); ok {
 		t.Fatal("ToFloat64(string) should not be numeric")
 	}
+
 	if _, ok := ToFloat64(nil); ok {
 		t.Fatal("ToFloat64(nil) should not be numeric")
 	}

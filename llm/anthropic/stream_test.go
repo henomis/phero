@@ -54,11 +54,14 @@ func TestExecuteStream_TextResponse(t *testing.T) {
 		text  strings.Builder
 		final llm.StreamChunk
 	)
+
 	for chunk, err := range c.ExecuteStream(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))}, nil) {
 		if err != nil {
 			t.Fatalf("ExecuteStream: %v", err)
 		}
+
 		text.WriteString(chunk.TextDelta)
+
 		if chunk.Done {
 			final = chunk
 		}
@@ -67,12 +70,15 @@ func TestExecuteStream_TextResponse(t *testing.T) {
 	if text.String() != "Hello there" {
 		t.Fatalf("streamed text = %q, want %q", text.String(), "Hello there")
 	}
+
 	if final.Message == nil || final.Message.TextContent() != "Hello there" {
 		t.Fatalf("final message = %v, want text %q", final.Message, "Hello there")
 	}
+
 	if final.Model != "claude-sonnet-4-6" {
 		t.Fatalf("final model = %q, want claude-sonnet-4-6", final.Model)
 	}
+
 	if final.Usage == nil || final.Usage.InputTokens != 5 || final.Usage.OutputTokens != 3 {
 		t.Fatalf("final usage = %+v, want in=5 out=3", final.Usage)
 	}

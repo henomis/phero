@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package main is the get-random-quote skill script.
 package main
 
 import (
@@ -22,7 +23,7 @@ import (
 	"net/http"
 )
 
-// Quote API response structure.
+// QuoteResponse represents the structure of the response from the quote API.
 type QuoteResponse struct {
 	Content string `json:"content"`
 	Author  string `json:"author"`
@@ -54,10 +55,12 @@ func main() {
 		Q string `json:"q"`
 		A string `json:"a"`
 	}
+
 	err = json.Unmarshal(body, &data)
 	if err != nil || len(data) == 0 {
 		fmt.Println("Invalid response from quote API")
 		return
 	}
+
 	fmt.Printf("%s - %s\n", data[0].Q, data[0].A)
 }

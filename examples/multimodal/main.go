@@ -66,9 +66,11 @@ func main() {
 			fmt.Fprintf(os.Stderr, "ImageFile: %v\n", err)
 			os.Exit(1)
 		}
+
 		fmt.Printf("Sending local file: %s (%s)\n", os.Args[1], imagePart.MIMEType)
 	} else {
 		imagePart = llm.ImageURL("https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/280px-PNG_transparency_demonstration_1.png")
+
 		fmt.Println("Sending remote image URL.")
 	}
 

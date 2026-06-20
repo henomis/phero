@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package main demonstrates a social simulation with multiple agents.
 package main
 
 import (
@@ -55,6 +56,7 @@ func main() {
 	defer cancel()
 
 	llmClient, llmInfo := buildLLMFromEnv()
+
 	rateLimiter, stop, err := middleware.NewLimiter(1, 4)
 	if err != nil {
 		panic(fmt.Errorf("rate limiter: %w", err))
@@ -65,6 +67,7 @@ func main() {
 	seedText := readSeed(seedFlag)
 
 	estimatedCalls := numAgents*numRounds + 3 // knowledge + personas + report
+
 	fmt.Println("multi-agent architecture example: social simulation")
 	fmt.Println("- llm:", llmInfo)
 	fmt.Printf("- agents: %d  rounds: %d  topk: %d\n", numAgents, numRounds, topk)
@@ -139,6 +142,7 @@ func main() {
 	if err := os.WriteFile("transcript.txt", []byte(transcript), 0o666); err != nil {
 		panic(fmt.Errorf("write transcript: %w", err))
 	}
+
 	reportPrompt := fmt.Sprintf(
 		"World facts:\n%s\n\nSimulation transcript:\n%s\n\nAnalyze this simulation and produce the report.",
 		worldFacts, transcript,
@@ -246,6 +250,7 @@ func interactiveREPL(ctx context.Context, reportAgent *agent.Agent) {
 
 		turnCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		result, err := reportAgent.Run(turnCtx, llm.Text(line))
+
 		cancel()
 
 		if err != nil {

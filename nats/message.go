@@ -23,11 +23,13 @@ import (
 	"github.com/henomis/phero/llm"
 )
 
+const mimeJPEG = "image/jpeg"
+
 // imageExtensions maps lowercase file extensions to MIME types for attachment handling.
 var imageExtensions = map[string]string{
 	".png":  "image/png",
-	".jpg":  "image/jpeg",
-	".jpeg": "image/jpeg",
+	".jpg":  mimeJPEG,
+	".jpeg": mimeJPEG,
 	".gif":  "image/gif",
 	".webp": "image/webp",
 }

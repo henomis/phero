@@ -23,6 +23,13 @@ import (
 	natsclient "github.com/nats-io/nats.go"
 )
 
+const (
+	chunkTypeResponse = "response"
+	chunkTypeStatus   = "status"
+	svcNameAgents     = "agents"
+	attachmentsOkTrue = "true"
+)
+
 // envelope is the JSON request payload (§5.1).
 type envelope struct {
 	Prompt      string       `json:"prompt"`
@@ -54,7 +61,7 @@ type heartbeatPayload struct {
 	Owner      string `json:"owner"`
 	Session    string `json:"session,omitempty"`
 	InstanceID string `json:"instance_id"`
-	Ts         string `json:"ts"`
+	TS         string `json:"ts"`
 	IntervalS  int    `json:"interval_s"`
 }
 
@@ -103,9 +110,11 @@ func decodeEnvelope(data []byte) (*envelope, error) {
 		if err := json.Unmarshal(trimmed, &env); err != nil {
 			return nil, fmt.Errorf("%w: JSON parse error: %v", ErrMalformedEnvelope, err)
 		}
+
 		if env.Prompt == "" {
 			return nil, fmt.Errorf("%w: missing or empty prompt field", ErrMalformedEnvelope)
 		}
+
 		return &env, nil
 	}
 
@@ -119,7 +128,9 @@ func encodeResponseChunk(text string) []byte {
 		Type string `json:"type"`
 		Data string `json:"data"`
 	}
-	b, _ := json.Marshal(chunk{Type: "response", Data: text})
+
+	b, _ := json.Marshal(chunk{Type: chunkTypeResponse, Data: text}) //nolint:errchkjson,lll // struct contains only string fields
+
 	return b
 }
 
@@ -129,13 +140,15 @@ func encodeStatusChunk(status string) []byte {
 		Type string `json:"type"`
 		Data string `json:"data"`
 	}
-	b, _ := json.Marshal(chunk{Type: "status", Data: status})
+
+	b, _ := json.Marshal(chunk{Type: chunkTypeStatus, Data: status}) //nolint:errchkjson,lll // struct contains only string fields
+
 	return b
 }
 
 // encodeHeartbeat serialises a heartbeat payload to JSON (§8.3).
 func encodeHeartbeat(p heartbeatPayload) []byte {
-	b, _ := json.Marshal(p)
+	b, _ := json.Marshal(p) //nolint:errchkjson // heartbeatPayload contains only string and int fields
 	return b
 }
 
@@ -155,6 +168,7 @@ func isServiceError(msg *natsclient.Msg) bool {
 func parseServiceError(msg *natsclient.Msg) error {
 	code := msg.Header.Get(errorCodeHeader)
 	desc := msg.Header.Get(errorHeader)
+
 	return fmt.Errorf("%w: code=%s %s", ErrServiceError, code, desc)
 }
 
@@ -165,10 +179,12 @@ func decodeResponseText(data json.RawMessage) string {
 	if err := json.Unmarshal(data, &text); err == nil {
 		return text
 	}
+
 	var obj responseData
 	if err := json.Unmarshal(data, &obj); err == nil {
 		return obj.Text
 	}
+
 	return ""
 }
 
@@ -183,6 +199,7 @@ func parseMaxPayload(s string) (int64, error) {
 		suffix string
 		mult   int64
 	}
+
 	units := []unit{
 		{"GB", 1 << 30},
 		{"MB", 1 << 20},
@@ -193,10 +210,12 @@ func parseMaxPayload(s string) (int64, error) {
 	for _, u := range units {
 		if numStr, ok := strings.CutSuffix(s, u.suffix); ok {
 			numStr = strings.TrimSpace(numStr)
+
 			var n int64
 			if _, err := fmt.Sscanf(numStr, "%d", &n); err != nil {
 				return 0, fmt.Errorf("nats: invalid max_payload %q: %w", s, err)
 			}
+
 			return n * u.mult, nil
 		}
 	}
@@ -210,6 +229,8 @@ func encodeErrorBody(errCode, message string) []byte {
 		Error   string `json:"error"`
 		Message string `json:"message"`
 	}
-	b, _ := json.Marshal(body{Error: errCode, Message: message})
+
+	b, _ := json.Marshal(body{Error: errCode, Message: message}) //nolint:errchkjson // struct contains only string fields
+
 	return b
 }

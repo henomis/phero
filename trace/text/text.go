@@ -24,6 +24,8 @@ import (
 	"github.com/henomis/phero/trace"
 )
 
+const noTools = "none"
+
 // ANSI colour/style escape codes.
 const (
 	ansiReset     = "\033[0m"
@@ -38,6 +40,9 @@ const (
 	ansiWhite     = "\033[37m"
 	ansiBoldWhite = "\033[1;37m"
 	ansiBoldRed   = "\033[1;31m"
+
+	truncateShortLen = 120
+	truncateLongLen  = 200
 )
 
 // Tracer writes human-readable, colour-coded trace lines to an io.Writer.
@@ -70,19 +75,22 @@ func (t *Tracer) Trace(event trace.Event) {
 	if line == "" {
 		return
 	}
+
 	t.mu.Lock()
 	_, _ = fmt.Fprintln(t.w, line)
 	t.mu.Unlock()
 }
 
+//nolint:gocognit,funlen
 func (t *Tracer) format(event trace.Event) string {
 	switch e := event.(type) {
 	case trace.AgentStartEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
+
 		return fmt.Sprintf("%s%s %s[%s]%s %s▶  AgentStart%s  input=%q",
 			ansiBoldWhite, ts, ansiDim, e.AgentName, ansiReset,
 			ansiBoldWhite, ansiReset,
-			truncate(e.Input, 120))
+			truncate(e.Input, truncateShortLen))
 
 	case trace.AgentEndEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
@@ -92,13 +100,15 @@ func (t *Tracer) format(event trace.Event) string {
 				ansiBoldRed, ansiReset,
 				e.Iterations, e.Err)
 		}
+
 		return fmt.Sprintf("%s%s %s[%s]%s %s■  AgentEnd%s  iterations=%d output=%q",
 			ansiBoldWhite, ts, ansiDim, e.AgentName, ansiReset,
 			ansiBoldWhite, ansiReset,
-			e.Iterations, truncate(e.Output, 120))
+			e.Iterations, truncate(e.Output, truncateShortLen))
 
 	case trace.AgentIterationEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
+
 		return fmt.Sprintf("%s%s %s[%s] ↻  iteration=%d%s",
 			ansiDim, ts, ansiDim, e.AgentName,
 			e.Iteration, ansiReset)
@@ -106,27 +116,36 @@ func (t *Tracer) format(event trace.Event) string {
 	case trace.AgentRunSummaryEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
 		summary := e.Summary
-		tools := "none"
+		tools := noTools
+
 		if len(summary.Tools) > 0 {
 			parts := make([]string, 0, len(summary.Tools))
 			for _, tool := range summary.Tools {
 				parts = append(parts, fmt.Sprintf("%s=%d/%d", tool.ToolName, tool.Calls, tool.Errors))
 			}
+
 			tools = strings.Join(parts, ", ")
 		}
+
 		handoff := ""
 		if len(summary.HandoffAgents) > 0 {
 			handoff = fmt.Sprintf(" handoff=%s", strings.Join(summary.HandoffAgents, ","))
 		}
+
 		errText := ""
 		if summary.Error != "" {
-			errText = fmt.Sprintf(" error=%q", truncate(summary.Error, 120))
+			errText = fmt.Sprintf(" error=%q", truncate(summary.Error, truncateShortLen))
 		}
+
 		cost := ""
 		if summary.Usage.CostUSD > 0 {
 			cost = fmt.Sprintf(" cost=$%.4f", summary.Usage.CostUSD)
 		}
-		return fmt.Sprintf("%s%s %s[%s]%s %s≡  RunSummary%s  iterations=%d llm_calls=%d tool_calls=%d tool_errors=%d memory=%d/%d tokens=%d/%d%s latency(total=%s llm=%s tool=%s memory=%s) tools=[%s]%s%s",
+
+		return fmt.Sprintf(
+			"%s%s %s[%s]%s %s≡  RunSummary%s  iterations=%d llm_calls=%d"+
+				" tool_calls=%d tool_errors=%d memory=%d/%d tokens=%d/%d%s"+
+				" latency(total=%s llm=%s tool=%s memory=%s) tools=[%s]%s%s",
 			ansiBoldWhite, ts, ansiDim, summary.AgentName, ansiReset,
 			ansiBoldWhite, ansiReset,
 			summary.Iterations, summary.LLMCalls, summary.ToolCalls, summary.ToolErrors,
@@ -139,10 +158,12 @@ func (t *Tracer) format(event trace.Event) string {
 		ts := e.Timestamp.Format("15:04:05.000")
 		agent := agentLabel(e.AgentName)
 		iter := iterLabel(e.Iteration)
-		tools := "none"
+
+		tools := noTools
 		if len(e.ToolNames) > 0 {
 			tools = strings.Join(e.ToolNames, ", ")
 		}
+
 		return fmt.Sprintf("%s%s%s %s→  LLMRequest%s%s  messages=%d tools=[%s]",
 			ansiBlue, ts, agent,
 			ansiBold, ansiReset, iter,
@@ -154,14 +175,17 @@ func (t *Tracer) format(event trace.Event) string {
 		iter := iterLabel(e.Iteration)
 		content := ""
 		toolCalls := 0
+
 		if e.Message != nil {
-			content = truncate(e.Message.TextContent(), 120)
+			content = truncate(e.Message.TextContent(), truncateShortLen)
 			toolCalls = len(e.Message.ToolCalls)
 		}
+
 		tokens := ""
 		if e.Usage != nil {
 			tokens = fmt.Sprintf(" in=%d out=%d", e.Usage.InputTokens, e.Usage.OutputTokens)
 		}
+
 		return fmt.Sprintf("%s%s%s %s←  LLMResponse%s%s%s  tool_calls=%d content=%q",
 			ansiCyan, ts, agent,
 			ansiBold, ansiReset, iter, tokens,
@@ -171,17 +195,19 @@ func (t *Tracer) format(event trace.Event) string {
 		ts := e.Timestamp.Format("15:04:05.000")
 		agent := agentLabel(e.AgentName)
 		iter := iterLabel(e.Iteration)
+
 		return fmt.Sprintf("%s%s%s %s🧠 Reasoning%s%s  %q",
 			ansiMagenta, ts, agent,
 			ansiBold, ansiReset, iter,
-			truncate(e.Content, 200))
+			truncate(e.Content, truncateLongLen))
 
 	case trace.ToolCallEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
+
 		return fmt.Sprintf("%s%s %s[%s]%s %s⚙  ToolCall%s  iter=%d tool=%s args=%s",
 			ansiYellow, ts, ansiDim, e.AgentName, ansiReset,
 			ansiYellow, ansiReset,
-			e.Iteration, e.ToolName, truncate(e.Arguments, 200))
+			e.Iteration, e.ToolName, truncate(e.Arguments, truncateLongLen))
 
 	case trace.ToolResultEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
@@ -191,13 +217,15 @@ func (t *Tracer) format(event trace.Event) string {
 				ansiRed, ansiReset,
 				e.Iteration, e.ToolName, e.Err)
 		}
+
 		return fmt.Sprintf("%s%s %s[%s]%s %s✓  ToolResult%s  iter=%d tool=%s result=%s",
 			ansiGreen, ts, ansiDim, e.AgentName, ansiReset,
 			ansiGreen, ansiReset,
-			e.Iteration, e.ToolName, truncate(e.Result, 200))
+			e.Iteration, e.ToolName, truncate(e.Result, truncateLongLen))
 
 	case trace.MemorySaveEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
+
 		return fmt.Sprintf("%s%s %s[%s]%s %s⟣  MemorySave%s  count=%d",
 			ansiMagenta, ts, ansiDim, e.AgentName, ansiReset,
 			ansiMagenta, ansiReset,
@@ -205,6 +233,7 @@ func (t *Tracer) format(event trace.Event) string {
 
 	case trace.MemoryRetrieveEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
+
 		return fmt.Sprintf("%s%s %s[%s]%s %s⟤  MemoryRetrieve%s  count=%d",
 			ansiMagenta, ts, ansiDim, e.AgentName, ansiReset,
 			ansiMagenta, ansiReset,
@@ -220,6 +249,7 @@ func agentLabel(name string) string {
 	if name == "" {
 		return ""
 	}
+
 	return fmt.Sprintf(" %s[%s]%s", ansiDim, name, ansiReset)
 }
 
@@ -228,6 +258,7 @@ func iterLabel(n int) string {
 	if n == 0 {
 		return ""
 	}
+
 	return fmt.Sprintf(" %siter=%d%s", ansiDim, n, ansiReset)
 }
 
@@ -237,6 +268,7 @@ func truncate(s string, n int) string {
 	if len(runes) <= n {
 		return s
 	}
+
 	return string(runes[:n]) + "…"
 }
 

@@ -53,6 +53,7 @@ func TestNewClient_Validation(t *testing.T) {
 	if _, err := pheroA2A.NewClient(ctx, ""); !errors.Is(err, pheroA2A.ErrURLRequired) {
 		t.Errorf("empty URL: got %v, want ErrURLRequired", err)
 	}
+
 	if _, err := pheroA2A.NewClient(ctx, "not-a-url"); !errors.Is(err, pheroA2A.ErrInvalidBaseURL) {
 		t.Errorf("invalid URL: got %v, want ErrInvalidBaseURL", err)
 	}
@@ -64,7 +65,7 @@ func TestAsTool_Success(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	ts, _ := newTestServer(t, textLLM("pong"))
+	ts := newTestServer(t, textLLM("pong"))
 
 	client, err := pheroA2A.NewClient(ctx, ts.URL)
 	if err != nil {
@@ -80,12 +81,17 @@ func TestAsTool_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
+
 	if result == nil {
 		t.Fatal("Handle returned nil result")
 	}
 
 	// Serialize to JSON and check the output field — toolOutput is unexported.
-	b, _ := json.Marshal(result)
+	b, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("json.Marshal result: %v", err)
+	}
+
 	if !strings.Contains(string(b), "pong") {
 		t.Errorf("serialized result = %s, want to contain %q", b, "pong")
 	}
@@ -97,7 +103,7 @@ func TestAsTool_RESTTransport(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	ts, _ := newTestServer(t, textLLM("rest-pong"), pheroA2A.WithRESTTransport())
+	ts := newTestServer(t, textLLM("rest-pong"), pheroA2A.WithRESTTransport())
 
 	client, err := pheroA2A.NewClient(ctx, ts.URL,
 		pheroA2A.WithPreferredTransports(sdka2a.TransportProtocolHTTPJSON),
@@ -116,7 +122,11 @@ func TestAsTool_RESTTransport(t *testing.T) {
 		t.Fatalf("Handle: %v", err)
 	}
 
-	b, _ := json.Marshal(result)
+	b, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("json.Marshal result: %v", err)
+	}
+
 	if !strings.Contains(string(b), "rest-pong") {
 		t.Errorf("serialized result = %s, want to contain %q", b, "rest-pong")
 	}
@@ -129,7 +139,7 @@ func TestAsTool_TaskFailed_WithReason(t *testing.T) {
 	defer cancel()
 
 	sentinel := errors.New("model quota exceeded")
-	ts, _ := newTestServer(t, errLLM(sentinel))
+	ts := newTestServer(t, errLLM(sentinel))
 
 	client, err := pheroA2A.NewClient(ctx, ts.URL)
 	if err != nil {
@@ -145,9 +155,11 @@ func TestAsTool_TaskFailed_WithReason(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
+
 	if !errors.Is(err, pheroA2A.ErrTaskFailed) {
 		t.Errorf("errors.Is(ErrTaskFailed) = false; err = %v", err)
 	}
+
 	if !strings.Contains(err.Error(), "model quota exceeded") {
 		t.Errorf("error message = %q, want to contain the failure reason", err.Error())
 	}

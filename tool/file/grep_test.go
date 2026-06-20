@@ -26,9 +26,11 @@ func TestGrepTool_DefaultModeFilesWithMatches(t *testing.T) {
 	tmp := t.TempDir()
 	matchFile := filepath.Join(tmp, "one.txt")
 	missFile := filepath.Join(tmp, "two.txt")
+
 	if err := os.WriteFile(matchFile, []byte("hello gopher"), 0o644); err != nil {
 		t.Fatalf("write match file: %v", err)
 	}
+
 	if err := os.WriteFile(missFile, []byte("hello world"), 0o644); err != nil {
 		t.Fatalf("write miss file: %v", err)
 	}
@@ -51,6 +53,7 @@ func TestGrepTool_DefaultModeFilesWithMatches(t *testing.T) {
 func TestGrepTool_ContentModeWithLineNumbers(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "code.go")
+
 	content := strings.Join([]string{"package main", "func main() {}", "// TODO"}, "\n")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write fixture: %v", err)
@@ -69,6 +72,7 @@ func TestGrepTool_ContentModeWithLineNumbers(t *testing.T) {
 	if len(out.Output) != 1 {
 		t.Fatalf("expected 1 output line, got %v", out.Output)
 	}
+
 	if !strings.Contains(out.Output[0], ":3:") {
 		t.Fatalf("expected line number in output, got %v", out.Output)
 	}
@@ -76,6 +80,7 @@ func TestGrepTool_ContentModeWithLineNumbers(t *testing.T) {
 
 func TestGrepTool_CountMode(t *testing.T) {
 	tmp := t.TempDir()
+
 	path := filepath.Join(tmp, "count.txt")
 	if err := os.WriteFile(path, []byte("x\nx\ny"), 0o644); err != nil {
 		t.Fatalf("write fixture: %v", err)
@@ -90,6 +95,7 @@ func TestGrepTool_CountMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("grep count failed: %v", err)
 	}
+
 	if len(out.Output) != 1 || !strings.HasSuffix(out.Output[0], ":2") {
 		t.Fatalf("unexpected count output: %v", out.Output)
 	}

@@ -36,12 +36,15 @@ func collectChunks(t *testing.T, splitter *Splitter) []string {
 	t.Helper()
 
 	var chunks []string
+
 	for doc, iterErr := range splitter.Split(context.TODO()) {
 		if iterErr != nil {
 			t.Fatalf("unexpected error from Split: %v", iterErr)
 		}
+
 		chunks = append(chunks, doc.Content)
 	}
+
 	if chunks == nil {
 		return []string{}
 	}
@@ -51,6 +54,7 @@ func collectChunks(t *testing.T, splitter *Splitter) []string {
 
 func assertStringsSliceEqual(t *testing.T, got, want []string) {
 	t.Helper()
+
 	if reflect.DeepEqual(got, want) {
 		return
 	}
@@ -170,14 +174,17 @@ func TestSplitter_Split_Cases(t *testing.T) {
 
 func TestSplitter_Split_EarlyStop(t *testing.T) {
 	const input = "one two three four five"
+
 	path := writeTempFile(t, input)
 	s := New(path, 5, 0).WithSeparators([]string{" "})
 
 	var collected []string
+
 	for doc, iterErr := range s.Split(context.TODO()) {
 		if iterErr != nil {
 			t.Fatalf("unexpected error: %v", iterErr)
 		}
+
 		collected = append(collected, doc.Content)
 		if len(collected) == 2 {
 			break

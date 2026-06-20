@@ -26,14 +26,14 @@ import (
 
 const (
 	toolName        = "agent"
-	toolDescription = "Create and run an agent at runtime with the given name, role description, and instructions. Use this tool to delegate a task to a purpose-built agent."
+	toolDescription = "Create and run an agent at runtime with the given name, role description, and instructions. Use this tool to delegate a task to a purpose-built agent." //nolint:lll
 )
 
 // Input defines the JSON input schema accepted by the tool.
 type Input struct {
 	Name        string `json:"name" jsonschema:"description=The name of the agent to create and run."`
 	Description string `json:"description" jsonschema:"description=The system prompt or role description for the agent."`
-	Input       string `json:"input" jsonschema:"description=Instructions for the delegated agent. Describe the task, question, or problem the agent should solve."`
+	Input       string `json:"input" jsonschema:"description=Instructions for the delegated agent. Describe the task, question, or problem the agent should solve."` //nolint:lll
 }
 
 // Output defines the JSON output schema returned by the tool.
@@ -69,6 +69,7 @@ func New(llmClient llm.LLM, tools ...*llm.Tool) (*Tool, error) {
 	}
 
 	t.tool = tool
+
 	return t, nil
 }
 
@@ -103,9 +104,8 @@ func (t *Tool) handle(ctx context.Context, input *Input) (*Output, error) {
 	}
 
 	for _, tool := range t.tools {
-		err := subAgent.AddTool(tool)
-		if err != nil {
-			return nil, err
+		if addErr := subAgent.AddTool(tool); addErr != nil {
+			return nil, addErr
 		}
 	}
 

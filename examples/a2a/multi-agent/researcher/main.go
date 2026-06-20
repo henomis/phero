@@ -111,6 +111,7 @@ Format your notes clearly with numbered sections. Be factual and objective.`,
 	fmt.Printf("rest/sse          http://localhost%s/rest/\n", addr)
 
 	<-ctx.Done()
+
 	if err := httpServer.Shutdown(context.Background()); err != nil {
 		log.Printf("shutdown: %v", err)
 	}

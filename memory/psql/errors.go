@@ -17,8 +17,12 @@ package psql
 import "errors"
 
 var (
-	ErrNilDB            = errors.New("nil db")
-	ErrEmptySessionID   = errors.New("empty session id")
-	ErrEmptyTableName   = errors.New("empty table name")
+	// ErrNilDB is returned when the database connection is nil.
+	ErrNilDB = errors.New("nil db")
+	// ErrEmptySessionID is returned when the session ID is empty.
+	ErrEmptySessionID = errors.New("empty session id")
+	// ErrEmptyTableName is returned when the table name is empty.
+	ErrEmptyTableName = errors.New("empty table name")
+	// ErrInvalidTableName is returned when the table name contains invalid characters.
 	ErrInvalidTableName = errors.New("invalid table name")
 )

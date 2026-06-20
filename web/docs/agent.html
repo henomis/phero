@@ -11,6 +11,7 @@
 <body>
   <nav class="navbar">
     <ul>
+      <li><a href="../index.html">ð Phero</a></li>
       <li><a href="index.html">Home</a></li>
       <li><a href="llm.html">LLM</a></li>
       <li><a href="agent.html">Agent</a></li>
@@ -203,9 +204,9 @@ if result.Summary != nil {
       <h2>Streaming output</h2>
       <p>
         <code>Agent.RunStream</code> runs the agent like <code>Run</code> but yields progress as a sequence of
-        <code>AgentEvent</code>s over a Go 1.23 iterator: text and reasoning deltas as the model produces them, a
+        <code>Event</code>s over a Go 1.23 iterator: text and reasoning deltas as the model produces them, a
         <code>ToolCall</code> and <code>ToolResult</code> event around each tool invocation, and a final
-        <code>AgentEventDone</code> whose <code>Result</code> mirrors <code>Run</code>. It uses the underlying LLM's
+        <code>EventDone</code> whose <code>Result</code> mirrors <code>Run</code>. It uses the underlying LLM's
         streaming API when available and otherwise falls back to a single buffered response.
       </p>
 
@@ -214,11 +215,11 @@ if result.Summary != nil {
         panic(err)
     }
     switch ev.Type {
-    case agent.AgentEventTextDelta:
+    case agent.EventTextDelta:
         fmt.Print(ev.TextDelta)
-    case agent.AgentEventToolCall:
+    case agent.EventToolCall:
         fmt.Printf("\n[tool %s]\n", ev.ToolName)
-    case agent.AgentEventDone:
+    case agent.EventDone:
         fmt.Println("\n", ev.Result.TextContent())
     }
 }</code></pre>

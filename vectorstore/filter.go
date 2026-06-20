@@ -107,10 +107,12 @@ func (f *Filter) Validate() error {
 	if f == nil {
 		return nil
 	}
+
 	for _, c := range f.Conditions {
 		if c.Key == "" {
 			return ErrInvalidFilter
 		}
+
 		switch c.Op {
 		case OpEq, OpNe:
 			if c.Value == nil {
@@ -128,6 +130,7 @@ func (f *Filter) Validate() error {
 			return ErrUnsupportedFilterOp
 		}
 	}
+
 	return nil
 }
 
@@ -150,11 +153,13 @@ func WithFilter(f *Filter) QueryOption {
 // implementations.
 func ApplyQueryOptions(opts []QueryOption) QueryConfig {
 	var cfg QueryConfig
+
 	for _, opt := range opts {
 		if opt != nil {
 			opt(&cfg)
 		}
 	}
+
 	return cfg
 }
 
@@ -171,11 +176,13 @@ func MatchPayload(f *Filter, payload map[string]any) bool {
 	if f == nil {
 		return true
 	}
+
 	for _, c := range f.Conditions {
 		if !matchCondition(c, payload) {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -196,14 +203,17 @@ func matchCondition(c Condition, payload map[string]any) bool {
 				return true
 			}
 		}
+
 		return false
 	case OpGt, OpGte, OpLt, OpLte:
 		got, okGot := ToFloat64(value)
+
 		want, okWant := ToFloat64(c.Value)
 		if !okGot || !okWant {
 			return false
 		}
-		switch c.Op {
+
+		switch c.Op { //nolint:exhaustive // outer case restricts to OpGt/Gte/Lt/Lte; others are unreachable
 		case OpGt:
 			return got > want
 		case OpGte:

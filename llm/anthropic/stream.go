@@ -32,7 +32,11 @@ var _ llm.StreamingLLM = (*Client)(nil)
 //
 // The terminal chunk (Done == true) carries the complete assistant message, the
 // model name, and token usage (including cache token counts).
-func (c *Client) ExecuteStream(ctx context.Context, messages []llm.Message, tools []*llm.Tool) iter.Seq2[llm.StreamChunk, error] {
+//
+//nolint:gocognit
+func (c *Client) ExecuteStream(
+	ctx context.Context, messages []llm.Message, tools []*llm.Tool,
+) iter.Seq2[llm.StreamChunk, error] {
 	return func(yield func(llm.StreamChunk, error) bool) {
 		params, err := c.buildParams(messages, tools)
 		if err != nil {
@@ -44,6 +48,7 @@ func (c *Client) ExecuteStream(ctx context.Context, messages []llm.Message, tool
 		defer func() { _ = stream.Close() }()
 
 		var acc anthropicapi.Message
+
 		for stream.Next() {
 			event := stream.Current()
 			if accErr := acc.Accumulate(event); accErr != nil {
@@ -64,6 +69,7 @@ func (c *Client) ExecuteStream(ctx context.Context, messages []llm.Message, tool
 				}
 			}
 		}
+
 		if streamErr := stream.Err(); streamErr != nil {
 			yield(llm.StreamChunk{}, streamErr)
 			return

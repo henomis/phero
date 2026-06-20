@@ -44,6 +44,7 @@ func main() {
 	natsURL := flag.String("nats-url", "", "NATS server URL (overrides NATS_URL env var; default nats://localhost:4222)")
 	owner := flag.String("owner", "demo", "Agent owner — 4th token in the subject hierarchy")
 	name := flag.String("name", "default", "Instance name — 5th token in the subject hierarchy")
+
 	flag.Parse()
 
 	url := resolveNATSURL(*natsURL)
@@ -62,6 +63,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("create agent: %v", err)
 	}
+
 	a.SetTracer(text.New(os.Stderr))
 
 	srv, err := natsagent.New(nc, a, *owner, *name,
@@ -89,9 +91,11 @@ func resolveNATSURL(flag string) string {
 	if flag != "" {
 		return flag
 	}
+
 	if v := os.Getenv("NATS_URL"); v != "" {
 		return v
 	}
+
 	return nats.DefaultURL
 }
 
@@ -105,6 +109,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if apiKey == "" && baseURL == "" {
 		baseURL = openai.OllamaBaseURL
 	}
+
 	if model == "" {
 		if baseURL == openai.OllamaBaseURL && apiKey == "" {
 			model = "gpt-oss:20b-cloud"
@@ -117,11 +122,13 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
+
 	client := openai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s", model)
 	if baseURL != "" {
 		info = fmt.Sprintf("model=%s base_url=%s", model, baseURL)
 	}
+
 	return client, info
 }

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package main demonstrates tracing with a Phero agent.
 package main
 
 import (
@@ -52,6 +53,7 @@ func calculate(_ context.Context, input *CalculatorInput) (*CalculatorOutput, er
 		if input.B == 0 {
 			return &CalculatorOutput{Error: "division by zero"}, nil
 		}
+
 		return &CalculatorOutput{Result: input.A / input.B}, nil
 	default:
 		return &CalculatorOutput{Error: "unknown operation: " + input.Operation}, nil

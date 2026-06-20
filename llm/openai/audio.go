@@ -59,7 +59,8 @@ func (c *Client) Transcribe(ctx context.Context, req llm.TranscriptionRequest) (
 		Format:      openaiapi.AudioResponseFormat(req.Format),
 	}
 	if len(req.TimestampGranularities) > 0 {
-		request.TimestampGranularities = make([]openaiapi.TranscriptionTimestampGranularity, 0, len(req.TimestampGranularities))
+		request.TimestampGranularities = make(
+			[]openaiapi.TranscriptionTimestampGranularity, 0, len(req.TimestampGranularities))
 		for _, granularity := range req.TimestampGranularities {
 			request.TimestampGranularities = append(
 				request.TimestampGranularities,

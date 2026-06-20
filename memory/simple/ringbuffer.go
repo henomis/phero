@@ -84,6 +84,7 @@ func (rb *ringBuffer[T]) Get() []T {
 func (rb *ringBuffer[T]) Len() int {
 	rb.mu.RLock()
 	defer rb.mu.RUnlock()
+
 	return rb.count
 }
 

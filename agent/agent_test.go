@@ -42,29 +42,36 @@ func (s *stubLLM) Execute(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*l
 	if s.delay > 0 {
 		time.Sleep(s.delay)
 	}
+
 	idx := s.callIdx
 	if idx >= len(s.responses) {
 		idx = len(s.responses) - 1
 	}
+
 	s.callIdx++
+
 	return s.responses[idx], s.errs[idx]
 }
 
 // makeStub builds a stubLLM from alternating (result, error) pairs.
 func makeStub(pairs ...any) *stubLLM {
 	s := &stubLLM{}
+
 	for i := 0; i+1 < len(pairs); i += 2 {
 		var r *llm.Result
 		if pairs[i] != nil {
 			r = pairs[i].(*llm.Result)
 		}
+
 		var e error
 		if pairs[i+1] != nil {
 			e = pairs[i+1].(error)
 		}
+
 		s.responses = append(s.responses, r)
 		s.errs = append(s.errs, e)
 	}
+
 	return s
 }
 
@@ -101,6 +108,7 @@ func toolCallResult(toolName, callID, arguments string) *llm.Result {
 func toolCallResultWithUsage(toolName, callID, arguments string, usage *llm.Usage) *llm.Result {
 	result := toolCallResult(toolName, callID, arguments)
 	result.Usage = usage
+
 	return result
 }
 
@@ -118,6 +126,7 @@ func (m *stubMemory) Retrieve(_ context.Context, _ string) ([]llm.Message, error
 	if m.retrieveDur > 0 {
 		time.Sleep(m.retrieveDur)
 	}
+
 	return m.retrieved, m.retrieveErr
 }
 
@@ -127,7 +136,9 @@ func (m *stubMemory) Save(_ context.Context, msgs []llm.Message) error {
 	if m.saveDur > 0 {
 		time.Sleep(m.saveDur)
 	}
+
 	m.saved = msgs
+
 	return m.saveErr
 }
 
@@ -143,19 +154,23 @@ func (t *recordingTracer) Trace(event trace.Event) {
 
 func mustNew(t *testing.T, client llm.LLM, name, desc string) *agent.Agent {
 	t.Helper()
+
 	a, err := agent.New(client, name, desc)
 	if err != nil {
 		t.Fatalf("agent.New: unexpected error: %v", err)
 	}
+
 	return a
 }
 
 func mustTool(t *testing.T, name string, fn func(context.Context, *struct{}) (string, error)) *llm.Tool {
 	t.Helper()
+
 	tool, err := llm.NewTool(name, "a test tool", fn)
 	if err != nil {
 		t.Fatalf("llm.NewTool(%q): unexpected error: %v", name, err)
 	}
+
 	return tool
 }
 
@@ -207,8 +222,10 @@ func TestNew_Validation(t *testing.T) {
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("want error %v, got %v", tc.wantErr, err)
 				}
+
 				return
 			}
+
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -228,10 +245,12 @@ func TestAddTool_DuplicateReturnsError(t *testing.T) {
 	}
 
 	err := a.AddTool(tool)
+
 	var alreadyExists *agent.ToolAlreadyExistsError
 	if !errors.As(err, &alreadyExists) {
 		t.Fatalf("expected ToolAlreadyExistsError, got %v", err)
 	}
+
 	if alreadyExists.Name != "my_tool" {
 		t.Fatalf("expected error for tool %q, got %q", "my_tool", alreadyExists.Name)
 	}
@@ -246,6 +265,7 @@ func TestAddHandoff_DuplicateReturnsError(t *testing.T) {
 	}
 
 	err := a.AddHandoff(target)
+
 	var alreadyExists *agent.ToolAlreadyExistsError
 	if !errors.As(err, &alreadyExists) {
 		t.Fatalf("expected ToolAlreadyExistsError on second AddHandoff, got %v", err)
@@ -260,9 +280,11 @@ func TestRun_Simple(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
+
 	if result.TextContent() != "Hello, world!" {
 		t.Fatalf("expected %q, got %q", "Hello, world!", result.TextContent())
 	}
+
 	if len(result.HandoffAgents) != 0 {
 		t.Fatalf("expected no handoff agents, got %v", result.HandoffAgents)
 	}
@@ -322,9 +344,11 @@ func TestRun_ToolCall_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
+
 	if !toolInvoked {
 		t.Fatal("expected tool to be invoked")
 	}
+
 	if result.TextContent() != "done" {
 		t.Fatalf("expected %q, got %q", "done", result.TextContent())
 	}
@@ -354,6 +378,7 @@ func TestRun_ToolCall_ToolErrors_AgentContinues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
+
 	if result.TextContent() != "recovered" {
 		t.Fatalf("expected %q, got %q", "recovered", result.TextContent())
 	}
@@ -406,12 +431,15 @@ func TestRun_Memory_SaveError_ResultStillReturned(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected result even when save fails")
 	}
+
 	if result.TextContent() != "answer" {
 		t.Fatalf("expected %q, got %q", "answer", result.TextContent())
 	}
+
 	if err == nil {
 		t.Fatal("expected save error to be surfaced")
 	}
+
 	if !errors.Is(err, agent.ErrSessionSaveFailed) {
 		t.Fatalf("expected ErrSessionSaveFailed in error chain, got %v", err)
 	}
@@ -437,9 +465,11 @@ func TestRun_Handoff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
+
 	if len(result.HandoffAgents) == 0 {
 		t.Fatal("expected HandoffAgents to be set")
 	}
+
 	if result.HandoffAgents[0].Name() != "worker" {
 		t.Fatalf("expected handoff to %q, got %q", "worker", result.HandoffAgents[0].Name())
 	}
@@ -467,6 +497,7 @@ func TestRun_PopulatesRunSummary(t *testing.T) {
 	a := mustNew(t, stub, "agent", "desc")
 	a.SetMemory(mem)
 	a.SetTracer(tracer)
+
 	if err := a.AddTool(mustTool(t, "echo_tool", func(_ context.Context, _ *struct{}) (string, error) {
 		time.Sleep(time.Millisecond)
 		return "echo_result", nil
@@ -478,6 +509,7 @@ func TestRun_PopulatesRunSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
+
 	if result.Summary == nil {
 		t.Fatal("expected run summary on result")
 	}
@@ -486,41 +518,53 @@ func TestRun_PopulatesRunSummary(t *testing.T) {
 	if summary.AgentName != "agent" {
 		t.Fatalf("summary.AgentName = %q, want %q", summary.AgentName, "agent")
 	}
+
 	if summary.Iterations != 2 {
 		t.Fatalf("summary.Iterations = %d, want 2", summary.Iterations)
 	}
+
 	if summary.LLMCalls != 2 {
 		t.Fatalf("summary.LLMCalls = %d, want 2", summary.LLMCalls)
 	}
+
 	if summary.ToolCalls != 1 {
 		t.Fatalf("summary.ToolCalls = %d, want 1", summary.ToolCalls)
 	}
+
 	if summary.ToolErrors != 0 {
 		t.Fatalf("summary.ToolErrors = %d, want 0", summary.ToolErrors)
 	}
+
 	if summary.MemoryRetrieved != 2 {
 		t.Fatalf("summary.MemoryRetrieved = %d, want 2", summary.MemoryRetrieved)
 	}
+
 	if summary.MemorySaved != 4 {
 		t.Fatalf("summary.MemorySaved = %d, want 4", summary.MemorySaved)
 	}
+
 	if summary.Usage.InputTokens != 17 {
 		t.Fatalf("summary.Usage.InputTokens = %d, want 17", summary.Usage.InputTokens)
 	}
+
 	if summary.Usage.OutputTokens != 8 {
 		t.Fatalf("summary.Usage.OutputTokens = %d, want 8", summary.Usage.OutputTokens)
 	}
+
 	if len(summary.Tools) != 1 {
 		t.Fatalf("len(summary.Tools) = %d, want 1", len(summary.Tools))
 	}
+
 	if summary.Tools[0].ToolName != "echo_tool" || summary.Tools[0].Calls != 1 || summary.Tools[0].Errors != 0 {
 		t.Fatalf("unexpected tool summary: %+v", summary.Tools[0])
 	}
+
 	if summary.Latency.Total <= 0 || summary.Latency.LLM <= 0 || summary.Latency.Tool <= 0 || summary.Latency.Memory <= 0 {
 		t.Fatalf("expected positive latency metrics, got %+v", summary.Latency)
 	}
 
 	var eventSummary *trace.RunSummary
+
 	for _, event := range tracer.events {
 		runSummaryEvent, ok := event.(trace.AgentRunSummaryEvent)
 		if ok {
@@ -528,10 +572,12 @@ func TestRun_PopulatesRunSummary(t *testing.T) {
 			break
 		}
 	}
+
 	if eventSummary == nil {
 		t.Fatal("expected AgentRunSummaryEvent to be emitted")
 		return
 	}
+
 	if eventSummary.ToolCalls != summary.ToolCalls {
 		t.Fatalf("event summary tool calls = %d, want %d", eventSummary.ToolCalls, summary.ToolCalls)
 	}
@@ -549,6 +595,7 @@ func TestRun_AggregatesCostFromModelPricing(t *testing.T) {
 		responses: []*llm.Result{toolRes, finalRes},
 		errs:      []error{nil, nil},
 	}
+
 	a := mustNew(t, stub, "agent", "desc")
 	if err := a.AddTool(mustTool(t, "echo_tool", func(_ context.Context, _ *struct{}) (string, error) {
 		return "ok", nil
@@ -575,6 +622,7 @@ func TestRun_EmptyInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
+
 	if result.TextContent() == "" {
 		t.Fatal("expected non-empty result")
 	}
@@ -649,6 +697,7 @@ func TestRun_ParallelToolCalls(t *testing.T) {
 	if err := a.AddTool(toolA); err != nil {
 		t.Fatalf("AddTool tool_a: %v", err)
 	}
+
 	if err := a.AddTool(toolB); err != nil {
 		t.Fatalf("AddTool tool_b: %v", err)
 	}
@@ -657,12 +706,15 @@ func TestRun_ParallelToolCalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
+
 	if calls[0] != 1 {
 		t.Errorf("tool_a called %d times, want 1", calls[0])
 	}
+
 	if calls[1] != 1 {
 		t.Errorf("tool_b called %d times, want 1", calls[1])
 	}
+
 	if result.TextContent() != "both done" {
 		t.Errorf("result = %q, want %q", result.TextContent(), "both done")
 	}
@@ -696,6 +748,7 @@ func TestRun_HandoffWithPrecedingToolCall(t *testing.T) {
 	if err := orchestrator.AddTool(regular); err != nil {
 		t.Fatalf("AddTool: %v", err)
 	}
+
 	if err := orchestrator.AddHandoff(worker); err != nil {
 		t.Fatalf("AddHandoff: %v", err)
 	}
@@ -704,12 +757,15 @@ func TestRun_HandoffWithPrecedingToolCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
+
 	if !regularInvoked {
 		t.Error("regular_tool was not invoked; expected it to run even when a handoff is in the same batch")
 	}
+
 	if len(result.HandoffAgents) == 0 {
 		t.Fatal("expected HandoffAgents to be set")
 	}
+
 	if result.HandoffAgents[0].Name() != "worker" {
 		t.Errorf("HandoffAgents[0] = %q, want %q", result.HandoffAgents[0].Name(), "worker")
 	}

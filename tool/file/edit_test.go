@@ -23,6 +23,7 @@ import (
 
 func TestEditTool_ReplaceAll(t *testing.T) {
 	tmp := t.TempDir()
+
 	path := filepath.Join(tmp, "multi.txt")
 	if err := os.WriteFile(path, []byte("x x x"), 0o644); err != nil {
 		t.Fatalf("write fixture: %v", err)
@@ -37,6 +38,7 @@ func TestEditTool_ReplaceAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("replace_all failed: %v", err)
 	}
+
 	if out.Replacements != 3 {
 		t.Fatalf("expected 3 replacements, got %d", out.Replacements)
 	}

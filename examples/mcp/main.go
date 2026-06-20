@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package main demonstrates MCP tool integration with a Phero agent.
 package main
 
 import (
@@ -108,6 +109,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
+
 	client := openai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s base_url=%s", model, baseURL)

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package main demonstrates human-in-the-loop tool confirmation.
 package main
 
 import (
@@ -55,8 +56,11 @@ func newConsoleInteractor(reader io.Reader, writer io.Writer) *consoleInteractor
 }
 
 func main() {
-	var goal string
-	var timeout time.Duration
+	var (
+		goal    string
+		timeout time.Duration
+	)
+
 	flag.StringVar(&goal, "goal",
 		"Set up a new Go microservice project: create a module, add a README, add a Dockerfile, and configure a CI pipeline.",
 		"High-level goal the agent should accomplish with human approval for each step")
@@ -112,6 +116,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
+
 	client := openai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s base_url=%s", model, baseURL)
@@ -199,6 +204,7 @@ func (c *consoleInteractor) Ask(ctx context.Context, in *human.Input) (map[strin
 		if _, err := fmt.Fprintf(c.writer, "\n[%s] %s\n", question.Header, question.Question); err != nil {
 			return nil, err
 		}
+
 		for idx, option := range question.Options {
 			if _, err := fmt.Fprintf(c.writer, "  %d) %s - %s\n", idx+1, option.Label, option.Description); err != nil {
 				return nil, err
@@ -260,7 +266,9 @@ func parseAnswer(raw string, question human.Question) (human.Answer, error) {
 		if _, exists := seen[normalized]; exists {
 			continue
 		}
+
 		seen[normalized] = struct{}{}
+
 		result.Selections = append(result.Selections, label)
 	}
 
@@ -277,6 +285,7 @@ func resolveOptionLabel(choice string, options []human.Choice) (string, error) {
 		if index < 1 || index > len(options) {
 			return "", fmt.Errorf("invalid option index: %d", index)
 		}
+
 		return options[index-1].Label, nil
 	}
 

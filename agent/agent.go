@@ -28,6 +28,8 @@ import (
 	"github.com/henomis/phero/trace"
 )
 
+const maxToolNameLength = 64
+
 // Agent runs a chat loop using an llm.LLM, optionally with tools and memory.
 type Agent struct {
 	llm         llm.LLM
@@ -55,6 +57,7 @@ func (r *Result) TextContent() string {
 	if r == nil {
 		return ""
 	}
+
 	return llm.TextContent(r.Parts...)
 }
 
@@ -103,6 +106,7 @@ func (a *Agent) AddTool(tool *llm.Tool) error {
 	}
 
 	a.tools = append(a.tools, tool)
+
 	return nil
 }
 
@@ -112,15 +116,16 @@ func (a *Agent) getTool(toolName string) (*llm.Tool, bool) {
 			return t, true
 		}
 	}
+
 	return nil, false
 }
 
-// AgentHandoffInput is the structured argument passed to a handoff tool.
-type AgentHandoffInput struct {
-	Context string `json:"context" jsonschema:"The contextual data gathered by the source agent to be passed to the receiving agent."`
+// HandoffInput is the structured argument passed to a handoff tool.
+type HandoffInput struct {
+	Context string `json:"context" jsonschema:"The contextual data gathered by the source agent to be passed to the receiving agent."` //nolint:lll
 }
 
-// AddTool registers a function tool.
+// AddHandoff registers another agent as a handoff target, exposing it as a tool named handoff_to_<name>.
 //
 // It returns ToolAlreadyExistsError if a tool with the same name is already present.
 func (a *Agent) AddHandoff(handoffAgent *Agent) error {
@@ -133,7 +138,7 @@ func (a *Agent) AddHandoff(handoffAgent *Agent) error {
 	tool, err := llm.NewTool(
 		toolName,
 		handoffAgent.Description(),
-		func(ctx context.Context, i *AgentHandoffInput) (string, error) {
+		func(_ context.Context, _ *HandoffInput) (string, error) {
 			return fmt.Sprintf("%s: success", toolName), nil
 		},
 	)
@@ -186,7 +191,7 @@ func (a *Agent) Run(ctx context.Context, parts ...llm.ContentPart) (*Result, err
 	return a.run(ctx, nil, parts...)
 }
 
-// run executes the agent loop, optionally emitting streaming AgentEvents.
+// run executes the agent loop, optionally emitting streaming Events.
 //
 // When emit is nil the agent runs in buffered mode (identical to the original
 // Run). When emit is non-nil, each LLM call is streamed and text/reasoning deltas
@@ -195,6 +200,7 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 	ctx = trace.WithTracer(ctx, a.tracer)
 	ctx = trace.WithAgentName(ctx, a.name)
 	stats := newRunStats(a.name)
+
 	var handoffAgentNames []string
 
 	session, sessionIndex, err := a.prepareSession(ctx, parts, stats)
@@ -220,6 +226,7 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 		if result != nil {
 			output = result.TextContent()
 		}
+
 		a.tracer.Trace(trace.AgentEndEvent{
 			AgentName:  a.name,
 			Output:     output,
@@ -253,9 +260,9 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 
 		iterCtx := trace.WithIteration(ctx, iteration)
 
-		iterationResult, err := a.handleAgentIteration(iterCtx, session, iteration, stats, emit)
-		if err != nil {
-			return nil, err
+		iterationResult, iterErr := a.handleAgentIteration(iterCtx, session, iteration, stats, emit)
+		if iterErr != nil {
+			return nil, iterErr
 		}
 
 		session = iterationResult.session
@@ -281,16 +288,19 @@ func partialResultFromSession(session []llm.Message) *Result {
 		if msg.Role != llm.RoleAssistant {
 			continue
 		}
+
 		textParts := make([]llm.ContentPart, 0, len(msg.Parts))
 		for _, p := range msg.Parts {
 			if p.Type == llm.ContentTypeText {
 				textParts = append(textParts, p)
 			}
 		}
+
 		if len(textParts) > 0 {
 			return &Result{Parts: textParts}
 		}
 	}
+
 	return nil
 }
 
@@ -303,6 +313,7 @@ func (a *Agent) saveSession(ctx context.Context, messages []llm.Message, session
 	start := time.Now()
 	count := len(messages) - sessionIndex
 	err := a.memory.Save(ctx, messages[sessionIndex:])
+
 	duration := time.Since(start)
 	if err == nil {
 		stats.recordMemorySave(count, duration)
@@ -314,6 +325,7 @@ func (a *Agent) saveSession(ctx context.Context, messages []llm.Message, session
 	} else {
 		stats.recordMemorySave(0, duration)
 	}
+
 	return err
 }
 
@@ -328,20 +340,25 @@ type agentIteration struct {
 // adds the response to the messages and memory, and executes any tool calls in the response.
 //
 // When emit is non-nil the LLM call is streamed and tool call/result events are emitted.
-func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message, iteration int, stats *runStats, emit emitFunc) (agentIteration, error) {
+func (a *Agent) handleAgentIteration(
+	ctx context.Context, session []llm.Message, iteration int, stats *runStats, emit emitFunc,
+) (agentIteration, error) {
 	var (
 		msg *llm.Result
 		err error
 	)
+
 	if emit == nil {
 		tracedLLM := trace.NewLLM(a.llm, a.tracer)
 		start := time.Now()
 		msg, err = tracedLLM.Execute(ctx, session, a.tools)
+
 		duration := time.Since(start)
 		if err != nil {
 			stats.recordLLM(duration, "", nil)
 			return agentIteration{session: session}, err
 		}
+
 		stats.recordLLM(duration, msg.Model, msg.Usage)
 	} else {
 		msg, err = a.streamIteration(ctx, session, iteration, stats, emit)
@@ -351,6 +368,7 @@ func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message,
 	}
 
 	session = append(session, *msg.Message)
+
 	return a.processToolCalls(ctx, session, msg.Message, iteration, stats, emit)
 }
 
@@ -358,7 +376,10 @@ func (a *Agent) handleAgentIteration(ctx context.Context, session []llm.Message,
 // preserving order, and appends their results to the session. When emit is
 // non-nil it pushes a ToolCall event before execution and a ToolResult event
 // after, both in call order, on the single calling goroutine.
-func (a *Agent) processToolCalls(ctx context.Context, session []llm.Message, message *llm.Message, iteration int, stats *runStats, emit emitFunc) (agentIteration, error) {
+func (a *Agent) processToolCalls(
+	ctx context.Context, session []llm.Message, message *llm.Message,
+	iteration int, stats *runStats, emit emitFunc,
+) (agentIteration, error) {
 	toolCalls := message.ToolCalls
 	if len(toolCalls) == 0 {
 		return agentIteration{session: session, lastMessage: message}, nil
@@ -366,8 +387,8 @@ func (a *Agent) processToolCalls(ctx context.Context, session []llm.Message, mes
 
 	if emit != nil {
 		for _, toolCall := range toolCalls {
-			emit(AgentEvent{
-				Type:      AgentEventToolCall,
+			emit(Event{
+				Type:      EventToolCall,
 				ToolName:  toolCall.Function.Name,
 				ToolArgs:  toolCall.Function.Arguments,
 				Iteration: iteration,
@@ -377,20 +398,24 @@ func (a *Agent) processToolCalls(ctx context.Context, session []llm.Message, mes
 
 	// Execute all tool calls concurrently, preserving order.
 	results := make([]*llm.Message, len(toolCalls))
+
 	var wg sync.WaitGroup
 	wg.Add(len(toolCalls))
+
 	for i, toolCall := range toolCalls {
 		go func() {
 			defer wg.Done()
+
 			results[i] = a.handleToolCall(ctx, toolCall, iteration, stats)
 		}()
 	}
+
 	wg.Wait()
 
 	if emit != nil {
 		for i, result := range results {
-			emit(AgentEvent{
-				Type:       AgentEventToolResult,
+			emit(Event{
+				Type:       EventToolResult,
 				ToolName:   toolCalls[i].Function.Name,
 				ToolResult: llm.TextContent(result.Parts...),
 				ToolError:  result.ToolError,
@@ -400,12 +425,16 @@ func (a *Agent) processToolCalls(ctx context.Context, session []llm.Message, mes
 	}
 
 	// Append results in order; collect all handoffs (fan-out when more than one).
-	var handoffAgents []*Agent
-	var handoffMsg *llm.Message
+	var (
+		handoffAgents []*Agent
+		handoffMsg    *llm.Message
+	)
+
 	for i, result := range results {
 		session = append(session, *result)
 		if hAgent, ok := a.handoffs[toolCalls[i].Function.Name]; ok {
 			handoffAgents = append(handoffAgents, hAgent)
+
 			if handoffMsg == nil {
 				handoffMsg = result
 			}
@@ -422,7 +451,9 @@ func (a *Agent) processToolCalls(ctx context.Context, session []llm.Message, mes
 }
 
 // handleToolCall executes a tool call and returns the result as a message to be added to the conversation.
-func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, iteration int, stats *runStats) *llm.Message {
+func (a *Agent) handleToolCall(
+	ctx context.Context, toolCall llm.ToolCall, iteration int, stats *runStats,
+) *llm.Message {
 	a.tracer.Trace(trace.ToolCallEvent{
 		AgentName: a.name,
 		ToolName:  toolCall.Function.Name,
@@ -441,6 +472,7 @@ func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, itera
 	if err != nil {
 		traceResult = err.Error()
 	}
+
 	a.tracer.Trace(trace.ToolResultEvent{
 		AgentName: a.name,
 		ToolName:  toolCall.Function.Name,
@@ -464,7 +496,9 @@ func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, itera
 }
 
 // prepareSession prepares the messages for the LLM call, including the system prompt, memory messages, and user input.
-func (a *Agent) prepareSession(ctx context.Context, parts []llm.ContentPart, stats *runStats) ([]llm.Message, int, error) {
+func (a *Agent) prepareSession(
+	ctx context.Context, parts []llm.ContentPart, stats *runStats,
+) ([]llm.Message, int, error) {
 	messages := []llm.Message{llm.SystemMessage(a.description)}
 
 	// Use the text representation of the input parts for the memory query.
@@ -473,6 +507,7 @@ func (a *Agent) prepareSession(ctx context.Context, parts []llm.ContentPart, sta
 	if a.memory != nil {
 		start := time.Now()
 		memoryMessages, err := a.memory.Retrieve(ctx, inputText)
+
 		duration := time.Since(start)
 		if err != nil {
 			stats.recordMemoryRetrieve(0, duration)
@@ -523,16 +558,20 @@ func anyToContentParts(v any) []llm.ContentPart {
 	if v == nil {
 		return nil
 	}
+
 	if parts, ok := v.([]llm.ContentPart); ok {
 		return parts
 	}
+
 	if s, ok := v.(string); ok {
 		return []llm.ContentPart{llm.Text(s)}
 	}
+
 	b, err := json.Marshal(v)
 	if err != nil {
 		return []llm.ContentPart{llm.Text(fmt.Sprintf("failed to marshal tool result: %v", err))}
 	}
+
 	return []llm.ContentPart{llm.Text(string(b))}
 }
 
@@ -546,7 +585,7 @@ func anyToContentParts(v any) []llm.ContentPart {
 // Tool arguments schema: {"input": "..."}.
 func (a *Agent) AsTool(toolName, toolDescription string) (*llm.Tool, error) {
 	type ToolInput struct {
-		Input string `json:"input" jsonschema:"description=Instructions for the agent. Describe the task, question, or problem the agent should solve."`
+		Input string `json:"input" jsonschema:"description=Instructions for the agent. Describe the task, question, or problem the agent should solve."` //nolint:lll
 	}
 
 	type ToolOutput struct {
@@ -558,6 +597,7 @@ func (a *Agent) AsTool(toolName, toolDescription string) (*llm.Tool, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		return &ToolOutput{Output: response.TextContent()}, nil
 	}
 
@@ -577,13 +617,16 @@ func SanitizeToolName(name string) string {
 			(r >= '0' && r <= '9') || r == '_' || r == '-' {
 			return r
 		}
+
 		return '_'
 	}, name)
-	if len(s) > 64 {
-		s = s[:64]
+	if len(s) > maxToolNameLength {
+		s = s[:maxToolNameLength]
 	}
+
 	if s == "" {
 		s = "agent"
 	}
+
 	return s
 }

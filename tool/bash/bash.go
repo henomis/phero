@@ -36,9 +36,9 @@ import (
 // Command is the bash command to execute. Description provides context on why the command is being run.
 type Input struct {
 	Command         string `json:"command" jsonschema:"description=The command to execute."`
-	Description     string `json:"description,omitempty" jsonschema:"description=Clear, concise command description (5-10 words)."`
-	Timeout         int    `json:"timeout,omitempty" jsonschema:"description=Optional timeout in milliseconds (max 600000)."`
-	RunInBackground bool   `json:"run_in_background,omitempty" jsonschema:"description=Set true to run the command in background."`
+	Description     string `json:"description,omitempty" jsonschema:"description=Clear, concise command description (5-10 words)."` //nolint:lll
+	Timeout         int    `json:"timeout,omitempty" jsonschema:"description=Optional timeout in milliseconds (max 600000)."`       //nolint:lll
+	RunInBackground bool   `json:"run_in_background,omitempty" jsonschema:"description=Set true to run the command in background."` //nolint:lll
 }
 
 // Output represents the output from bash_tool.
@@ -51,14 +51,14 @@ type Output struct {
 	Truncated bool   `json:"truncated"`
 }
 
-// BashOutputInput represents input for retrieving background shell output.
-type BashOutputInput struct {
+// OutputInput represents input for retrieving background shell output.
+type OutputInput struct {
 	BashID string `json:"bash_id" jsonschema:"description=ID of the background shell to read."`
-	Filter string `json:"filter,omitempty" jsonschema:"description=Optional regular expression to include only matching lines."`
+	Filter string `json:"filter,omitempty" jsonschema:"description=Optional regular expression to include only matching lines."` //nolint:lll
 }
 
-// BashOutputOutput represents incremental output from a background shell.
-type BashOutputOutput struct {
+// OutputOutput represents incremental output from a background shell.
+type OutputOutput struct {
 	Output    string `json:"output"`
 	Running   bool   `json:"running"`
 	Truncated bool   `json:"truncated"`
@@ -88,9 +88,13 @@ const MaxTimeout = 600 * time.Second
 // single tool call before truncation.
 const MaxOutputChars = 30000
 
+const randomIDBytes = 8
+
+const rmRFSlash = "rm -rf /"
+
 // safeModeBlocklist contains substring patterns that are blocked when safe mode is enabled.
 var safeModeBlocklist = []string{
-	"rm -rf /",
+	rmRFSlash,
 	"rm -fr /",
 	"dd if=",
 	"mkfs",
@@ -139,7 +143,7 @@ type Option func(*Tool)
 // New creates a new instance of the bash_tool.
 func New(options ...Option) (*Tool, error) {
 	name := "bash"
-	description := "Executes a given bash command in a persistent shell session with optional timeout and background execution."
+	description := "Executes a given bash command in a persistent shell session with optional timeout and background execution." //nolint:lll
 
 	bashTool := &Tool{
 		defaultTimeout: DefaultTimeout,
@@ -182,6 +186,7 @@ func New(options ...Option) (*Tool, error) {
 	bashTool.tool = tool
 	bashTool.outputTool = outputTool
 	bashTool.killTool = killTool
+
 	return bashTool, nil
 }
 
@@ -276,13 +281,16 @@ func WithSafeMode() Option {
 	}
 }
 
+//nolint:gocognit
 func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 	if input == nil {
 		return nil, ErrNilInput
 	}
+
 	if strings.TrimSpace(input.Command) == "" {
 		return nil, ErrCommandRequired
 	}
+
 	if input.Timeout < 0 {
 		return nil, ErrTimeoutTooLarge
 	}
@@ -293,14 +301,17 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 			return nil, ErrCommandBlocked
 		}
 	}
+
 	if len(t.allowlist) > 0 {
 		allowed := false
+
 		for _, pat := range t.allowlist {
 			if strings.Contains(lower, pat) {
 				allowed = true
 				break
 			}
 		}
+
 		if !allowed {
 			return nil, ErrCommandNotAllowed
 		}
@@ -316,17 +327,20 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 		if startErr != nil {
 			return nil, startErr
 		}
+
 		return &Output{BashID: shellID, Running: true}, nil
 	}
 
 	runCtx := ctx
+
 	if cmdTimeout > 0 {
 		var cancel context.CancelFunc
+
 		runCtx, cancel = context.WithTimeout(ctx, cmdTimeout)
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(runCtx, "bash", "-c", input.Command)
+	cmd := exec.CommandContext(runCtx, "bash", "-c", input.Command) //nolint:gosec,lll // intentional: bash tool executes arbitrary commands by design
 	if t.workingDir != "" {
 		cmd.Dir = t.workingDir
 	}
@@ -351,8 +365,10 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 		if out != "" && !strings.HasSuffix(out, "\n") {
 			out += "\n"
 		}
+
 		out += fmt.Sprintf("exit code: %d", exitErr.ExitCode())
 		out, truncated = t.truncateOutput(out)
+
 		return &Output{Output: out, Running: false, Truncated: truncated}, nil
 	}
 
@@ -360,10 +376,11 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 	return nil, err
 }
 
-func (t *Tool) output(_ context.Context, input *BashOutputInput) (*BashOutputOutput, error) {
+func (t *Tool) output(_ context.Context, input *OutputInput) (*OutputOutput, error) {
 	if input == nil {
 		return nil, ErrNilInput
 	}
+
 	if strings.TrimSpace(input.BashID) == "" {
 		return nil, ErrBashIDRequired
 	}
@@ -371,24 +388,29 @@ func (t *Tool) output(_ context.Context, input *BashOutputInput) (*BashOutputOut
 	t.mu.RLock()
 	shell, ok := t.shell[input.BashID]
 	t.mu.RUnlock()
+
 	if !ok {
 		return nil, ErrShellNotFound
 	}
 
 	var re *regexp.Regexp
+
 	if strings.TrimSpace(input.Filter) != "" {
 		compiled, err := regexp.Compile(input.Filter)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidOutputFilter, err)
 		}
+
 		re = compiled
 	}
 
 	shell.mu.Lock()
+
 	raw := shell.out.String()
 	if shell.readOffset > len(raw) {
 		shell.readOffset = len(raw)
 	}
+
 	incremental := raw[shell.readOffset:]
 	shell.readOffset = len(raw)
 	running := shell.running
@@ -396,23 +418,27 @@ func (t *Tool) output(_ context.Context, input *BashOutputInput) (*BashOutputOut
 
 	if re != nil && incremental != "" {
 		lines := strings.Split(incremental, "\n")
+
 		filtered := make([]string, 0, len(lines))
 		for _, line := range lines {
 			if re.MatchString(line) {
 				filtered = append(filtered, line)
 			}
 		}
+
 		incremental = strings.Join(filtered, "\n")
 	}
 
 	trimmed, truncated := t.truncateOutput(incremental)
-	return &BashOutputOutput{Output: trimmed, Running: running, Truncated: truncated}, nil
+
+	return &OutputOutput{Output: trimmed, Running: running, Truncated: truncated}, nil
 }
 
 func (t *Tool) kill(_ context.Context, input *KillShellInput) (*KillShellOutput, error) {
 	if input == nil {
 		return nil, ErrNilInput
 	}
+
 	if strings.TrimSpace(input.ShellID) == "" {
 		return nil, ErrShellIDRequired
 	}
@@ -420,6 +446,7 @@ func (t *Tool) kill(_ context.Context, input *KillShellInput) (*KillShellOutput,
 	t.mu.RLock()
 	shell, ok := t.shell[input.ShellID]
 	t.mu.RUnlock()
+
 	if !ok {
 		return nil, ErrShellNotFound
 	}
@@ -451,6 +478,7 @@ func (t *Tool) resolveTimeout(timeoutMs int) (time.Duration, error) {
 		if t.maxTimeout > 0 && requested > t.maxTimeout {
 			return 0, ErrTimeoutTooLarge
 		}
+
 		effective = requested
 	}
 
@@ -469,9 +497,11 @@ func (t *Tool) truncateOutput(output string) (string, bool) {
 	if t.maxOutputChars <= 0 {
 		return output, false
 	}
+
 	if len(output) <= t.maxOutputChars {
 		return output, false
 	}
+
 	return output[:t.maxOutputChars], true
 }
 
@@ -482,12 +512,13 @@ func (t *Tool) startBackground(command string, timeout time.Duration) (string, e
 	}
 
 	baseCtx := context.Background()
+
 	var cancel context.CancelFunc
 	if timeout > 0 {
 		baseCtx, cancel = context.WithTimeout(context.Background(), timeout)
 	}
 
-	cmd := exec.CommandContext(baseCtx, "bash", "-c", command)
+	cmd := exec.CommandContext(baseCtx, "bash", "-c", command) //nolint:gosec,lll // intentional: bash tool executes arbitrary commands by design
 	if t.workingDir != "" {
 		cmd.Dir = t.workingDir
 	}
@@ -504,8 +535,8 @@ func (t *Tool) startBackground(command string, timeout time.Duration) (string, e
 	cmd.Stdout = writer
 	cmd.Stderr = writer
 
-	if err := cmd.Start(); err != nil {
-		return "", err
+	if startErr := cmd.Start(); startErr != nil {
+		return "", startErr
 	}
 
 	t.mu.Lock()
@@ -514,9 +545,11 @@ func (t *Tool) startBackground(command string, timeout time.Duration) (string, e
 
 	go func() {
 		_ = cmd.Wait()
+
 		if shell.cancel != nil {
 			shell.cancel()
 		}
+
 		shell.mu.Lock()
 		shell.running = false
 		shell.mu.Unlock()
@@ -527,10 +560,11 @@ func (t *Tool) startBackground(command string, timeout time.Duration) (string, e
 }
 
 func randomID() (string, error) {
-	b := make([]byte, 8)
+	b := make([]byte, randomIDBytes)
 	if _, err := io.ReadFull(rand.Reader, b); err != nil {
 		return "", err
 	}
+
 	return hex.EncodeToString(b), nil
 }
 
@@ -541,5 +575,6 @@ type lockedWriter struct {
 func (w *lockedWriter) Write(p []byte) (int, error) {
 	w.shell.mu.Lock()
 	defer w.shell.mu.Unlock()
+
 	return w.shell.out.Write(p)
 }

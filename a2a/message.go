@@ -37,6 +37,7 @@ func translatePartsToPhero(msg *sdka2a.Message) []llm.ContentPart {
 	if msg == nil {
 		return nil
 	}
+
 	parts := make([]llm.ContentPart, 0, len(msg.Parts))
 	for _, part := range msg.Parts {
 		switch {
@@ -60,6 +61,7 @@ func translatePartsToPhero(msg *sdka2a.Message) []llm.ContentPart {
 			}
 		}
 	}
+
 	return parts
 }
 
@@ -73,6 +75,7 @@ func translateResultToA2A(result *agent.Result) []*sdka2a.Part {
 	if result == nil {
 		return nil
 	}
+
 	parts := make([]*sdka2a.Part, 0, len(result.Parts))
 	for _, p := range result.Parts {
 		switch p.Type {
@@ -88,8 +91,11 @@ func translateResultToA2A(result *agent.Result) []*sdka2a.Part {
 				a2aPart.MediaType = p.MIMEType
 				parts = append(parts, a2aPart)
 			}
+		case llm.ContentTypeReasoning, llm.ContentTypeRedactedReasoning:
+			// A2A has no reasoning part type; skip.
 		}
 	}
+
 	return parts
 }
 
@@ -98,6 +104,8 @@ func translateResultToA2A(result *agent.Result) []*sdka2a.Part {
 // A result is either a *sdka2a.Message (agent responds inline) or a *sdka2a.Task
 // (server creates a task to track the work). Both are handled. Artifacts are also
 // checked if neither the status message nor inline parts contain text.
+//
+//nolint:gocognit
 func extractTextFromResult(result sdka2a.SendMessageResult) (string, error) {
 	switch v := result.(type) {
 	case *sdka2a.Message:
@@ -106,6 +114,7 @@ func extractTextFromResult(result sdka2a.SendMessageResult) (string, error) {
 				return t, nil
 			}
 		}
+
 		return "", ErrNoTextContent
 
 	case *sdka2a.Task:
@@ -116,6 +125,7 @@ func extractTextFromResult(result sdka2a.SendMessageResult) (string, error) {
 				}
 			}
 		}
+
 		for _, artifact := range v.Artifacts {
 			for _, part := range artifact.Parts {
 				if t := part.Text(); t != "" {
@@ -123,6 +133,7 @@ func extractTextFromResult(result sdka2a.SendMessageResult) (string, error) {
 				}
 			}
 		}
+
 		return "", ErrNoTextContent
 
 	default:

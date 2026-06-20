@@ -56,6 +56,7 @@ func New(apiKey string, opts ...Option) *Client {
 		model:  DefaultModel,
 		config: openai.DefaultConfig(apiKey),
 	}
+
 	for _, opt := range opts {
 		if opt != nil {
 			opt(c)
@@ -63,6 +64,7 @@ func New(apiKey string, opts ...Option) *Client {
 	}
 
 	c.client = openai.NewClientWithConfig(c.config)
+
 	return c
 }
 
@@ -94,6 +96,7 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*l
 	}
 
 	msg := messageFromOpenAI(response.Choices[0].Message)
+
 	return &llm.Result{
 		Message: &msg,
 		Model:   model,
@@ -110,6 +113,7 @@ func messagesToOpenAI(messages []llm.Message) []openai.ChatCompletionMessage {
 	for _, m := range messages {
 		out = append(out, messageToOpenAI(m))
 	}
+
 	return out
 }
 
@@ -174,9 +178,13 @@ func messageToOpenAI(m llm.Message) openai.ChatCompletionMessage {
 					URL: dataURI,
 				},
 			})
+		case llm.ContentTypeReasoning, llm.ContentTypeRedactedReasoning:
+			// OpenAI has no reasoning content type; skip
 		}
 	}
+
 	msg.MultiContent = multi
+
 	return msg
 }
 
@@ -216,6 +224,7 @@ func messageFromOpenAI(m openai.ChatCompletionMessage) llm.Message {
 				}
 			}
 		}
+
 		msg.Parts = parts
 	} else if strings.TrimSpace(m.Content) != "" {
 		msg.Parts = []llm.ContentPart{llm.Text(m.Content)}

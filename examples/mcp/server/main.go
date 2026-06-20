@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package main runs a minimal MCP server for the mcp example.
 package main
 
 import (
@@ -25,7 +26,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// Quote API response structure.
+// QuoteResponse represents the structure of the response from the quote API.
 type QuoteResponse struct {
 	Content string `json:"content"`
 	Author  string `json:"author"`
@@ -76,9 +77,11 @@ func getRandomQuoteHandler(ctx context.Context, _ *mcp.CallToolRequest, _ *Input
 		Q string `json:"q"`
 		A string `json:"a"`
 	}
+
 	err = json.Unmarshal(body, &data)
 	if err != nil || len(data) == 0 {
 		return nil, Output{}, fmt.Errorf("invalid response from quote API")
 	}
+
 	return nil, Output{Content: fmt.Sprintf("%s - %s", data[0].Q, data[0].A)}, nil
 }

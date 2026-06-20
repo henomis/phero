@@ -28,6 +28,8 @@ import (
 	"github.com/henomis/phero/llm"
 )
 
+const defaultPollingInterval = 500 * time.Millisecond
+
 // ClientOption configures a [Client].
 type ClientOption func(*clientConfig)
 
@@ -108,7 +110,7 @@ func NewClient(ctx context.Context, baseURL string, opts ...ClientOption) (*Clie
 
 	cfg := &clientConfig{
 		resolver:        agentcard.DefaultResolver,
-		pollingInterval: 500 * time.Millisecond,
+		pollingInterval: defaultPollingInterval,
 	}
 
 	for _, o := range opts {
@@ -157,6 +159,9 @@ func (c *Client) Card() *sdka2a.AgentCard {
 // The tool input and output are text-only. Non-text parts in the remote agent's
 // response (images, raw bytes) are not surfaced; if the response contains no text
 // the tool returns [ErrNoTextContent].
+// responses, but the logic is straightforward and well-commented.
+//
+//nolint:gocognit
 func (c *Client) AsTool() (*llm.Tool, error) {
 	type toolInput struct {
 		Input string `json:"input" jsonschema:"description=Instructions or question for the remote agent."`
@@ -184,6 +189,7 @@ func (c *Client) AsTool() (*llm.Tool, error) {
 			if err != nil {
 				return nil, err
 			}
+
 			result = task
 		}
 
@@ -194,9 +200,14 @@ func (c *Client) AsTool() (*llm.Tool, error) {
 				if reason := extractStatusMessage(task.Status.Message); reason != "" {
 					return nil, fmt.Errorf("%w: %s", ErrTaskFailed, reason)
 				}
+
 				return nil, ErrTaskFailed
 			case sdka2a.TaskStateCanceled:
 				return nil, ErrTaskCanceled
+			case sdka2a.TaskStateCompleted, sdka2a.TaskStateUnspecified, sdka2a.TaskStateAuthRequired,
+				sdka2a.TaskStateInputRequired, sdka2a.TaskStateRejected, sdka2a.TaskStateSubmitted,
+				sdka2a.TaskStateWorking:
+				// fall through to text extraction below
 			}
 		}
 
@@ -217,11 +228,13 @@ func extractStatusMessage(msg *sdka2a.Message) string {
 	if msg == nil {
 		return ""
 	}
+
 	for _, part := range msg.Parts {
 		if t := part.Text(); t != "" {
 			return t
 		}
 	}
+
 	return ""
 }
 
@@ -229,6 +242,8 @@ func extractStatusMessage(msg *sdka2a.Message) string {
 // final Task. It first attempts to subscribe to the task's event stream; if
 // that fails or the server does not support streaming, it falls back to polling
 // GetTask at the configured polling interval (default 500 ms).
+//
+//nolint:gocognit
 func (c *Client) waitForTask(ctx context.Context, task *sdka2a.Task) (*sdka2a.Task, error) {
 	if task.Status.State.Terminal() {
 		return task, nil
@@ -242,6 +257,7 @@ func (c *Client) waitForTask(ctx context.Context, task *sdka2a.Task) (*sdka2a.Ta
 		if err != nil {
 			break
 		}
+
 		switch v := event.(type) {
 		case *sdka2a.Task:
 			if v.Status.State.Terminal() {
@@ -249,10 +265,11 @@ func (c *Client) waitForTask(ctx context.Context, task *sdka2a.Task) (*sdka2a.Ta
 			}
 		case *sdka2a.TaskStatusUpdateEvent:
 			if v.Status.State.Terminal() {
-				t, err := c.client.GetTask(ctx, &sdka2a.GetTaskRequest{ID: task.ID})
-				if err != nil {
-					return nil, err
+				t, getErr := c.client.GetTask(ctx, &sdka2a.GetTaskRequest{ID: task.ID})
+				if getErr != nil {
+					return nil, getErr
 				}
+
 				return t, nil
 			}
 		}
@@ -271,6 +288,7 @@ func (c *Client) waitForTask(ctx context.Context, task *sdka2a.Task) (*sdka2a.Ta
 			if err != nil {
 				return nil, err
 			}
+
 			if t.Status.State.Terminal() {
 				return t, nil
 			}

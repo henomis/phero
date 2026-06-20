@@ -27,6 +27,16 @@ import (
 // ContentType identifies the kind of content within a ContentPart.
 type ContentType string
 
+// mimeSniffBytes is the number of bytes used for MIME type sniffing (matches http.DetectContentType).
+const mimeSniffBytes = 512
+
+const (
+	mimeImageJPEG = "image/jpeg"
+	mimeImagePNG  = "image/png"
+	mimeImageGIF  = "image/gif"
+	mimeImageWEBP = "image/webp"
+)
+
 const (
 	// ContentTypeText is a plain-text content part.
 	ContentTypeText ContentType = "text"
@@ -101,20 +111,21 @@ func ImageBase64(mimeType, data string) ContentPart {
 // those accepted by OpenAI and Anthropic: image/jpeg, image/png, image/gif,
 // and image/webp.
 func ImageFile(path string) (ContentPart, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // path is controlled by caller
 	if err != nil {
 		return ContentPart{}, fmt.Errorf("llm.ImageFile: read %q: %w", path, err)
 	}
 
 	mimeType := detectImageMIMEType(data, path)
 	switch mimeType {
-	case "image/jpeg", "image/png", "image/gif", "image/webp":
+	case mimeImageJPEG, mimeImagePNG, mimeImageGIF, mimeImageWEBP:
 		// accepted
 	default:
 		return ContentPart{}, fmt.Errorf("llm.ImageFile: unsupported image type %q for %q", mimeType, path)
 	}
 
 	b64 := base64.StdEncoding.EncodeToString(data)
+
 	return ImageBase64(mimeType, b64), nil
 }
 
@@ -122,9 +133,10 @@ func ImageFile(path string) (ContentPart, error) {
 // falls back to the file extension.
 func detectImageMIMEType(data []byte, path string) string {
 	sniff := data
-	if len(sniff) > 512 {
-		sniff = sniff[:512]
+	if len(sniff) > mimeSniffBytes {
+		sniff = sniff[:mimeSniffBytes]
 	}
+
 	mt := http.DetectContentType(sniff)
 	// http.DetectContentType returns "image/jpeg", "image/png", "image/gif",
 	// "image/webp" for the respective formats.
@@ -134,14 +146,15 @@ func detectImageMIMEType(data []byte, path string) string {
 	// Fall back to extension.
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".jpg", ".jpeg":
-		return "image/jpeg"
+		return mimeImageJPEG
 	case ".png":
-		return "image/png"
+		return mimeImagePNG
 	case ".gif":
-		return "image/gif"
+		return mimeImageGIF
 	case ".webp":
-		return "image/webp"
+		return mimeImageWEBP
 	}
+
 	return mt
 }
 
@@ -194,28 +207,34 @@ func (m Message) TextContent() string {
 // text parts in the message. Redacted reasoning is opaque and is not included.
 func (m Message) ReasoningContent() string {
 	var sb strings.Builder
+
 	for _, p := range m.Parts {
 		if p.Type == ContentTypeReasoning && p.Text != "" {
 			if sb.Len() > 0 {
 				sb.WriteByte('\n')
 			}
+
 			sb.WriteString(p.Text)
 		}
 	}
+
 	return sb.String()
 }
 
 // TextContent returns the concatenation of all text parts across the given ContentParts.
 func TextContent(parts ...ContentPart) string {
 	var sb strings.Builder
+
 	for i, p := range parts {
 		if p.Type == ContentTypeText {
 			if i > 0 && sb.Len() > 0 {
 				sb.WriteByte('\n')
 			}
+
 			sb.WriteString(p.Text)
 		}
 	}
+
 	return sb.String()
 }
 
@@ -289,21 +308,22 @@ type LLM interface {
 	Execute(context.Context, []Message, []*Tool) (*Result, error)
 }
 
-// LLMMiddleware wraps an LLM, decorating its Execute method with additional behavior.
+// Middleware wraps an LLM, decorating its Execute method with additional behavior.
 //
 // Use Use to compose multiple middlewares around a base LLM.
 // Middleware order is preserved: Use(base, m1, m2) means m1 is the outermost layer and
 // runs first, delegating to m2, which delegates to base.
-type LLMMiddleware func(next LLM) LLM
+type Middleware func(next LLM) LLM
 
 // Use wraps base with the provided middlewares, returning a new LLM.
 //
 // Middlewares are applied in order: the first middleware listed is the outermost layer.
 // For example, Use(base, logging, ratelimit) produces logging(ratelimit(base)).
-func Use(base LLM, middlewares ...LLMMiddleware) LLM {
+func Use(base LLM, middlewares ...Middleware) LLM {
 	result := base
 	for i := len(middlewares) - 1; i >= 0; i-- {
 		result = middlewares[i](result)
 	}
+
 	return result
 }

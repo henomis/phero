@@ -34,36 +34,42 @@ func TestNewFunctionTool_PointerInput_SchemaIsStrictObject(t *testing.T) {
 		if in == nil {
 			return nil, nil
 		}
+
 		return &testOutput{NickName: in.Name + "y"}, nil
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
-	if got, _ := tool.InputSchema()["type"].(string); got != "object" {
-		t.Fatalf("schema type: expected %q, got %#v", "object", tool.InputSchema()["type"])
+	if got, _ := tool.InputSchema()[schemaKeyType].(string); got != schemaTypeObject {
+		t.Fatalf("schema type: expected %q, got %#v", schemaTypeObject, tool.InputSchema()[schemaKeyType])
 	}
+
 	if _, ok := tool.InputSchema()["anyOf"]; ok {
 		t.Fatalf("expected no top-level anyOf in schema, got: %#v", tool.InputSchema()["anyOf"])
 	}
 
-	props, ok := tool.InputSchema()["properties"].(map[string]any)
+	props, ok := tool.InputSchema()[schemaKeyProperties].(map[string]any)
 	if !ok {
-		t.Fatalf("schema properties: expected map, got %#v", tool.InputSchema()["properties"])
+		t.Fatalf("schema properties: expected map, got %#v", tool.InputSchema()[schemaKeyProperties])
 	}
-	if _, ok := props["name"]; !ok {
+
+	if _, hasName := props["name"]; !hasName {
 		t.Fatalf("schema properties: expected key %q, got %#v", "name", props)
 	}
 }
 
 func TestNewFunctionTool_PointerInput_HandleDecodesIntoPointer(t *testing.T) {
 	var gotName string
+
 	tool, err := NewTool("nick", "", func(_ context.Context, in *testInput) (*testOutput, error) {
 		if in == nil {
 			gotName = "<nil>"
 			return &testOutput{NickName: "nil"}, nil
 		}
+
 		gotName = in.Name
+
 		return &testOutput{NickName: in.Name + "y"}, nil
 	})
 	if err != nil {
@@ -79,9 +85,11 @@ func TestNewFunctionTool_PointerInput_HandleDecodesIntoPointer(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *testOutput result, got %#v", result)
 	}
+
 	if gotName != "Simone" {
 		t.Fatalf("handler input: expected %q, got %q", "Simone", gotName)
 	}
+
 	if out.NickName != "Simoney" {
 		t.Fatalf("output: expected %q, got %q", "Simoney", out.NickName)
 	}
@@ -97,13 +105,14 @@ func TestNewFunctionTool_PointerToAnonymousEmptyStruct_DoesNotPanic(t *testing.T
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
-	if got, _ := tool.InputSchema()["type"].(string); got != "object" {
-		t.Fatalf("schema type: expected %q, got %#v", "object", tool.InputSchema()["type"])
+	if got, _ := tool.InputSchema()[schemaKeyType].(string); got != schemaTypeObject {
+		t.Fatalf("schema type: expected %q, got %#v", schemaTypeObject, tool.InputSchema()[schemaKeyType])
 	}
 }
 
 func TestToolMiddleware_Order(t *testing.T) {
 	var calls []string
+
 	tool, err := NewTool("nick", "", func(_ context.Context, in *testInput) (*testOutput, error) {
 		calls = append(calls, "handler")
 		return &testOutput{NickName: in.Name}, nil
@@ -139,6 +148,7 @@ func TestToolMiddleware_Order(t *testing.T) {
 
 func TestToolMiddleware_InputValidation_ShortCircuits(t *testing.T) {
 	var handled bool
+
 	tool, err := NewTool("nick", "", func(_ context.Context, _ *testInput) (*testOutput, error) {
 		handled = true
 		return &testOutput{NickName: "x"}, nil
@@ -147,10 +157,8 @@ func TestToolMiddleware_InputValidation_ShortCircuits(t *testing.T) {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
-	tool.Use(func(_ *Tool, next ToolHandler) ToolHandler {
-		return func(ctx context.Context, arguments string) (any, error) {
-			// For this test we don't need to decode JSON; just reject based on raw args.
-			_ = arguments
+	tool.Use(func(_ *Tool, _ ToolHandler) ToolHandler {
+		return func(_ context.Context, _ string) (any, error) {
 			return nil, errors.New("invalid")
 		}
 	})
@@ -159,6 +167,7 @@ func TestToolMiddleware_InputValidation_ShortCircuits(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error")
 	}
+
 	if handled {
 		t.Fatalf("expected handler not to run")
 	}
@@ -166,34 +175,39 @@ func TestToolMiddleware_InputValidation_ShortCircuits(t *testing.T) {
 
 func TestNewRawTool_PreservesObjectSchema(t *testing.T) {
 	schema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"city": map[string]any{"type": "string"},
+		schemaKeyType: schemaTypeObject,
+		schemaKeyProperties: map[string]any{
+			"city": map[string]any{schemaKeyType: "string"},
 		},
 	}
+
 	tool, err := NewRawTool("weather", "get weather", schema, func(_ context.Context, args string) (any, error) {
 		return args, nil
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
-	if got, _ := tool.InputSchema()["type"].(string); got != "object" {
-		t.Fatalf("schema type: expected %q, got %#v", "object", tool.InputSchema()["type"])
+
+	if got, _ := tool.InputSchema()[schemaKeyType].(string); got != schemaTypeObject {
+		t.Fatalf("schema type: expected %q, got %#v", schemaTypeObject, tool.InputSchema()[schemaKeyType])
 	}
-	props, ok := tool.InputSchema()["properties"].(map[string]any)
+
+	props, ok := tool.InputSchema()[schemaKeyProperties].(map[string]any)
 	if !ok {
-		t.Fatalf("expected properties map, got %#v", tool.InputSchema()["properties"])
+		t.Fatalf("expected properties map, got %#v", tool.InputSchema()[schemaKeyProperties])
 	}
-	if _, ok := props["city"]; !ok {
+
+	if _, hasCity := props["city"]; !hasCity {
 		t.Fatalf("expected 'city' property, got %#v", props)
 	}
 }
 
 func TestNewRawTool_HandlerReceivesRawJSON(t *testing.T) {
 	var got string
+
 	tool, err := NewRawTool("echo", "", map[string]any{
-		"type":       "object",
-		"properties": map[string]any{},
+		schemaKeyType:       schemaTypeObject,
+		schemaKeyProperties: map[string]any{},
 	}, func(_ context.Context, args string) (any, error) {
 		got = args
 		return "ok", nil
@@ -201,11 +215,14 @@ func TestNewRawTool_HandlerReceivesRawJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
+
 	payload := `{"hello":"world"}`
+
 	_, err = tool.Handle(context.Background(), payload)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
+
 	if got != payload {
 		t.Fatalf("handler got %q, want %q", got, payload)
 	}
@@ -213,13 +230,15 @@ func TestNewRawTool_HandlerReceivesRawJSON(t *testing.T) {
 
 func TestNewRawTool_DoesNotMutateCallerSchema(t *testing.T) {
 	original := map[string]any{
-		"type":       "object",
-		"properties": map[string]any{"x": map[string]any{"type": "integer"}},
+		schemaKeyType:       schemaTypeObject,
+		schemaKeyProperties: map[string]any{"x": map[string]any{schemaKeyType: "integer"}},
 	}
+
 	_, err := NewRawTool("t", "desc", original, func(_ context.Context, _ string) (any, error) { return nil, nil })
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
+
 	if _, ok := original["description"]; ok {
 		t.Fatalf("original schema was mutated: 'description' key was added")
 	}

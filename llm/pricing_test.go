@@ -28,6 +28,7 @@ func TestPricingCost(t *testing.T) {
 	u := Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000, CacheReadTokens: 1_000_000, CacheWriteTokens: 1_000_000}
 
 	got := p.Cost(u)
+
 	want := 3.00 + 15.00 + 0.30 + 3.75
 	if !almostEqual(got, want) {
 		t.Fatalf("Cost() = %v, want %v", got, want)
@@ -64,6 +65,7 @@ func TestUsageCost_UnknownModelIsZero(t *testing.T) {
 
 func TestRegisterPricing_OverrideAndCustom(t *testing.T) {
 	RegisterPricing("my-local-model", Pricing{InputPer1M: 1.0, OutputPer1M: 2.0})
+
 	got := Usage{InputTokens: 2_000_000, OutputTokens: 1_000_000}.Cost("my-local-model")
 	if !almostEqual(got, 2.0+2.0) {
 		t.Fatalf("custom model cost = %v, want %v", got, 4.0)

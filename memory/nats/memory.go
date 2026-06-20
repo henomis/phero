@@ -51,6 +51,7 @@ func New(kv nats.KeyValue, sessionID string, options ...Option) (*Memory, error)
 	if kv == nil {
 		return nil, ErrNilKeyValue
 	}
+
 	if strings.TrimSpace(sessionID) == "" {
 		return nil, ErrEmptySessionID
 	}
@@ -92,13 +93,15 @@ func (m *Memory) load() ([]llm.Message, error) {
 		if err == nats.ErrKeyNotFound {
 			return []llm.Message{}, nil
 		}
+
 		return nil, err
 	}
 
 	var msgs []llm.Message
-	if err := json.Unmarshal(entry.Value(), &msgs); err != nil {
-		return nil, err
+	if unmarshalErr := json.Unmarshal(entry.Value(), &msgs); unmarshalErr != nil {
+		return nil, unmarshalErr
 	}
+
 	return msgs, nil
 }
 
@@ -109,7 +112,9 @@ func (m *Memory) store(msgs []llm.Message) error {
 	if err != nil {
 		return err
 	}
+
 	_, err = m.kv.Put(m.sessionID, data)
+
 	return err
 }
 
@@ -135,14 +140,13 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 
 		history := memory.FormatSummaryPrompt(toSummarize)
 
-		summaryMsg, err := m.llm.Execute(ctx, []llm.Message{history}, nil)
-		if err != nil {
-			return err
+		summaryMsg, llmErr := m.llm.Execute(ctx, []llm.Message{history}, nil)
+		if llmErr != nil {
+			return llmErr
 		}
 
-		merged = []llm.Message{
-			llm.SystemMessage(memory.SummarySystemMessagePrefix + summaryMsg.Message.TextContent()),
-		}
+		merged = make([]llm.Message, 0, 1+len(toAppend))
+		merged = append(merged, llm.SystemMessage(memory.SummarySystemMessagePrefix+summaryMsg.Message.TextContent()))
 		merged = append(merged, toAppend...)
 	}
 
@@ -167,5 +171,6 @@ func (m *Memory) Clear(_ context.Context) error {
 	if err := m.kv.Purge(m.sessionID); err != nil && err != nats.ErrKeyNotFound {
 		return err
 	}
+
 	return nil
 }

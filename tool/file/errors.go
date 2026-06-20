@@ -46,19 +46,19 @@ var ErrInvalidOutputMode = errors.New("invalid output_mode")
 // ErrContextFlagsRequireContentMode is returned when -A/-B/-C/-n are used with a non-content mode.
 var ErrContextFlagsRequireContentMode = errors.New("-A/-B/-C/-n require output_mode=content")
 
-// FileTooLargeError includes the path, actual file size, and configured limit.
-type FileTooLargeError struct {
+// TooLargeError includes the path, actual file size, and configured limit.
+type TooLargeError struct {
 	Path  string
 	Size  int64
 	Limit int64
 }
 
 // Error returns the formatted file-too-large message.
-func (e *FileTooLargeError) Error() string {
+func (e *TooLargeError) Error() string {
 	return fmt.Sprintf("%s: file size %d bytes exceeds limit of %d bytes", e.Path, e.Size, e.Limit)
 }
 
 // Is reports sentinel compatibility for errors.Is.
-func (e *FileTooLargeError) Is(target error) bool {
+func (e *TooLargeError) Is(target error) bool {
 	return target == ErrFileTooLarge
 }

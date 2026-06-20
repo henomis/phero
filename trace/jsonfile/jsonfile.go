@@ -23,6 +23,15 @@ import (
 	"github.com/henomis/phero/trace"
 )
 
+const (
+	fieldAgentName = "agent_name"
+	fieldErr       = "err"
+	fieldIteration = "iteration"
+	fieldToolName  = "tool_name"
+	fieldCallID    = "call_id"
+	fieldCount     = "count"
+)
+
 // record is the JSON envelope written for each event.
 type record struct {
 	Type      string    `json:"type"`
@@ -48,10 +57,12 @@ func New(filePath string) (*Tracer, error) {
 	if filePath == "" {
 		return nil, ErrEmptyFilePath
 	}
-	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec,lll // path is supplied by the caller at construction time
 	if err != nil {
 		return nil, err
 	}
+
 	return &Tracer{f: f, enc: json.NewEncoder(f)}, nil
 }
 
@@ -59,15 +70,18 @@ func New(filePath string) (*Tracer, error) {
 func (t *Tracer) Close() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
 	return t.f.Close()
 }
 
 // Trace encodes event as a single JSON line and appends it to the file.
 func (t *Tracer) Trace(event trace.Event) {
 	r := toRecord(event)
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	_ = t.enc.Encode(r)
+
+	_ = t.enc.Encode(r) //nolint:errchkjson // tracer intentionally swallows encode errors to avoid disrupting the agent
 }
 
 // toRecord maps a typed Event to a JSON-serialisable record.
@@ -75,24 +89,25 @@ func toRecord(event trace.Event) record {
 	switch e := event.(type) {
 	case trace.AgentStartEvent:
 		return record{Type: "AgentStart", Timestamp: e.Timestamp, Data: map[string]any{
-			"agent_name": e.AgentName,
-			"input":      e.Input,
+			fieldAgentName: e.AgentName,
+			"input":        e.Input,
 		}}
 	case trace.AgentEndEvent:
 		errStr := ""
 		if e.Err != nil {
 			errStr = e.Err.Error()
 		}
+
 		return record{Type: "AgentEnd", Timestamp: e.Timestamp, Data: map[string]any{
-			"agent_name": e.AgentName,
-			"output":     e.Output,
-			"err":        errStr,
-			"iterations": e.Iterations,
+			fieldAgentName: e.AgentName,
+			"output":       e.Output,
+			fieldErr:       errStr,
+			"iterations":   e.Iterations,
 		}}
 	case trace.AgentIterationEvent:
 		return record{Type: "AgentIteration", Timestamp: e.Timestamp, Data: map[string]any{
-			"agent_name": e.AgentName,
-			"iteration":  e.Iteration,
+			fieldAgentName: e.AgentName,
+			fieldIteration: e.Iteration,
 		}}
 	case trace.AgentRunSummaryEvent:
 		return record{Type: "AgentRunSummary", Timestamp: e.Timestamp, Data: map[string]any{
@@ -100,48 +115,49 @@ func toRecord(event trace.Event) record {
 		}}
 	case trace.LLMRequestEvent:
 		return record{Type: "LLMRequest", Timestamp: e.Timestamp, Data: map[string]any{
-			"agent_name":    e.AgentName,
+			fieldAgentName:  e.AgentName,
 			"message_count": e.MessageCount,
 			"tool_names":    e.ToolNames,
-			"iteration":     e.Iteration,
+			fieldIteration:  e.Iteration,
 		}}
 	case trace.LLMResponseEvent:
 		return record{Type: "LLMResponse", Timestamp: e.Timestamp, Data: map[string]any{
-			"agent_name": e.AgentName,
-			"message":    e.Message,
-			"usage":      e.Usage,
-			"iteration":  e.Iteration,
+			fieldAgentName: e.AgentName,
+			"message":      e.Message,
+			"usage":        e.Usage,
+			fieldIteration: e.Iteration,
 		}}
 	case trace.ToolCallEvent:
 		return record{Type: "ToolCall", Timestamp: e.Timestamp, Data: map[string]any{
-			"agent_name": e.AgentName,
-			"tool_name":  e.ToolName,
-			"arguments":  e.Arguments,
-			"call_id":    e.CallID,
-			"iteration":  e.Iteration,
+			fieldAgentName: e.AgentName,
+			fieldToolName:  e.ToolName,
+			"arguments":    e.Arguments,
+			fieldCallID:    e.CallID,
+			fieldIteration: e.Iteration,
 		}}
 	case trace.ToolResultEvent:
 		errStr := ""
 		if e.Err != nil {
 			errStr = e.Err.Error()
 		}
+
 		return record{Type: "ToolResult", Timestamp: e.Timestamp, Data: map[string]any{
-			"agent_name": e.AgentName,
-			"tool_name":  e.ToolName,
-			"result":     e.Result,
-			"err":        errStr,
-			"call_id":    e.CallID,
-			"iteration":  e.Iteration,
+			fieldAgentName: e.AgentName,
+			fieldToolName:  e.ToolName,
+			"result":       e.Result,
+			fieldErr:       errStr,
+			fieldCallID:    e.CallID,
+			fieldIteration: e.Iteration,
 		}}
 	case trace.MemorySaveEvent:
 		return record{Type: "MemorySave", Timestamp: e.Timestamp, Data: map[string]any{
-			"agent_name": e.AgentName,
-			"count":      e.Count,
+			fieldAgentName: e.AgentName,
+			fieldCount:     e.Count,
 		}}
 	case trace.MemoryRetrieveEvent:
 		return record{Type: "MemoryRetrieve", Timestamp: e.Timestamp, Data: map[string]any{
-			"agent_name": e.AgentName,
-			"count":      e.Count,
+			fieldAgentName: e.AgentName,
+			fieldCount:     e.Count,
 		}}
 	default:
 		return record{Type: "Unknown", Timestamp: time.Now()}

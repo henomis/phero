@@ -33,6 +33,7 @@ func (stubEmbedder) Embed(_ context.Context, texts []string) ([]embedding.Vector
 	for i := range texts {
 		vectors[i] = embedding.Vector{float32(i + 1)}
 	}
+
 	return vectors, nil
 }
 
@@ -50,6 +51,7 @@ func (s *stubStore) EnsureCollection(_ context.Context) error {
 	s.ensureCalls++
 	started := s.ensureStarted
 	release := s.ensureRelease
+
 	var err error
 	if callIndex < len(s.ensureErrs) {
 		err = s.ensureErrs[callIndex]
@@ -62,6 +64,7 @@ func (s *stubStore) EnsureCollection(_ context.Context) error {
 		default:
 		}
 	}
+
 	if release != nil {
 		<-release
 	}
@@ -92,6 +95,7 @@ func (s *stubStore) Count(_ context.Context) (uint64, error) {
 func (s *stubStore) EnsureCalls() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	return s.ensureCalls
 }
 
@@ -112,17 +116,19 @@ func (s *stubSplitter) Split(_ context.Context) iter.Seq2[document.Document, err
 func TestRAGEnsureCollectionCachedAfterSuccess(t *testing.T) {
 	store := &stubStore{}
 	splitter := &stubSplitter{chunks: []string{"first"}}
+
 	r, err := New(store, stubEmbedder{})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
 
 	ctx := context.Background()
-	if err := r.Ingest(ctx, splitter); err != nil {
-		t.Fatalf("IngestFile() error = %v", err)
+	if ingestErr := r.Ingest(ctx, splitter); ingestErr != nil {
+		t.Fatalf("IngestFile() error = %v", ingestErr)
 	}
-	if _, err := r.Query(ctx, "question"); err != nil {
-		t.Fatalf("Query() error = %v", err)
+
+	if _, queryErr := r.Query(ctx, "question"); queryErr != nil {
+		t.Fatalf("Query() error = %v", queryErr)
 	}
 
 	if got := store.EnsureCalls(); got != 1 {
@@ -133,17 +139,19 @@ func TestRAGEnsureCollectionCachedAfterSuccess(t *testing.T) {
 func TestRAGEnsureCollectionRetriesAfterFailure(t *testing.T) {
 	store := &stubStore{ensureErrs: []error{errors.New("temporary ensure failure"), nil}}
 	splitter := &stubSplitter{chunks: []string{"first"}}
+
 	r, err := New(store, stubEmbedder{})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
 
 	ctx := context.Background()
-	if err := r.Ingest(ctx, splitter); err == nil {
+	if ingestErr := r.Ingest(ctx, splitter); ingestErr == nil {
 		t.Fatal("IngestFile() error = nil, want transient ensure error")
 	}
-	if err := r.Ingest(ctx, splitter); err != nil {
-		t.Fatalf("second IngestFile() error = %v", err)
+
+	if ingestErr := r.Ingest(ctx, splitter); ingestErr != nil {
+		t.Fatalf("second IngestFile() error = %v", ingestErr)
 	}
 
 	if got := store.EnsureCalls(); got != 2 {
@@ -156,21 +164,26 @@ func TestRAGEnsureCollectionConcurrentCallersShareSuccess(t *testing.T) {
 		ensureStarted: make(chan struct{}, 1),
 		ensureRelease: make(chan struct{}),
 	}
+
 	r, err := New(store, stubEmbedder{})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
 
 	ctx := context.Background()
+
 	const goroutines = 8
+
 	errCh := make(chan error, goroutines)
+
 	var wg sync.WaitGroup
 	for i := 0; i < goroutines; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := r.Query(ctx, "shared question")
-			errCh <- err
+
+			_, queryErr := r.Query(ctx, "shared question")
+			errCh <- queryErr
 		}()
 	}
 
@@ -192,6 +205,7 @@ func TestRAGEnsureCollectionConcurrentCallersShareSuccess(t *testing.T) {
 
 type countingStore struct {
 	stubStore
+
 	count       uint64
 	upsertCalls int
 }
@@ -208,14 +222,16 @@ func (s *countingStore) Upsert(_ context.Context, _ []vectorstore.Point) error {
 func TestRAG_IngestOnce_SkipsWhenNonEmpty(t *testing.T) {
 	store := &countingStore{count: 5}
 	splitter := &stubSplitter{chunks: []string{"chunk"}}
+
 	r, err := New(store, stubEmbedder{})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	if err := r.IngestOnce(context.Background(), splitter); err != nil {
-		t.Fatalf("IngestOnce() error = %v", err)
+	if ingestErr := r.IngestOnce(context.Background(), splitter); ingestErr != nil {
+		t.Fatalf("IngestOnce() error = %v", ingestErr)
 	}
+
 	if store.upsertCalls != 0 {
 		t.Fatalf("Upsert called %d times, want 0 (collection was non-empty)", store.upsertCalls)
 	}
@@ -224,14 +240,16 @@ func TestRAG_IngestOnce_SkipsWhenNonEmpty(t *testing.T) {
 func TestRAG_IngestOnce_IngestsWhenEmpty(t *testing.T) {
 	store := &countingStore{count: 0}
 	splitter := &stubSplitter{chunks: []string{"chunk1", "chunk2"}}
+
 	r, err := New(store, stubEmbedder{})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	if err := r.IngestOnce(context.Background(), splitter); err != nil {
-		t.Fatalf("IngestOnce() error = %v", err)
+	if ingestErr := r.IngestOnce(context.Background(), splitter); ingestErr != nil {
+		t.Fatalf("IngestOnce() error = %v", ingestErr)
 	}
+
 	if store.upsertCalls == 0 {
 		t.Fatal("Upsert not called, want at least one call (collection was empty)")
 	}

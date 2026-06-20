@@ -122,6 +122,7 @@ func (h *Tool) ask(ctx context.Context, input *Input) (*Output, error) {
 	if input == nil {
 		return nil, ErrNilInput
 	}
+
 	if err := validateInput(input); err != nil {
 		return nil, err
 	}
@@ -135,28 +136,32 @@ func (h *Tool) ask(ctx context.Context, input *Input) (*Output, error) {
 		answers = map[string]Answer{}
 	}
 
-	if err := validateAnswers(input.Questions, answers); err != nil {
-		return nil, err
+	if validateErr := validateAnswers(input.Questions, answers); validateErr != nil {
+		return nil, validateErr
 	}
 
 	return &Output{Answers: answers}, nil
 }
 
+//nolint:gocognit
 func validateInput(input *Input) error {
 	questions := input.Questions
 	if len(questions) < minQuestions {
 		return ErrQuestionsRequired
 	}
+
 	if len(questions) > maxQuestions {
 		return ErrTooManyQuestions
 	}
 
 	seenHeaders := map[string]struct{}{}
+
 	for _, q := range questions {
 		header := strings.TrimSpace(q.Header)
 		if header == "" {
 			return ErrHeaderRequired
 		}
+
 		if utf8.RuneCountInString(header) > maxHeaderLen {
 			return ErrHeaderTooLong
 		}
@@ -165,12 +170,14 @@ func validateInput(input *Input) error {
 		if _, exists := seenHeaders[normalizedHeader]; exists {
 			return ErrDuplicateQuestionHeader
 		}
+
 		seenHeaders[normalizedHeader] = struct{}{}
 
 		questionText := strings.TrimSpace(q.Question)
 		if questionText == "" {
 			return ErrQuestionTextRequired
 		}
+
 		if !strings.HasSuffix(questionText, "?") {
 			return ErrQuestionMustEndWithQuestionMark
 		}

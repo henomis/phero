@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package main demonstrates loading and using agent skills.
 package main
 
 import (
@@ -62,7 +63,9 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	bashTool.Tool().Use(confirmBeforeRun(os.Stdin, os.Stdout))
+
 	if err := a.AddTool(bashTool.Tool()); err != nil {
 		panic(err)
 	}
@@ -71,6 +74,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	if err := a.AddTool(readTool.Tool()); err != nil {
 		panic(err)
 	}
@@ -79,7 +83,9 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	writeTool.Tool().Use(confirmBeforeRun(os.Stdin, os.Stdout))
+
 	if err := a.AddTool(writeTool.Tool()); err != nil {
 		panic(err)
 	}
@@ -88,7 +94,9 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	editTool.Tool().Use(confirmBeforeRun(os.Stdin, os.Stdout))
+
 	if err := a.AddTool(editTool.Tool()); err != nil {
 		panic(err)
 	}
@@ -117,17 +125,21 @@ var ErrConfirmationDenied = errors.New("user denied confirmation")
 // confirmBeforeRun returns a ToolMiddleware that prints the tool name and
 // arguments to w, reads a y/N answer from r, and short-circuits with
 // ErrConfirmationDenied when the user does not confirm.
-func confirmBeforeRun(r *os.File, w *os.File) llm.ToolMiddleware {
+func confirmBeforeRun(r, w *os.File) llm.ToolMiddleware {
 	scanner := bufio.NewScanner(r)
+
 	return func(tool *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
 		return func(ctx context.Context, arguments string) (any, error) {
 			_, _ = fmt.Fprintf(w, "\n[confirm] tool=%s args=%s\nProceed? [y/N] ", tool.Name(), arguments)
+
 			if !scanner.Scan() {
 				return nil, ErrConfirmationDenied
 			}
+
 			if strings.ToLower(strings.TrimSpace(scanner.Text())) != "y" {
 				return nil, ErrConfirmationDenied
 			}
+
 			return next(ctx, arguments)
 		}
 	}
@@ -155,6 +167,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
+
 	client := openai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s base_url=%s", model, baseURL)

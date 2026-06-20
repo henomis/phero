@@ -50,6 +50,7 @@ func (l *limiterLLM) Execute(ctx context.Context, messages []llm.Message, tools 
 	case <-l.stopCh:
 		return nil, ErrStopped
 	}
+
 	defer func() { <-l.semaphore }()
 
 	return l.inner.Execute(ctx, messages, tools)
@@ -75,7 +76,7 @@ func runLimiterTokenProducer(tokens chan struct{}, interval time.Duration, stopC
 	}
 }
 
-// NewLimiter returns an llm.LLMMiddleware that enforces two constraints on
+// NewLimiter returns an llm.Middleware that enforces two constraints on
 // Execute calls:
 //
 //   - At most requestsPerSecond calls are started per second (token bucket).
@@ -91,10 +92,11 @@ func runLimiterTokenProducer(tokens chan struct{}, interval time.Duration, stopC
 //	if err != nil { ... }
 //	defer stop()
 //	client := llm.Use(openaiClient, mw)
-func NewLimiter(requestsPerSecond float64, maxConcurrentRequests int) (llm.LLMMiddleware, func(), error) {
+func NewLimiter(requestsPerSecond float64, maxConcurrentRequests int) (llm.Middleware, func(), error) {
 	if requestsPerSecond <= 0 {
 		return nil, nil, ErrInvalidRate
 	}
+
 	if maxConcurrentRequests <= 0 {
 		return nil, nil, ErrInvalidMaxConcurrentRequests
 	}
@@ -103,7 +105,9 @@ func NewLimiter(requestsPerSecond float64, maxConcurrentRequests int) (llm.LLMMi
 	bucketCapacity := max(1, int(requestsPerSecond))
 
 	stopCh := make(chan struct{})
+
 	var stopOnce sync.Once
+
 	stop := func() {
 		stopOnce.Do(func() { close(stopCh) })
 	}
@@ -113,6 +117,7 @@ func NewLimiter(requestsPerSecond float64, maxConcurrentRequests int) (llm.LLMMi
 	// when multiple agents each wrap their own LLM with the same limiter.
 	tokens := make(chan struct{}, bucketCapacity)
 	semaphore := make(chan struct{}, maxConcurrentRequests)
+
 	go runLimiterTokenProducer(tokens, interval, stopCh)
 
 	mw := func(next llm.LLM) llm.LLM {

@@ -54,6 +54,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("create agent: %v", err)
 	}
+
 	greeter.SetTracer(text.New(os.Stderr))
 
 	srv, err := a2a.New(greeter, "http://localhost:8080")
@@ -113,6 +114,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
+
 	client := openai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s base_url=%s", model, baseURL)

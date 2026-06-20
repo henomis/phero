@@ -16,16 +16,16 @@ package recursive
 
 import "fmt"
 
-// ErrReadFile is returned when the source file cannot be read.
-type ErrReadFile struct {
+// ReadFileError is returned when the source file cannot be read.
+type ReadFileError struct {
 	Source string
 	Err    error
 }
 
-func (e *ErrReadFile) Error() string {
+func (e *ReadFileError) Error() string {
 	return fmt.Sprintf("reading file %q: %v", e.Source, e.Err)
 }
 
-func (e *ErrReadFile) Unwrap() error {
+func (e *ReadFileError) Unwrap() error {
 	return e.Err
 }

@@ -31,6 +31,7 @@ func (e *EmbedderVectorCountMismatchError) Error() string {
 	if e.SingleQuery {
 		return fmt.Sprintf("embedder returned %d vectors for single query", e.Got)
 	}
+
 	return fmt.Sprintf("embedder returned %d vectors for %d texts", e.Got, e.Want)
 }
 

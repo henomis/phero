@@ -28,6 +28,8 @@ import (
 	"github.com/henomis/phero/vectorstore"
 )
 
+const opEmbed = "embed"
+
 const (
 	contentKey               = "text"
 	defaultTopK              = 4
@@ -59,9 +61,11 @@ func New(store vectorstore.Store, embedder embedding.Embedder, options ...Option
 	if store == nil {
 		return nil, ErrNilStore
 	}
+
 	if embedder == nil {
 		return nil, ErrNilEmbedder
 	}
+
 	rag := &RAG{store: store, embedder: embedder, topk: defaultTopK, embedderBatchSize: defaultEmbedderBatchSize}
 
 	for _, option := range options {
@@ -105,19 +109,20 @@ func WithBatchSize(batchSize int) Option {
 // ensureCollection calls EnsureCollection on the backing store exactly once
 // per RAG instance. A successful call is permanently cached; a failed call
 // is not cached so the next caller will retry.
-func (s *RAG) ensureCollection(ctx context.Context) error {
-	s.ensureMu.Lock()
-	defer s.ensureMu.Unlock()
+func (m *RAG) ensureCollection(ctx context.Context) error {
+	m.ensureMu.Lock()
+	defer m.ensureMu.Unlock()
 
-	if s.ensureDone {
+	if m.ensureDone {
 		return nil
 	}
 
-	if err := s.store.EnsureCollection(ctx); err != nil {
+	if err := m.store.EnsureCollection(ctx); err != nil {
 		return &EnsureCollectionError{Cause: err}
 	}
 
-	s.ensureDone = true
+	m.ensureDone = true
+
 	return nil
 }
 
@@ -126,16 +131,17 @@ func (s *RAG) ensureCollection(ctx context.Context) error {
 // used to populate IngestError fields for diagnostics.
 // Each vectorstore Point payload contains the document's Content under the "text"
 // key plus all entries from the document's Metadata map.
-func (s *RAG) ingestBatch(ctx context.Context, docs []document.Document, offset int) error {
+func (m *RAG) ingestBatch(ctx context.Context, docs []document.Document, offset int) error {
 	texts := make([]string, len(docs))
 	for i, d := range docs {
 		texts[i] = d.Content
 	}
 
-	vectors, err := s.embedder.Embed(ctx, texts)
+	vectors, err := m.embedder.Embed(ctx, texts)
 	if err != nil {
-		return &IngestError{Op: "embed", BatchStart: offset, BatchEnd: offset + len(docs), Cause: err}
+		return &IngestError{Op: opEmbed, BatchStart: offset, BatchEnd: offset + len(docs), Cause: err}
 	}
+
 	if len(vectors) != len(docs) {
 		return &EmbedderVectorCountMismatchError{Got: len(vectors), Want: len(docs)}
 	}
@@ -146,6 +152,7 @@ func (s *RAG) ingestBatch(ctx context.Context, docs []document.Document, offset 
 		for k, v := range d.Metadata {
 			payload[k] = v
 		}
+
 		payload[contentKey] = d.Content
 		points = append(points, vectorstore.Point{
 			ID:      uuid.New().String(),
@@ -154,9 +161,10 @@ func (s *RAG) ingestBatch(ctx context.Context, docs []document.Document, offset 
 		})
 	}
 
-	if err := s.store.Upsert(ctx, points); err != nil {
-		return &IngestError{Op: "upsert", BatchStart: offset, BatchEnd: offset + len(docs), Cause: err}
+	if upsertErr := m.store.Upsert(ctx, points); upsertErr != nil {
+		return &IngestError{Op: "upsert", BatchStart: offset, BatchEnd: offset + len(docs), Cause: upsertErr}
 	}
+
 	return nil
 }
 
@@ -170,16 +178,16 @@ func (s *RAG) ingestBatch(ctx context.Context, docs []document.Document, offset 
 // Returns ErrNoSplitter if no Splitter was provided to New.
 // Any error yielded by the splitter iterator is returned immediately, aborting
 // ingestion.
-func (s *RAG) Ingest(ctx context.Context, splitter textsplitter.Splitter) error {
+func (m *RAG) Ingest(ctx context.Context, splitter textsplitter.Splitter) error {
 	if splitter == nil {
 		return ErrNoSplitter
 	}
 
-	if err := s.ensureCollection(ctx); err != nil {
+	if err := m.ensureCollection(ctx); err != nil {
 		return err
 	}
 
-	batchSize := s.embedderBatchSize
+	batchSize := m.embedderBatchSize
 	if batchSize <= 0 {
 		batchSize = defaultEmbedderBatchSize
 	}
@@ -191,40 +199,47 @@ func (s *RAG) Ingest(ctx context.Context, splitter textsplitter.Splitter) error 
 		if err != nil {
 			return err
 		}
+
 		batch = append(batch, doc)
 		if len(batch) >= batchSize {
 			n := len(batch)
-			if err := s.ingestBatch(ctx, batch, offset); err != nil {
-				return err
+			if batchErr := m.ingestBatch(ctx, batch, offset); batchErr != nil {
+				return batchErr
 			}
+
 			offset += n
 			batch = batch[:0]
 		}
 	}
 
 	if len(batch) > 0 {
-		return s.ingestBatch(ctx, batch, offset)
+		return m.ingestBatch(ctx, batch, offset)
 	}
+
 	return nil
 }
 
 // IngestOnce ingests using the provided splitter only when the backing
 // collection is empty (Count() == 0). Returns ErrNoSplitter if splitter is nil.
-func (s *RAG) IngestOnce(ctx context.Context, splitter textsplitter.Splitter) error {
+func (m *RAG) IngestOnce(ctx context.Context, splitter textsplitter.Splitter) error {
 	if splitter == nil {
 		return ErrNoSplitter
 	}
-	if err := s.ensureCollection(ctx); err != nil {
+
+	if err := m.ensureCollection(ctx); err != nil {
 		return err
 	}
-	count, err := s.store.Count(ctx)
+
+	count, err := m.store.Count(ctx)
 	if err != nil {
 		return err
 	}
+
 	if count > 0 {
 		return nil
 	}
-	return s.Ingest(ctx, splitter)
+
+	return m.Ingest(ctx, splitter)
 }
 
 // Query embeds the provided query text and performs a similarity search.
@@ -232,30 +247,35 @@ func (s *RAG) IngestOnce(ctx context.Context, splitter textsplitter.Splitter) er
 // Options are forwarded to the backing store, e.g. vectorstore.WithFilter to
 // restrict results by payload metadata. When no options are provided, the
 // default filter configured via WithFilter (if any) is applied.
-func (s *RAG) Query(ctx context.Context, queryText string, opts ...vectorstore.QueryOption) ([]vectorstore.ScoredPoint, error) {
+func (m *RAG) Query(
+	ctx context.Context, queryText string, opts ...vectorstore.QueryOption,
+) ([]vectorstore.ScoredPoint, error) {
 	if strings.TrimSpace(queryText) == "" {
 		return nil, ErrEmptyQueryText
 	}
-	if err := s.ensureCollection(ctx); err != nil {
+
+	if err := m.ensureCollection(ctx); err != nil {
 		return nil, err
 	}
 
-	vectors, err := s.embedder.Embed(ctx, []string{queryText})
+	vectors, err := m.embedder.Embed(ctx, []string{queryText})
 	if err != nil {
-		return nil, &QueryError{Op: "embed", Cause: err}
+		return nil, &QueryError{Op: opEmbed, Cause: err}
 	}
+
 	if len(vectors) != 1 {
 		return nil, &EmbedderVectorCountMismatchError{Got: len(vectors), Want: 1, SingleQuery: true}
 	}
 
-	if len(opts) == 0 && s.filter != nil {
-		opts = []vectorstore.QueryOption{vectorstore.WithFilter(s.filter)}
+	if len(opts) == 0 && m.filter != nil {
+		opts = []vectorstore.QueryOption{vectorstore.WithFilter(m.filter)}
 	}
 
-	results, err := s.store.Query(ctx, vectors[0], s.topk, opts...)
+	results, err := m.store.Query(ctx, vectors[0], m.topk, opts...)
 	if err != nil {
 		return nil, &QueryError{Op: "store query", Cause: err}
 	}
+
 	return results, nil
 }
 
@@ -265,7 +285,7 @@ func (s *RAG) Query(ctx context.Context, queryText string, opts ...vectorstore.Q
 // Tool arguments schema:
 //
 //	{"query": "..."}
-func (s *RAG) AsTool(toolName, toolDescription string) (*llm.Tool, error) {
+func (m *RAG) AsTool(toolName, toolDescription string) (*llm.Tool, error) {
 	type ToolInput struct {
 		Query string `json:"query" jsonschema:"description=Query text to search for."`
 	}
@@ -285,7 +305,7 @@ func (s *RAG) AsTool(toolName, toolDescription string) (*llm.Tool, error) {
 			input = &ToolInput{}
 		}
 
-		points, err := s.Query(ctx, input.Query)
+		points, err := m.Query(ctx, input.Query)
 		if err != nil {
 			return nil, err
 		}

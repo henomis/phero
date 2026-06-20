@@ -23,6 +23,10 @@ import (
 	natsclient "github.com/nats-io/nats.go"
 )
 
+// heartbeatMissedFactor is the number of missed heartbeat intervals before an
+// agent is considered stale (§8.2).
+const heartbeatMissedFactor = 3
+
 // HeartbeatTracker subscribes to the heartbeat wildcard agents.hb.*.*.* and
 // tracks the liveness of each agent instance by instance_id (§8.1–§8.2).
 //
@@ -48,6 +52,7 @@ func NewHeartbeatTracker(nc *natsclient.Conn) (*HeartbeatTracker, error) {
 		if err := json.Unmarshal(msg.Data, &p); err != nil || p.InstanceID == "" {
 			return
 		}
+
 		t.mu.Lock()
 		t.seen[p.InstanceID] = &heartbeatEntry{payload: p, lastSeen: time.Now()}
 		t.mu.Unlock()
@@ -57,6 +62,7 @@ func NewHeartbeatTracker(nc *natsclient.Conn) (*HeartbeatTracker, error) {
 	}
 
 	t.sub = sub
+
 	return t, nil
 }
 
@@ -66,10 +72,13 @@ func (t *HeartbeatTracker) IsOnline(instanceID string) bool {
 	t.mu.RLock()
 	e, ok := t.seen[instanceID]
 	t.mu.RUnlock()
+
 	if !ok {
 		return false
 	}
-	threshold := time.Duration(e.payload.IntervalS) * time.Second * 3
+
+	threshold := time.Duration(e.payload.IntervalS) * time.Second * heartbeatMissedFactor
+
 	return time.Since(e.lastSeen) <= threshold
 }
 
@@ -91,7 +100,7 @@ func (s *Server) startHeartbeats(ctx context.Context, subject, instanceID string
 			Owner:      s.owner,
 			Session:    s.cfg.session,
 			InstanceID: instanceID,
-			Ts:         time.Now().UTC().Format(time.RFC3339),
+			TS:         time.Now().UTC().Format(time.RFC3339),
 			IntervalS:  int(s.cfg.heartbeatInterval.Seconds()),
 		}
 		_ = s.nc.Publish(subject, encodeHeartbeat(p))

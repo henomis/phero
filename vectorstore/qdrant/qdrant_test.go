@@ -30,6 +30,7 @@ import (
 // validation errors tested here are returned before any network I/O.
 func fakeClient(t *testing.T) *qdrantapi.Client {
 	t.Helper()
+
 	c, err := qdrantapi.NewClient(&qdrantapi.Config{
 		Host: "127.0.0.1",
 		Port: 19999, // nothing listens here
@@ -37,6 +38,7 @@ func fakeClient(t *testing.T) *qdrantapi.Client {
 	if err != nil {
 		t.Fatalf("qdrantapi.NewClient: %v", err)
 	}
+
 	return c
 }
 
@@ -68,6 +70,7 @@ func TestNew_Valid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	if s == nil {
 		t.Fatal("expected non-nil Store")
 	}
@@ -96,6 +99,7 @@ func TestUpsert_EmptyPointIDReturnsError(t *testing.T) {
 	points := []vectorstore.Point{
 		{ID: "", Vector: []float32{1, 2, 3, 4}},
 	}
+
 	err = s.Upsert(context.Background(), points)
 	if !errors.Is(err, qdrant.ErrPointIDRequired) {
 		t.Fatalf("expected ErrPointIDRequired, got %v", err)
@@ -117,6 +121,7 @@ func TestUpsert_EmptyVectorReturnsError(t *testing.T) {
 	if !errors.As(err, &emptyVecErr) {
 		t.Fatalf("expected EmptyVectorError, got %v", err)
 	}
+
 	if emptyVecErr.PointID != "p1" {
 		t.Fatalf("expected PointID %q, got %q", "p1", emptyVecErr.PointID)
 	}
@@ -137,6 +142,7 @@ func TestUpsert_VectorSizeMismatchReturnsError(t *testing.T) {
 	if !errors.As(err, &mismatch) {
 		t.Fatalf("expected VectorSizeMismatchError, got %v", err)
 	}
+
 	if mismatch.Expected != 4 || mismatch.Got != 3 {
 		t.Fatalf("mismatch fields: expected=%d got=%d", mismatch.Expected, mismatch.Got)
 	}
@@ -166,6 +172,7 @@ func TestQuery_ZeroLimitReturnsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query: unexpected error: %v", err)
 	}
+
 	if len(results) != 0 {
 		t.Fatalf("expected empty results, got %d", len(results))
 	}
@@ -178,6 +185,7 @@ func TestQuery_VectorSizeMismatchReturnsError(t *testing.T) {
 	}
 
 	_, err = s.Query(context.Background(), []float32{1, 2}, 5) // 2 instead of 4
+
 	var mismatch *qdrant.VectorSizeMismatchError
 	if !errors.As(err, &mismatch) {
 		t.Fatalf("expected VectorSizeMismatchError, got %v", err)
@@ -220,6 +228,7 @@ func TestWithBatchSize_Option(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+
 	if s == nil {
 		t.Fatal("expected non-nil Store")
 	}
@@ -233,6 +242,7 @@ func TestWithDistance_Option(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+
 	if s == nil {
 		t.Fatal("expected non-nil Store")
 	}

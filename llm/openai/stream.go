@@ -34,7 +34,11 @@ var _ llm.StreamingLLM = (*Client)(nil)
 //
 // The terminal chunk (Done == true) carries the complete assistant message, the
 // model name, and — when the server reports it — token usage.
-func (c *Client) ExecuteStream(ctx context.Context, messages []llm.Message, tools []*llm.Tool) iter.Seq2[llm.StreamChunk, error] {
+//
+//nolint:gocognit,funlen
+func (c *Client) ExecuteStream(
+	ctx context.Context, messages []llm.Message, tools []*llm.Tool,
+) iter.Seq2[llm.StreamChunk, error] {
 	return func(yield func(llm.StreamChunk, error) bool) {
 		request := openai.ChatCompletionRequest{
 			Model:         c.model,
@@ -67,6 +71,7 @@ func (c *Client) ExecuteStream(ctx context.Context, messages []llm.Message, tool
 			if errors.Is(recvErr, io.EOF) {
 				break
 			}
+
 			if recvErr != nil {
 				yield(llm.StreamChunk{}, recvErr)
 				return
@@ -75,6 +80,7 @@ func (c *Client) ExecuteStream(ctx context.Context, messages []llm.Message, tool
 			if response.Model != "" {
 				model = response.Model
 			}
+
 			if response.Usage != nil {
 				usage = &llm.Usage{
 					InputTokens:  response.Usage.PromptTokens,
@@ -85,6 +91,7 @@ func (c *Client) ExecuteStream(ctx context.Context, messages []llm.Message, tool
 			if len(response.Choices) == 0 {
 				continue
 			}
+
 			delta := response.Choices[0].Delta
 
 			if delta.ReasoningContent != "" {
@@ -92,8 +99,10 @@ func (c *Client) ExecuteStream(ctx context.Context, messages []llm.Message, tool
 					return
 				}
 			}
+
 			if delta.Content != "" {
 				textBuilder.WriteString(delta.Content)
+
 				if !yield(llm.StreamChunk{TextDelta: delta.Content}, nil) {
 					return
 				}
@@ -104,21 +113,26 @@ func (c *Client) ExecuteStream(ctx context.Context, messages []llm.Message, tool
 				if tc.Index != nil {
 					idx = *tc.Index
 				}
+
 				existing, ok := toolCalls[idx]
 				if !ok {
 					existing = &llm.ToolCall{Type: llm.ToolTypeFunction}
 					toolCalls[idx] = existing
 					toolOrder = append(toolOrder, idx)
 				}
+
 				if tc.ID != "" {
 					existing.ID = tc.ID
 				}
+
 				if tc.Type != "" {
 					existing.Type = string(tc.Type)
 				}
+
 				if tc.Function.Name != "" {
 					existing.Function.Name = tc.Function.Name
 				}
+
 				existing.Function.Arguments += tc.Function.Arguments
 			}
 		}
@@ -127,6 +141,7 @@ func (c *Client) ExecuteStream(ctx context.Context, messages []llm.Message, tool
 		assembled := make([]llm.ToolCall, 0, len(toolOrder))
 		for _, idx := range toolOrder {
 			tc := *toolCalls[idx]
+
 			assembled = append(assembled, tc)
 			if !yield(llm.StreamChunk{ToolCall: &tc}, nil) {
 				return

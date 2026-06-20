@@ -26,19 +26,23 @@ import (
 
 func TestTextTracer_AgentStart(t *testing.T) {
 	var buf bytes.Buffer
+
 	tr := text.New(&buf)
 	tr.Trace(trace.AgentStartEvent{
 		AgentName: "myagent",
 		Input:     "hello",
 		Timestamp: time.Date(2026, 3, 24, 10, 0, 0, 0, time.UTC),
 	})
+
 	out := buf.String()
 	if !strings.Contains(out, "AgentStart") {
 		t.Errorf("expected 'AgentStart' in output, got: %q", out)
 	}
+
 	if !strings.Contains(out, "myagent") {
 		t.Errorf("expected agent name in output, got: %q", out)
 	}
+
 	if !strings.Contains(out, "hello") {
 		t.Errorf("expected input in output, got: %q", out)
 	}
@@ -46,6 +50,7 @@ func TestTextTracer_AgentStart(t *testing.T) {
 
 func TestTextTracer_ToolCallResult(t *testing.T) {
 	var buf bytes.Buffer
+
 	tr := text.New(&buf)
 	tr.Trace(trace.ToolCallEvent{
 		AgentName: "agent1", ToolName: "bash",
@@ -57,13 +62,16 @@ func TestTextTracer_ToolCallResult(t *testing.T) {
 		Result: "file.txt\n", Iteration: 1,
 		Timestamp: time.Now(),
 	})
+
 	out := buf.String()
 	if !strings.Contains(out, "ToolCall") {
 		t.Errorf("expected 'ToolCall' in output")
 	}
+
 	if !strings.Contains(out, "ToolResult") {
 		t.Errorf("expected 'ToolResult' in output")
 	}
+
 	if !strings.Contains(out, "✓") {
 		t.Errorf("expected success icon in output")
 	}
@@ -71,12 +79,14 @@ func TestTextTracer_ToolCallResult(t *testing.T) {
 
 func TestTextTracer_ToolResultError(t *testing.T) {
 	var buf bytes.Buffer
+
 	tr := text.New(&buf)
 	tr.Trace(trace.ToolResultEvent{
 		AgentName: "agent1", ToolName: "bash",
 		Err: errTest, Iteration: 1,
 		Timestamp: time.Now(),
 	})
+
 	out := buf.String()
 	if !strings.Contains(out, "✗") {
 		t.Errorf("expected error icon in output, got: %q", out)
@@ -85,6 +95,7 @@ func TestTextTracer_ToolResultError(t *testing.T) {
 
 func TestTextTracer_RunSummary(t *testing.T) {
 	var buf bytes.Buffer
+
 	tr := text.New(&buf)
 	tr.Trace(trace.AgentRunSummaryEvent{
 		Summary: trace.RunSummary{
@@ -101,13 +112,16 @@ func TestTextTracer_RunSummary(t *testing.T) {
 		},
 		Timestamp: time.Now(),
 	})
+
 	out := buf.String()
 	if !strings.Contains(out, "RunSummary") {
 		t.Errorf("expected 'RunSummary' in output, got: %q", out)
 	}
+
 	if !strings.Contains(out, "tool_calls=1") {
 		t.Errorf("expected tool call total in output, got: %q", out)
 	}
+
 	if !strings.Contains(out, "tools=[bash=1/0]") {
 		t.Errorf("expected per-tool summary in output, got: %q", out)
 	}
@@ -115,8 +129,10 @@ func TestTextTracer_RunSummary(t *testing.T) {
 
 func TestTextTracer_AllEventTypes_NoPanic(t *testing.T) {
 	var buf bytes.Buffer
+
 	tr := text.New(&buf)
 	now := time.Now()
+
 	events := []trace.Event{
 		trace.AgentStartEvent{AgentName: "a", Input: "i", Timestamp: now},
 		trace.AgentIterationEvent{AgentName: "a", Iteration: 1, Timestamp: now},
@@ -132,6 +148,7 @@ func TestTextTracer_AllEventTypes_NoPanic(t *testing.T) {
 	for _, e := range events {
 		tr.Trace(e)
 	}
+
 	if buf.Len() == 0 {
 		t.Error("expected non-empty output")
 	}

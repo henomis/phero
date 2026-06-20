@@ -75,6 +75,7 @@ func (t *Tool) Handle(ctx context.Context, arguments string) (any, error) {
 	for i := len(t.middlewares) - 1; i >= 0; i-- {
 		h = t.middlewares[i](t, h)
 	}
+
 	return h(ctx, arguments)
 }
 
@@ -90,7 +91,8 @@ func (t *Tool) Use(middlewares ...ToolMiddleware) *Tool {
 //
 // The handler function must be of the form func(context.Context, T) (R, error) where T and R can be any types.
 // The input type T is used to generate a JSON schema for the tool's parameters, which is passed to the LLM.
-// When the tool is called, the LLM will provide the arguments as a JSON string, which will be unmarshaled into T and passed to the handler.
+// When the tool is called, the LLM will provide the arguments as a JSON string, which will be
+// unmarshaled into T and passed to the handler.
 // The handler's return value R will be returned as the result of the tool call.
 //
 // Example usage:
@@ -127,6 +129,7 @@ func NewTool[T, R any](name, description string, handler func(ctx context.Contex
 	}
 
 	var zero T
+
 	t := reflect.TypeOf(zero)
 	if t == nil {
 		return nil, &ToolNilInputTypeError{ToolName: name}
@@ -134,6 +137,7 @@ func NewTool[T, R any](name, description string, handler func(ctx context.Contex
 
 	schemaType := t
 	schemaTarget := any(&zero)
+
 	if t.Kind() == reflect.Pointer && t.Elem().Kind() == reflect.Struct {
 		// If the handler takes a pointer-to-struct input (e.g. *Input), we still want
 		// to generate a strict object schema based on the underlying struct (Input),
@@ -141,12 +145,13 @@ func NewTool[T, R any](name, description string, handler func(ctx context.Contex
 		schemaType = t.Elem()
 		schemaTarget = reflect.New(schemaType).Interface()
 	}
+
 	var schema *jsonschema.Schema
 	if schemaType.Kind() == reflect.Struct && schemaType.Name() == "" && schemaType.NumField() == 0 {
 		// Avoid panic in jsonschema when reflecting an anonymous empty struct
 		schema = &jsonschema.Schema{
 			Version:    jsonschema.Version,
-			Type:       "object",
+			Type:       schemaTypeObject,
 			Properties: jsonschema.NewProperties(),
 		}
 		if !reflector.AllowAdditionalProperties {
@@ -177,9 +182,10 @@ func NewTool[T, R any](name, description string, handler func(ctx context.Contex
 		inputSchema: schemaMap,
 		handle: func(ctx context.Context, arguments string) (any, error) {
 			var args T
-			if err := json.Unmarshal([]byte(arguments), &args); err != nil {
-				return nil, &ToolArgumentParseError{Err: err}
+			if parseErr := json.Unmarshal([]byte(arguments), &args); parseErr != nil {
+				return nil, &ToolArgumentParseError{Err: parseErr}
 			}
+
 			return handler(ctx, args)
 		},
 	}, nil

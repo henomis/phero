@@ -16,6 +16,14 @@ package nats
 
 import "time"
 
+const (
+	defaultHeartbeatInterval = 30 * time.Second
+	defaultKeepaliveInterval = 30 * time.Second
+	defaultInactivityTimeout = 60 * time.Second
+	defaultDiscoveryTimeout  = 2 * time.Second
+	defaultStallTimeout      = 750 * time.Millisecond
+)
+
 // — Server options ——————————————————————————————————————————————————————————
 
 // ServerOption configures a [Server].
@@ -44,8 +52,8 @@ func defaultServerConfig() *serverConfig {
 		version:           "0.1.0",
 		maxPayload:        "1MB",
 		attachmentsOk:     false,
-		heartbeatInterval: 30 * time.Second,
-		keepaliveInterval: 30 * time.Second,
+		heartbeatInterval: defaultHeartbeatInterval,
+		keepaliveInterval: defaultKeepaliveInterval,
 	}
 }
 
@@ -106,9 +114,9 @@ type clientConfig struct {
 
 func defaultClientConfig() *clientConfig {
 	return &clientConfig{
-		inactivityTimeout: 60 * time.Second,
-		discoveryTimeout:  2 * time.Second,
-		stallTimeout:      750 * time.Millisecond,
+		inactivityTimeout: defaultInactivityTimeout,
+		discoveryTimeout:  defaultDiscoveryTimeout,
+		stallTimeout:      defaultStallTimeout,
 	}
 }
 

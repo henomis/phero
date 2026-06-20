@@ -26,7 +26,8 @@ import (
 )
 
 const (
-	toolName = "skill"
+	toolName            = "skill"
+	catalogSizeMultiple = 2
 )
 
 // Parser defines the minimal skill discovery/parsing contract used by this tool.
@@ -102,16 +103,19 @@ func New(skillsRootPath string, opts ...Option) (*Tool, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	t.catalog = entries
 	t.commands = commands
 
 	description := t.buildDescription()
+
 	tool, err := llm.NewTool(toolName, description, t.handle)
 	if err != nil {
 		return nil, err
 	}
 
 	t.tool = tool
+
 	return t, nil
 }
 
@@ -127,12 +131,12 @@ func (t *Tool) buildCatalog(skillsRootPath string) ([]catalogEntry, map[string]c
 	}
 
 	entries := make([]catalogEntry, 0, len(dirs))
-	commands := make(map[string]catalogEntry, len(dirs)*2)
+	commands := make(map[string]catalogEntry, len(dirs)*catalogSizeMultiple)
 
 	for _, dir := range dirs {
-		skillItem, err := t.parser.Parse(dir)
-		if err != nil {
-			return nil, nil, err
+		skillItem, parseErr := t.parser.Parse(dir)
+		if parseErr != nil {
+			return nil, nil, parseErr
 		}
 
 		name := strings.TrimSpace(skillItem.Name)
@@ -161,6 +165,7 @@ func (t *Tool) buildCatalog(skillsRootPath string) ([]catalogEntry, map[string]c
 		if existing, ok := commands[normalizedName]; ok {
 			return nil, nil, &DuplicateSkillNameError{Name: name, ExistingDir: existing.dir, DuplicateDir: dir}
 		}
+
 		commands[normalizedName] = entry
 
 		normalizedDir := strings.ToLower(strings.TrimSpace(dir))
@@ -185,13 +190,16 @@ func (t *Tool) buildDescription() string {
 
 	b.WriteString("Execute a skill within the main conversation.\n\n")
 	b.WriteString("<skills_instructions>\n")
-	b.WriteString("When users ask you to perform tasks, check if any available skill can help complete the task more effectively.\n")
+	b.WriteString("When users ask you to perform tasks, check if any available skill " +
+		"can help complete the task more effectively.\n")
 	b.WriteString("Invoke this tool with the skill name only, using the command field.\n")
 	b.WriteString("Do not pass arguments inside command.\n")
-	b.WriteString("After invocation, use the returned base path and instructions to execute the task in the same conversation.\n")
+	b.WriteString("After invocation, use the returned base path and instructions " +
+		"to execute the task in the same conversation.\n")
 	b.WriteString("</skills_instructions>\n\n")
 
 	b.WriteString("<available_skills>\n")
+
 	for _, entry := range t.catalog {
 		b.WriteString("  <skill>\n")
 		b.WriteString("    <name>")
@@ -205,6 +213,7 @@ func (t *Tool) buildDescription() string {
 		b.WriteString("</location>\n")
 		b.WriteString("  </skill>\n")
 	}
+
 	b.WriteString("</available_skills>")
 
 	return b.String()
@@ -227,7 +236,7 @@ func (t *Tool) handle(_ context.Context, input *Input) (*Output, error) {
 
 	entry, ok := t.commands[strings.ToLower(command)]
 	if !ok {
-		return nil, &SkillNotFoundError{Command: command}
+		return nil, &NotFoundError{Command: command}
 	}
 
 	skillItem, err := t.parser.Parse(entry.dir)
@@ -267,5 +276,6 @@ func escapeXML(s string) string {
 		`"`, "&quot;",
 		"'", "&apos;",
 	)
+
 	return replacer.Replace(s)
 }

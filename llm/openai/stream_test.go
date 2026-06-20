@@ -29,12 +29,15 @@ import (
 // the terminating [DONE] sentinel.
 func sseServer(t *testing.T, frames ...string) *httptest.Server {
 	t.Helper()
+
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
+
 		for _, f := range frames {
 			_, _ = w.Write([]byte("data: " + f + "\n\n"))
 		}
+
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 }
@@ -54,11 +57,14 @@ func TestExecuteStream_TextAndUsage(t *testing.T) {
 		text  strings.Builder
 		final llm.StreamChunk
 	)
+
 	for chunk, err := range c.ExecuteStream(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))}, nil) {
 		if err != nil {
 			t.Fatalf("ExecuteStream: %v", err)
 		}
+
 		text.WriteString(chunk.TextDelta)
+
 		if chunk.Done {
 			final = chunk
 		}
@@ -67,12 +73,15 @@ func TestExecuteStream_TextAndUsage(t *testing.T) {
 	if text.String() != "Hello" {
 		t.Fatalf("streamed text = %q, want %q", text.String(), "Hello")
 	}
+
 	if final.Message == nil || final.Message.TextContent() != "Hello" {
 		t.Fatalf("final message = %v, want text %q", final.Message, "Hello")
 	}
+
 	if final.Usage == nil || final.Usage.InputTokens != 5 || final.Usage.OutputTokens != 2 {
 		t.Fatalf("final usage = %+v, want in=5 out=2", final.Usage)
 	}
+
 	if final.Model != "gpt-4o-mini" {
 		t.Fatalf("final model = %q, want gpt-4o-mini", final.Model)
 	}
@@ -92,13 +101,16 @@ func TestExecuteStream_AssemblesToolCall(t *testing.T) {
 		emittedCall *llm.ToolCall
 		final       llm.StreamChunk
 	)
+
 	for chunk, err := range c.ExecuteStream(context.Background(), []llm.Message{llm.UserMessage(llm.Text("weather?"))}, nil) {
 		if err != nil {
 			t.Fatalf("ExecuteStream: %v", err)
 		}
+
 		if chunk.ToolCall != nil {
 			emittedCall = chunk.ToolCall
 		}
+
 		if chunk.Done {
 			final = chunk
 		}
@@ -107,9 +119,11 @@ func TestExecuteStream_AssemblesToolCall(t *testing.T) {
 	if emittedCall == nil {
 		t.Fatal("expected a tool-call chunk")
 	}
+
 	if emittedCall.Function.Name != "get_weather" || emittedCall.Function.Arguments != `{"city":"Paris"}` {
 		t.Fatalf("assembled tool call = %+v", emittedCall.Function)
 	}
+
 	if final.Message == nil || len(final.Message.ToolCalls) != 1 {
 		t.Fatalf("final message tool calls = %v, want 1", final.Message)
 	}

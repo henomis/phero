@@ -21,11 +21,18 @@ import (
 	"strings"
 )
 
+const (
+	schemaTypeObject         = "object"
+	schemaKeyAdditionalProps = "additionalProperties"
+	schemaKeyProperties      = "properties"
+	schemaKeyType            = "type"
+)
+
 var emptySchema = map[string]any{
-	"additionalProperties": false,
-	"type":                 "object",
-	"properties":           map[string]any{},
-	"required":             []any{},
+	schemaKeyAdditionalProps: false,
+	schemaKeyType:            schemaTypeObject,
+	schemaKeyProperties:      map[string]any{},
+	"required":               []any{},
 }
 
 // ensureStrictJSONSchema mutates the given JSON schema to ensure it conforms to
@@ -39,12 +46,16 @@ func ensureStrictJSONSchema(schema map[string]any) (map[string]any, error) {
 		for k, v := range emptySchema {
 			result[k] = v
 		}
+
 		return result, nil
 	}
+
 	return ensureStrictJSONSchemaRecursive(schema, nil, schema)
 }
 
 // ensureStrictJSONSchemaRecursive recursively processes a JSON schema to make it strict.
+//
+//nolint:gocognit,gocyclo,funlen
 func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[string]any) (map[string]any, error) {
 	schema, ok := jsonSchema.(map[string]any)
 	if !ok {
@@ -52,10 +63,11 @@ func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[str
 	}
 
 	// Process $defs
-	if defs, ok := schema["$defs"]; ok {
-		if defsMap, ok := defs.(map[string]any); ok {
+	if defs, hasDefs := schema["$defs"]; hasDefs {
+		if defsMap, isDefsMap := defs.(map[string]any); isDefsMap {
 			for defName, defSchema := range defsMap {
 				newPath := append(append([]string{}, path...), "$defs", defName)
+
 				_, err := ensureStrictJSONSchemaRecursive(defSchema, newPath, root)
 				if err != nil {
 					return nil, err
@@ -65,10 +77,11 @@ func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[str
 	}
 
 	// Process definitions
-	if definitions, ok := schema["definitions"]; ok {
-		if defsMap, ok := definitions.(map[string]any); ok {
+	if definitions, hasDefinitions := schema["definitions"]; hasDefinitions {
+		if defsMap, isDefinitionsMap := definitions.(map[string]any); isDefinitionsMap {
 			for defName, defSchema := range defsMap {
 				newPath := append(append([]string{}, path...), "definitions", defName)
+
 				_, err := ensureStrictJSONSchemaRecursive(defSchema, newPath, root)
 				if err != nil {
 					return nil, err
@@ -78,70 +91,79 @@ func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[str
 	}
 
 	// Handle object types and additionalProperties
-	typ, hasType := schema["type"]
-	if hasType && typ == "object" {
-		if _, hasAdditional := schema["additionalProperties"]; !hasAdditional {
-			schema["additionalProperties"] = false
-		} else if additionalProps := schema["additionalProperties"]; additionalProps == true {
+	typ, hasType := schema[schemaKeyType]
+	if hasType && typ == schemaTypeObject {
+		if _, hasAdditional := schema[schemaKeyAdditionalProps]; !hasAdditional {
+			schema[schemaKeyAdditionalProps] = false
+		} else if additionalProps := schema[schemaKeyAdditionalProps]; additionalProps == true {
 			return nil, ErrSchemaAdditionalPropertiesSet
 		}
 	}
 
 	// Process properties
-	if properties, ok := schema["properties"]; ok {
-		if propsMap, ok := properties.(map[string]any); ok {
+	if properties, hasProperties := schema[schemaKeyProperties]; hasProperties {
+		if propsMap, isPropsMap := properties.(map[string]any); isPropsMap {
 			// Set all properties as required
 			required := make([]any, 0, len(propsMap))
 			for key := range propsMap {
 				required = append(required, key)
 			}
+
 			schema["required"] = required
 
 			// Recursively process each property
 			newPropsMap := make(map[string]any, len(propsMap))
 			for key, propSchema := range propsMap {
-				newPath := append(append([]string{}, path...), "properties", key)
+				newPath := append(append([]string{}, path...), schemaKeyProperties, key)
+
 				processed, err := ensureStrictJSONSchemaRecursive(propSchema, newPath, root)
 				if err != nil {
 					return nil, err
 				}
+
 				newPropsMap[key] = processed
 			}
-			schema["properties"] = newPropsMap
+
+			schema[schemaKeyProperties] = newPropsMap
 		}
 	}
 
 	// Process array items
-	if items, ok := schema["items"]; ok {
+	if items, hasItems := schema["items"]; hasItems {
 		if _, isMap := items.(map[string]any); isMap {
 			newPath := append(append([]string{}, path...), "items")
+
 			processed, err := ensureStrictJSONSchemaRecursive(items, newPath, root)
 			if err != nil {
 				return nil, err
 			}
+
 			schema["items"] = processed
 		}
 	}
 
 	// Process anyOf
-	if anyOf, ok := schema["anyOf"]; ok {
-		if anyOfList, ok := anyOf.([]any); ok {
+	if anyOf, hasAnyOf := schema["anyOf"]; hasAnyOf {
+		if anyOfList, isAnyOfList := anyOf.([]any); isAnyOfList {
 			newAnyOf := make([]any, len(anyOfList))
 			for i, variant := range anyOfList {
 				newPath := append(append([]string{}, path...), "anyOf", strconv.Itoa(i))
+
 				processed, err := ensureStrictJSONSchemaRecursive(variant, newPath, root)
 				if err != nil {
 					return nil, err
 				}
+
 				newAnyOf[i] = processed
 			}
+
 			schema["anyOf"] = newAnyOf
 		}
 	}
 
 	// Convert oneOf to anyOf (oneOf is not supported by OpenAI's structured outputs in nested contexts)
-	if oneOf, ok := schema["oneOf"]; ok {
-		if oneOfList, ok := oneOf.([]any); ok {
+	if oneOf, hasOneOf := schema["oneOf"]; hasOneOf {
+		if oneOfList, isOneOfList := oneOf.([]any); isOneOfList {
 			// Get existing anyOf or start with empty list
 			existingAnyOf, _ := schema["anyOf"].([]any)
 			if existingAnyOf == nil {
@@ -151,23 +173,27 @@ func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[str
 			// Process each oneOf variant
 			for i, variant := range oneOfList {
 				newPath := append(append([]string{}, path...), "oneOf", strconv.Itoa(i))
+
 				processed, err := ensureStrictJSONSchemaRecursive(variant, newPath, root)
 				if err != nil {
 					return nil, err
 				}
+
 				existingAnyOf = append(existingAnyOf, processed)
 			}
+
 			schema["anyOf"] = existingAnyOf
 			delete(schema, "oneOf")
 		}
 	}
 
 	// Process allOf
-	if allOf, ok := schema["allOf"]; ok {
-		if allOfList, ok := allOf.([]any); ok {
+	if allOf, hasAllOf := schema["allOf"]; hasAllOf {
+		if allOfList, isAllOfList := allOf.([]any); isAllOfList {
 			if len(allOfList) == 1 {
 				// Merge single allOf entry into parent
 				newPath := append(append([]string{}, path...), "allOf", "0")
+
 				processed, err := ensureStrictJSONSchemaRecursive(allOfList[0], newPath, root)
 				if err != nil {
 					return nil, err
@@ -176,32 +202,36 @@ func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[str
 				for k, v := range processed {
 					schema[k] = v
 				}
+
 				delete(schema, "allOf")
 			} else {
 				// Process each allOf entry
 				newAllOf := make([]any, len(allOfList))
 				for i, entry := range allOfList {
 					newPath := append(append([]string{}, path...), "allOf", strconv.Itoa(i))
+
 					processed, err := ensureStrictJSONSchemaRecursive(entry, newPath, root)
 					if err != nil {
 						return nil, err
 					}
+
 					newAllOf[i] = processed
 				}
+
 				schema["allOf"] = newAllOf
 			}
 		}
 	}
 
 	// Strip nil defaults
-	if defaultVal, ok := schema["default"]; ok && defaultVal == nil {
+	if defaultVal, hasDefault := schema["default"]; hasDefault && defaultVal == nil {
 		delete(schema, "default")
 	}
 
 	// Handle $ref expansion when there are other properties
-	if ref, ok := schema["$ref"]; ok && hasMoreThanNKeys(schema, 1) {
-		refStr, ok := ref.(string)
-		if !ok {
+	if ref, hasRef := schema["$ref"]; hasRef && hasMoreThanNKeys(schema, 1) {
+		refStr, isRefStr := ref.(string)
+		if !isRefStr {
 			return nil, &SchemaNonStringRefError{RawRef: ref}
 		}
 
@@ -210,8 +240,8 @@ func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[str
 			return nil, err
 		}
 
-		resolvedMap, ok := resolved.(map[string]any)
-		if !ok {
+		resolvedMap, isResolvedMap := resolved.(map[string]any)
+		if !isResolvedMap {
 			return nil, &SchemaExpectedMapError{Got: resolved, Path: path}
 		}
 
@@ -221,6 +251,7 @@ func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[str
 				schema[k] = v
 			}
 		}
+
 		delete(schema, "$ref")
 
 		// Process again to ensure the expanded schema is valid
@@ -237,6 +268,7 @@ func resolveRef(root map[string]any, ref string) (any, error) {
 	}
 
 	pathParts := strings.Split(ref[2:], "/")
+
 	var resolved any = root
 
 	for _, key := range pathParts {
@@ -252,6 +284,7 @@ func resolveRef(root map[string]any, ref string) (any, error) {
 		if !exists {
 			return nil, fmt.Errorf("key %q not found while resolving $ref %q", key, ref)
 		}
+
 		resolved = value
 	}
 
@@ -267,12 +300,14 @@ func hasMoreThanNKeys(obj map[string]any, n int) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
 // jsonEncodeDecode is a helper function that marshals a value to JSON and then unmarshals it into the specified type.
 func jsonEncodeDecode[T any](v any) (T, error) {
 	var result T
+
 	b, err := json.Marshal(v)
 	if err != nil {
 		return result, err
@@ -282,6 +317,7 @@ func jsonEncodeDecode[T any](v any) (T, error) {
 	if err != nil {
 		return result, err
 	}
+
 	return result, nil
 }
 

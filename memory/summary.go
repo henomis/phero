@@ -22,13 +22,16 @@ import (
 
 //nolint:misspell // accepted as is
 const summaryPrompt = `# Role
-You are a Memory Synthesis Module for an AI Agent. Your goal is to condense the provided conversation history into a structured "State Snapshot" while preserving crucial details for future reasoning.
+You are a Memory Synthesis Module for an AI Agent. Your goal is to condense the provided
+conversation history into a structured "State Snapshot" while preserving crucial details for
+future reasoning.
 
 # Task
 Analyze the dialogue below and generate a concise summary based on these four pillars:
 
 1. **Entities & Facts:** List key people, technical stacks, or specific data points mentioned.
-2. **User Preferences:** Explicit or implicit likes, dislikes, and stylistic requirements (e.g., "Prefers Go over Python," "Dislikes verbose explanations").
+2. **User Preferences:** Explicit or implicit likes, dislikes, and stylistic requirements
+(e.g., "Prefers Go over Python," "Dislikes verbose explanations").
 3. **Current Progress:** What was achieved in this window? What problems were solved?
 4. **Open Loops:** What are the pending questions, tasks, or follow-up items the user is expecting?
 
@@ -44,7 +47,10 @@ Analyze the dialogue below and generate a concise summary based on these four pi
 
 // SummarySystemMessagePrefix is the prefix prepended to the generated summary
 // when it is stored as a system message in memory.
-const SummarySystemMessagePrefix = "Summary of previous conversation:\n"
+const (
+	SummarySystemMessagePrefix = "Summary of previous conversation:\n"
+	summaryDefaultHalve        = 2
+)
 
 // ClampSummarySize validates and normalises a (summarizeThreshold, summarySize)
 // pair for use by WithSummarization options across all memory backends.
@@ -55,7 +61,7 @@ const SummarySystemMessagePrefix = "Summary of previous conversation:\n"
 //     (minimum 1) to prevent an infinite summarization loop.
 func ClampSummarySize(summarizeThreshold, summarySize uint) uint {
 	if summarySize == 0 && summarizeThreshold > 0 {
-		summarySize = summarizeThreshold / 2
+		summarySize = summarizeThreshold / summaryDefaultHalve
 		if summarySize == 0 {
 			summarySize = 1
 		}

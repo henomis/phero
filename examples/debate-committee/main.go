@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package main demonstrates a multi-agent debate-committee workflow.
 package main
 
 import (
@@ -43,9 +44,12 @@ type Debater struct {
 }
 
 func main() {
-	var question string
-	var goal string
-	var timeout time.Duration
+	var (
+		question string
+		goal     string
+		timeout  time.Duration
+	)
+
 	flag.StringVar(&question, "question", "Given this repo's agent framework, propose a safe multi-agent design to diagnose failing tests.", "Debate question")
 	flag.StringVar(&goal, "goal", "Produce a single best answer grounded in the committee arguments.", "High-level goal for the debate")
 	flag.DurationVar(&timeout, "timeout", 6*time.Minute, "Overall timeout for the run")
@@ -72,6 +76,7 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
+
 		debate = append(debate, DebateResult{Member: member.Name, Output: strings.TrimSpace(out.TextContent())})
 	}
 
@@ -82,6 +87,7 @@ func main() {
 	}
 
 	judgeInput := renderJudgeInput(goal, question, debate)
+
 	final, err := judge.Run(ctx, llm.Text(judgeInput))
 	if err != nil {
 		panic(err)
@@ -96,13 +102,16 @@ func renderJudgeInput(goal, question string, debate []DebateResult) string {
 	fmt.Fprintf(b, "goal: %s\n", goal)
 	fmt.Fprintf(b, "question: %s\n\n", question)
 	fmt.Fprintf(b, "committee_arguments:\n")
+
 	for i, r := range debate {
 		fmt.Fprintf(b, "- member_%d: %s\n", i+1, r.Member)
 		fmt.Fprintf(b, "  argument: |\n")
+
 		for _, ln := range strings.Split(r.Output, "\n") {
 			fmt.Fprintf(b, "    %s\n", ln)
 		}
 	}
+
 	return b.String()
 }
 
@@ -128,6 +137,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
+
 	client := openai.New(apiKey, opts...)
 
 	info := fmt.Sprintf("model=%s base_url=%s", model, baseURL)
@@ -184,6 +194,7 @@ Prefer fewer agents, fewer moving parts, and safe deterministic steps.
 		if e != nil {
 			return nil, nil, e
 		}
+
 		committee = append(committee, Debater{Name: mp.name, Agent: a})
 	}
 

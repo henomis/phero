@@ -25,6 +25,8 @@ import (
 const (
 	defaultInitialBackoff = 500 * time.Millisecond
 	defaultMaxBackoff     = 30 * time.Second
+	jitterHalfDivisor     = 2
+	jitterQuarterDivisor  = 4
 )
 
 // RetryOption configures a Retry middleware.
@@ -55,7 +57,7 @@ func WithShouldRetry(fn func(error) bool) RetryOption {
 	return func(c *retryConfig) { c.shouldRetry = fn }
 }
 
-// NewRetry returns an llm.LLMMiddleware that automatically retries failed
+// NewRetry returns an llm.Middleware that automatically retries failed
 // Execute calls up to maxAttempts times using exponential back-off with jitter.
 //
 // Context cancellation is honoured between retries: if ctx is cancelled while
@@ -64,7 +66,7 @@ func WithShouldRetry(fn func(error) bool) RetryOption {
 //	mw, err := middleware.NewRetry(3, middleware.WithInitialBackoff(200*time.Millisecond))
 //	if err != nil { ... }
 //	client := llm.Use(base, mw)
-func NewRetry(maxAttempts int, opts ...RetryOption) (llm.LLMMiddleware, error) {
+func NewRetry(maxAttempts int, opts ...RetryOption) (llm.Middleware, error) {
 	if maxAttempts < 1 {
 		return nil, ErrInvalidMaxAttempts
 	}
@@ -94,6 +96,7 @@ type retryLLM struct {
 // exponential back-off and +/-25% jitter between each attempt.
 func (r *retryLLM) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
 	var lastErr error
+
 	backoff := r.cfg.initialBackoff
 
 	for attempt := 0; attempt < r.cfg.maxAttempts; attempt++ {
@@ -105,6 +108,7 @@ func (r *retryLLM) Execute(ctx context.Context, messages []llm.Message, tools []
 		if err == nil {
 			return result, nil
 		}
+
 		lastErr = err
 
 		if !r.cfg.shouldRetry(err) {
@@ -116,8 +120,9 @@ func (r *retryLLM) Execute(ctx context.Context, messages []llm.Message, tools []
 		}
 
 		sleep := backoff
-		if half := int64(backoff) / 2; half > 0 {
-			jitter := time.Duration(rand.Int63n(half)) - backoff/4 //nolint:gosec
+		if half := int64(backoff) / jitterHalfDivisor; half > 0 {
+			jitter := time.Duration(rand.Int63n(half)) - backoff/jitterQuarterDivisor //nolint:gosec
+
 			sleep += jitter
 			if sleep < 0 {
 				sleep = 0

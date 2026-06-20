@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package memory defines the Memory interface for conversational context storage.
 package memory
 
 import (
@@ -20,7 +21,8 @@ import (
 	"github.com/henomis/phero/llm"
 )
 
-// Memory defines the interface for storing and retrieving conversation history or other relevant information across agent interactions.
+// Memory defines the interface for storing and retrieving conversation history or other
+// relevant information across agent interactions.
 type Memory interface {
 	Save(ctx context.Context, messages []llm.Message) error
 	Retrieve(ctx context.Context, query string) ([]llm.Message, error)

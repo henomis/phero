@@ -27,26 +27,31 @@ import (
 //
 // It returns a string of " AND <predicate>" clauses to append to the base
 // WHERE clause, plus the bind arguments those predicates reference. Argument
-// placeholders start at $firstArg. Payload keys and values are passed
-// exclusively as bind parameters, never interpolated into the SQL text.
+// placeholders start at $4. Payload keys and values are passed exclusively as
+// bind parameters, never interpolated into the SQL text.
 //
 // A nil or empty filter yields an empty clause string.
-func filterSQL(f *vectorstore.Filter, firstArg int) (string, []any, error) {
+//
+//nolint:gocognit
+func filterSQL(f *vectorstore.Filter) (string, []any, error) {
 	if f == nil || len(f.Conditions) == 0 {
 		return "", nil, nil
 	}
+
 	if err := f.Validate(); err != nil {
 		return "", nil, err
 	}
 
 	var sb strings.Builder
+
 	args := make([]any, 0, len(f.Conditions))
-	next := firstArg
+	next := 4
 
 	placeholder := func(v any) string {
 		args = append(args, v)
 		p := fmt.Sprintf("$%d", next)
 		next++
+
 		return p
 	}
 
@@ -57,6 +62,7 @@ func filterSQL(f *vectorstore.Filter, firstArg int) (string, []any, error) {
 			if err != nil {
 				return "", nil, err
 			}
+
 			fmt.Fprintf(&sb, " AND payload @> %s::jsonb", placeholder(doc))
 		case vectorstore.OpNe:
 			doc, err := containmentDoc(c.Key, c.Value)
@@ -74,8 +80,10 @@ func filterSQL(f *vectorstore.Filter, firstArg int) (string, []any, error) {
 				if err != nil {
 					return "", nil, err
 				}
+
 				ors = append(ors, fmt.Sprintf("payload @> %s::jsonb", placeholder(doc)))
 			}
+
 			fmt.Fprintf(&sb, " AND (%s)", strings.Join(ors, " OR "))
 		case vectorstore.OpGt, vectorstore.OpGte, vectorstore.OpLt, vectorstore.OpLte:
 			value, ok := vectorstore.ToFloat64(c.Value)
@@ -101,11 +109,12 @@ func containmentDoc(key string, value any) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", vectorstore.ErrInvalidFilter, err)
 	}
+
 	return string(doc), nil
 }
 
 func sqlComparison(op vectorstore.Op) string {
-	switch op {
+	switch op { //nolint:exhaustive // callers only pass comparison operators; others are unreachable
 	case vectorstore.OpGt:
 		return ">"
 	case vectorstore.OpGte:

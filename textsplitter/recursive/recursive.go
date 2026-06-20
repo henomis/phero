@@ -82,20 +82,24 @@ func (r *Splitter) Split(_ context.Context) iter.Seq2[document.Document, error] 
 	return func(yield func(document.Document, error) bool) {
 		data, err := os.ReadFile(r.source)
 		if err != nil {
-			yield(document.Document{}, &ErrReadFile{Source: r.source, Err: err})
+			yield(document.Document{}, &ReadFileError{Source: r.source, Err: err})
 			return
 		}
+
 		content := string(data)
 		cursor := 0
 		chunkIndex := 0
+
 		if !r.splitStream(content, func(chunk string) bool {
 			startOffset := -1
 			endOffset := -1
+
 			if idx := strings.Index(content[cursor:], chunk); idx >= 0 {
 				startOffset = cursor + idx
 				endOffset = startOffset + len(chunk)
 				cursor = startOffset + len(chunk)
 			}
+
 			doc := document.Document{
 				Content: chunk,
 				Metadata: map[string]any{
@@ -106,6 +110,7 @@ func (r *Splitter) Split(_ context.Context) iter.Seq2[document.Document, error] 
 				},
 			}
 			chunkIndex++
+
 			return yield(doc, nil)
 		}) {
 			return
@@ -113,9 +118,11 @@ func (r *Splitter) Split(_ context.Context) iter.Seq2[document.Document, error] 
 	}
 }
 
+//nolint:gocognit
 func (r *Splitter) splitStream(text string, yield func(string) bool) bool {
 	separator := r.separators[len(r.separators)-1]
 	newSeparators := []string{}
+
 	for i, s := range r.separators {
 		if s == "" {
 			separator = s
@@ -125,12 +132,14 @@ func (r *Splitter) splitStream(text string, yield func(string) bool) bool {
 		if strings.Contains(text, s) {
 			separator = s
 			newSeparators = r.separators[i+1:]
+
 			break
 		}
 	}
 
 	splits := strings.Split(text, separator)
 	goodSplits := []string{}
+
 	for _, s := range splits {
 		if r.lengthFunction(s) < r.chunkSize {
 			goodSplits = append(goodSplits, s)
@@ -141,12 +150,15 @@ func (r *Splitter) splitStream(text string, yield func(string) bool) bool {
 			if !r.mergeSplitsStream(goodSplits, separator, yield) {
 				return false
 			}
+
 			goodSplits = goodSplits[:0]
 		}
+
 		if len(newSeparators) == 0 {
 			if !yield(s) {
 				return false
 			}
+
 			continue
 		}
 
@@ -154,6 +166,7 @@ func (r *Splitter) splitStream(text string, yield func(string) bool) bool {
 			return false
 		}
 	}
+
 	if len(goodSplits) > 0 {
 		if !r.mergeSplitsStream(goodSplits, separator, yield) {
 			return false
@@ -166,6 +179,7 @@ func (r *Splitter) splitStream(text string, yield func(string) bool) bool {
 func (r *Splitter) mergeSplitsStream(splits []string, separator string, yield func(string) bool) bool {
 	currentDoc := make([]string, 0)
 	total := 0
+
 	for _, d := range splits {
 		splitLen := r.lengthFunction(d)
 
@@ -175,16 +189,19 @@ func (r *Splitter) mergeSplitsStream(splits []string, separator string, yield fu
 				if doc != "" && !yield(doc) {
 					return false
 				}
+
 				for (total > r.chunkOverlap) || (separatorLen(currentDoc, separator, 0) > r.chunkSize && total > 0) {
 					total -= r.lengthFunction(currentDoc[0]) + separatorLen(currentDoc, separator, 1)
 					currentDoc = currentDoc[1:]
 				}
 			}
 		}
+
 		currentDoc = append(currentDoc, d)
 		total += separatorLen(currentDoc, separator, 1)
 		total += splitLen
 	}
+
 	doc := r.joinDocs(currentDoc, separator)
 	if doc != "" && !yield(doc) {
 		return false

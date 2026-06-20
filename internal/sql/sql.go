@@ -29,6 +29,10 @@ var ErrInvalidIdent = errors.New("invalid SQL identifier")
 // letter or underscore, followed by letters, digits, or underscores.
 var safeIdent = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
+// maxIdentParts is the maximum number of dot-separated components in a
+// qualified SQL identifier (schema.table).
+const maxIdentParts = 2
+
 // QuoteQualifiedIdent validates name and returns it as a safely double-quoted
 // SQL identifier of the form "ident" or "schema"."table".
 //
@@ -42,7 +46,7 @@ func QuoteQualifiedIdent(name string) (string, error) {
 	}
 
 	parts := strings.Split(name, ".")
-	if len(parts) > 2 {
+	if len(parts) > maxIdentParts {
 		return "", ErrInvalidIdent
 	}
 
@@ -51,6 +55,7 @@ func QuoteQualifiedIdent(name string) (string, error) {
 		if !safeIdent.MatchString(p) {
 			return "", ErrInvalidIdent
 		}
+
 		out = append(out, `"`+p+`"`)
 	}
 

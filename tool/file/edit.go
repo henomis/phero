@@ -28,8 +28,8 @@ import (
 type EditInput struct {
 	FilePath   string `json:"file_path" jsonschema:"description=The absolute path to the file to modify"`
 	OldString  string `json:"old_string" jsonschema:"description=The text to replace"`
-	NewString  string `json:"new_string" jsonschema:"description=The text to replace it with (must be different from old_string)"`
-	ReplaceAll bool   `json:"replace_all,omitempty" jsonschema:"description=Replace all occurrences of old_string (default false)"`
+	NewString  string `json:"new_string" jsonschema:"description=The text to replace it with (must be different from old_string)"`  //nolint:lll
+	ReplaceAll bool   `json:"replace_all,omitempty" jsonschema:"description=Replace all occurrences of old_string (default false)"` //nolint:lll
 }
 
 // EditOutput is the output schema for the edit tool.
@@ -57,6 +57,7 @@ func NewEditTool(opts ...Option) (*EditTool, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	e.tool = tool
 
 	return e, nil
@@ -71,12 +72,15 @@ func (e *EditTool) edit(_ context.Context, input *EditInput) (*EditOutput, error
 	if input == nil {
 		return nil, fmt.Errorf("nil input")
 	}
+
 	if strings.TrimSpace(input.FilePath) == "" {
 		return nil, ErrPathRequired
 	}
+
 	if input.OldString == "" {
 		return nil, ErrOldStringRequired
 	}
+
 	if input.OldString == input.NewString {
 		return nil, fmt.Errorf("new_string must differ from old_string")
 	}
@@ -90,19 +94,22 @@ func (e *EditTool) edit(_ context.Context, input *EditInput) (*EditOutput, error
 	if err != nil {
 		return nil, err
 	}
+
 	mode := info.Mode().Perm()
 
-	content, err := os.ReadFile(resolvedPath)
+	content, err := os.ReadFile(resolvedPath) //nolint:gosec // path is resolved and validated above
 	if err != nil {
 		return nil, err
 	}
 
 	needle := []byte(input.OldString)
 	replacement := []byte(input.NewString)
+
 	count := bytes.Count(content, needle)
 	if count == 0 {
 		return nil, fmt.Errorf("old_string not found in %s", resolvedPath)
 	}
+
 	if !input.ReplaceAll && count != 1 {
 		return nil, fmt.Errorf("old_string found %d times in %s", count, resolvedPath)
 	}
@@ -113,12 +120,13 @@ func (e *EditTool) edit(_ context.Context, input *EditInput) (*EditOutput, error
 	}
 
 	updated := bytes.Replace(content, needle, replacement, maxReplacements)
-	if err := atomicWriteFile(resolvedPath, updated, mode); err != nil {
-		return nil, err
+	if writeErr := atomicWriteFile(resolvedPath, updated, mode); writeErr != nil {
+		return nil, writeErr
 	}
 
 	if !input.ReplaceAll {
 		return &EditOutput{Replacements: 1}, nil
 	}
+
 	return &EditOutput{Replacements: count}, nil
 }

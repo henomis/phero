@@ -15,7 +15,6 @@
 package llm
 
 import (
-	"encoding/json"
 	"reflect"
 	"testing"
 )
@@ -29,17 +28,19 @@ func TestEnsureStrictJSONSchema_EmptySchema(t *testing.T) {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
-	if result["type"] != "object" {
-		t.Errorf("expected type=object, got: %v", result["type"])
-	}
-	if result["additionalProperties"] != false {
-		t.Errorf("expected additionalProperties=false, got: %v", result["additionalProperties"])
+	if result[schemaKeyType] != schemaTypeObject {
+		t.Errorf("expected type=object, got: %v", result[schemaKeyType])
 	}
 
-	props, ok := result["properties"].(map[string]any)
-	if !ok {
-		t.Errorf("expected properties to be a map, got: %T", result["properties"])
+	if result[schemaKeyAdditionalProps] != false {
+		t.Errorf("expected additionalProperties=false, got: %v", result[schemaKeyAdditionalProps])
 	}
+
+	props, ok := result[schemaKeyProperties].(map[string]any)
+	if !ok {
+		t.Errorf("expected properties to be a map, got: %T", result[schemaKeyProperties])
+	}
+
 	if len(props) != 0 {
 		t.Errorf("expected empty properties, got: %v", props)
 	}
@@ -48,6 +49,7 @@ func TestEnsureStrictJSONSchema_EmptySchema(t *testing.T) {
 	if !ok {
 		t.Errorf("expected required to be a slice, got: %T", result["required"])
 	}
+
 	if len(required) != 0 {
 		t.Errorf("expected empty required, got: %v", required)
 	}
@@ -56,10 +58,10 @@ func TestEnsureStrictJSONSchema_EmptySchema(t *testing.T) {
 // TestEnsureStrictJSONSchema_ObjectAddsAdditionalPropertiesFalse tests that object types get additionalProperties: false.
 func TestEnsureStrictJSONSchema_ObjectAddsAdditionalPropertiesFalse(t *testing.T) {
 	schema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
+		schemaKeyType: schemaTypeObject,
+		schemaKeyProperties: map[string]any{
 			"name": map[string]any{
-				"type": "string",
+				schemaKeyType: "string",
 			},
 		},
 	}
@@ -69,16 +71,16 @@ func TestEnsureStrictJSONSchema_ObjectAddsAdditionalPropertiesFalse(t *testing.T
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
-	if result["additionalProperties"] != false {
-		t.Errorf("expected additionalProperties=false, got: %v", result["additionalProperties"])
+	if result[schemaKeyAdditionalProps] != false {
+		t.Errorf("expected additionalProperties=false, got: %v", result[schemaKeyAdditionalProps])
 	}
 }
 
 // TestEnsureStrictJSONSchema_ObjectWithAdditionalPropertiesTrue tests that setting additionalProperties: true returns an error.
 func TestEnsureStrictJSONSchema_ObjectWithAdditionalPropertiesTrue(t *testing.T) {
 	schema := map[string]any{
-		"type":                 "object",
-		"additionalProperties": true,
+		schemaKeyType:            schemaTypeObject,
+		schemaKeyAdditionalProps: true,
 	}
 
 	_, err := ensureStrictJSONSchema(schema)
@@ -90,13 +92,13 @@ func TestEnsureStrictJSONSchema_ObjectWithAdditionalPropertiesTrue(t *testing.T)
 // TestEnsureStrictJSONSchema_PropertiesBecomesRequired tests that all properties are marked as required.
 func TestEnsureStrictJSONSchema_PropertiesBecomesRequired(t *testing.T) {
 	schema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
+		schemaKeyType: schemaTypeObject,
+		schemaKeyProperties: map[string]any{
 			"name": map[string]any{
-				"type": "string",
+				schemaKeyType: "string",
 			},
 			"age": map[string]any{
-				"type": "number",
+				schemaKeyType: "number",
 			},
 		},
 	}
@@ -110,14 +112,16 @@ func TestEnsureStrictJSONSchema_PropertiesBecomesRequired(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected required to be a slice, got: %T", result["required"])
 	}
+
 	if len(required) != 2 {
 		t.Errorf("expected 2 required fields, got: %v", len(required))
 	}
 
 	// Convert to map for easier checking
 	requiredMap := make(map[string]bool)
+
 	for _, r := range required {
-		if str, ok := r.(string); ok {
+		if str, isStr := r.(string); isStr {
 			requiredMap[str] = true
 		}
 	}
@@ -130,13 +134,13 @@ func TestEnsureStrictJSONSchema_PropertiesBecomesRequired(t *testing.T) {
 // TestEnsureStrictJSONSchema_NestedObjects tests that nested objects are processed recursively.
 func TestEnsureStrictJSONSchema_NestedObjects(t *testing.T) {
 	schema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
+		schemaKeyType: schemaTypeObject,
+		schemaKeyProperties: map[string]any{
 			"address": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
+				schemaKeyType: schemaTypeObject,
+				schemaKeyProperties: map[string]any{
 					"street": map[string]any{
-						"type": "string",
+						schemaKeyType: "string",
 					},
 				},
 			},
@@ -148,11 +152,11 @@ func TestEnsureStrictJSONSchema_NestedObjects(t *testing.T) {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
-	props, _ := result["properties"].(map[string]any)
+	props, _ := result[schemaKeyProperties].(map[string]any)
 	address, _ := props["address"].(map[string]any)
 
-	if address["additionalProperties"] != false {
-		t.Errorf("expected nested object to have additionalProperties=false, got: %v", address["additionalProperties"])
+	if address[schemaKeyAdditionalProps] != false {
+		t.Errorf("expected nested object to have additionalProperties=false, got: %v", address[schemaKeyAdditionalProps])
 	}
 
 	addressRequired, ok := address["required"].([]any)
@@ -164,12 +168,12 @@ func TestEnsureStrictJSONSchema_NestedObjects(t *testing.T) {
 // TestEnsureStrictJSONSchema_ArrayItems tests that array items are processed.
 func TestEnsureStrictJSONSchema_ArrayItems(t *testing.T) {
 	schema := map[string]any{
-		"type": "array",
+		schemaKeyType: "array",
 		"items": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
+			schemaKeyType: schemaTypeObject,
+			schemaKeyProperties: map[string]any{
 				"id": map[string]any{
-					"type": "integer",
+					schemaKeyType: "integer",
 				},
 			},
 		},
@@ -185,8 +189,8 @@ func TestEnsureStrictJSONSchema_ArrayItems(t *testing.T) {
 		t.Fatalf("expected items to be a map, got: %T", result["items"])
 	}
 
-	if items["additionalProperties"] != false {
-		t.Errorf("expected array items object to have additionalProperties=false, got: %v", items["additionalProperties"])
+	if items[schemaKeyAdditionalProps] != false {
+		t.Errorf("expected array items object to have additionalProperties=false, got: %v", items[schemaKeyAdditionalProps])
 	}
 
 	itemsRequired, ok := items["required"].([]any)
@@ -200,18 +204,18 @@ func TestEnsureStrictJSONSchema_AnyOf(t *testing.T) {
 	schema := map[string]any{
 		"anyOf": []any{
 			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
+				schemaKeyType: schemaTypeObject,
+				schemaKeyProperties: map[string]any{
 					"name": map[string]any{
-						"type": "string",
+						schemaKeyType: "string",
 					},
 				},
 			},
 			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
+				schemaKeyType: schemaTypeObject,
+				schemaKeyProperties: map[string]any{
 					"id": map[string]any{
-						"type": "integer",
+						schemaKeyType: "integer",
 					},
 				},
 			},
@@ -227,6 +231,7 @@ func TestEnsureStrictJSONSchema_AnyOf(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected anyOf to be a slice, got: %T", result["anyOf"])
 	}
+
 	if len(anyOf) != 2 {
 		t.Errorf("expected 2 anyOf variants, got: %v", len(anyOf))
 	}
@@ -236,8 +241,9 @@ func TestEnsureStrictJSONSchema_AnyOf(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected first anyOf variant to be a map, got: %T", anyOf[0])
 	}
-	if first["additionalProperties"] != false {
-		t.Errorf("expected first anyOf variant to have additionalProperties=false, got: %v", first["additionalProperties"])
+
+	if first[schemaKeyAdditionalProps] != false {
+		t.Errorf("expected first anyOf variant to have additionalProperties=false, got: %v", first[schemaKeyAdditionalProps])
 	}
 }
 
@@ -246,10 +252,10 @@ func TestEnsureStrictJSONSchema_OneOfConvertsToAnyOf(t *testing.T) {
 	schema := map[string]any{
 		"oneOf": []any{
 			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
+				schemaKeyType: schemaTypeObject,
+				schemaKeyProperties: map[string]any{
 					"name": map[string]any{
-						"type": "string",
+						schemaKeyType: "string",
 					},
 				},
 			},
@@ -269,6 +275,7 @@ func TestEnsureStrictJSONSchema_OneOfConvertsToAnyOf(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected anyOf to exist, got: %T", result["anyOf"])
 	}
+
 	if len(anyOf) != 1 {
 		t.Errorf("expected 1 anyOf variant (converted from oneOf), got: %v", len(anyOf))
 	}
@@ -279,12 +286,12 @@ func TestEnsureStrictJSONSchema_OneOfMergesWithExistingAnyOf(t *testing.T) {
 	schema := map[string]any{
 		"anyOf": []any{
 			map[string]any{
-				"type": "string",
+				schemaKeyType: "string",
 			},
 		},
 		"oneOf": []any{
 			map[string]any{
-				"type": "number",
+				schemaKeyType: "number",
 			},
 		},
 	}
@@ -298,6 +305,7 @@ func TestEnsureStrictJSONSchema_OneOfMergesWithExistingAnyOf(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected anyOf to exist, got: %T", result["anyOf"])
 	}
+
 	if len(anyOf) != 2 {
 		t.Errorf("expected 2 anyOf variants (merged from anyOf + oneOf), got: %v", len(anyOf))
 	}
@@ -308,10 +316,10 @@ func TestEnsureStrictJSONSchema_AllOfSingleEntryMerges(t *testing.T) {
 	schema := map[string]any{
 		"allOf": []any{
 			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
+				schemaKeyType: schemaTypeObject,
+				schemaKeyProperties: map[string]any{
 					"id": map[string]any{
-						"type": "integer",
+						schemaKeyType: "integer",
 					},
 				},
 			},
@@ -327,13 +335,13 @@ func TestEnsureStrictJSONSchema_AllOfSingleEntryMerges(t *testing.T) {
 		t.Errorf("expected single allOf to be merged and removed, but it still exists")
 	}
 
-	if result["type"] != "object" {
-		t.Errorf("expected type=object from merged allOf, got: %v", result["type"])
+	if result[schemaKeyType] != schemaTypeObject {
+		t.Errorf("expected type=object from merged allOf, got: %v", result[schemaKeyType])
 	}
 
-	props, ok := result["properties"].(map[string]any)
+	props, ok := result[schemaKeyProperties].(map[string]any)
 	if !ok || len(props) != 1 {
-		t.Errorf("expected properties from merged allOf, got: %v", result["properties"])
+		t.Errorf("expected properties from merged allOf, got: %v", result[schemaKeyProperties])
 	}
 }
 
@@ -342,12 +350,12 @@ func TestEnsureStrictJSONSchema_AllOfMultipleEntries(t *testing.T) {
 	schema := map[string]any{
 		"allOf": []any{
 			map[string]any{
-				"type": "object",
+				schemaKeyType: schemaTypeObject,
 			},
 			map[string]any{
-				"properties": map[string]any{
+				schemaKeyProperties: map[string]any{
 					"id": map[string]any{
-						"type": "integer",
+						schemaKeyType: "integer",
 					},
 				},
 			},
@@ -363,6 +371,7 @@ func TestEnsureStrictJSONSchema_AllOfMultipleEntries(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected allOf to remain with multiple entries, got: %T", result["allOf"])
 	}
+
 	if len(allOf) != 2 {
 		t.Errorf("expected 2 allOf entries, got: %v", len(allOf))
 	}
@@ -371,8 +380,8 @@ func TestEnsureStrictJSONSchema_AllOfMultipleEntries(t *testing.T) {
 // TestEnsureStrictJSONSchema_NilDefaultStripped tests that nil defaults are removed.
 func TestEnsureStrictJSONSchema_NilDefaultStripped(t *testing.T) {
 	schema := map[string]any{
-		"type":    "string",
-		"default": nil,
+		schemaKeyType: "string",
+		"default":     nil,
 	}
 
 	result, err := ensureStrictJSONSchema(schema)
@@ -388,8 +397,8 @@ func TestEnsureStrictJSONSchema_NilDefaultStripped(t *testing.T) {
 // TestEnsureStrictJSONSchema_NonNilDefaultKept tests that non-nil defaults are kept.
 func TestEnsureStrictJSONSchema_NonNilDefaultKept(t *testing.T) {
 	schema := map[string]any{
-		"type":    "string",
-		"default": "hello",
+		schemaKeyType: "string",
+		"default":     "hello",
 	}
 
 	result, err := ensureStrictJSONSchema(schema)
@@ -407,16 +416,16 @@ func TestEnsureStrictJSONSchema_Defs(t *testing.T) {
 	schema := map[string]any{
 		"$defs": map[string]any{
 			"Person": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
+				schemaKeyType: schemaTypeObject,
+				schemaKeyProperties: map[string]any{
 					"name": map[string]any{
-						"type": "string",
+						schemaKeyType: "string",
 					},
 				},
 			},
 		},
-		"type": "object",
-		"properties": map[string]any{
+		schemaKeyType: schemaTypeObject,
+		schemaKeyProperties: map[string]any{
 			"person": map[string]any{
 				"$ref": "#/$defs/Person",
 			},
@@ -438,8 +447,8 @@ func TestEnsureStrictJSONSchema_Defs(t *testing.T) {
 		t.Fatalf("expected Person definition to be a map, got: %T", defs["Person"])
 	}
 
-	if person["additionalProperties"] != false {
-		t.Errorf("expected Person definition to have additionalProperties=false, got: %v", person["additionalProperties"])
+	if person[schemaKeyAdditionalProps] != false {
+		t.Errorf("expected Person definition to have additionalProperties=false, got: %v", person[schemaKeyAdditionalProps])
 	}
 }
 
@@ -448,10 +457,10 @@ func TestEnsureStrictJSONSchema_Definitions(t *testing.T) {
 	schema := map[string]any{
 		"definitions": map[string]any{
 			"Person": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
+				schemaKeyType: schemaTypeObject,
+				schemaKeyProperties: map[string]any{
 					"name": map[string]any{
-						"type": "string",
+						schemaKeyType: "string",
 					},
 				},
 			},
@@ -473,8 +482,8 @@ func TestEnsureStrictJSONSchema_Definitions(t *testing.T) {
 		t.Fatalf("expected Person definition to be a map, got: %T", definitions["Person"])
 	}
 
-	if person["additionalProperties"] != false {
-		t.Errorf("expected Person definition to have additionalProperties=false, got: %v", person["additionalProperties"])
+	if person[schemaKeyAdditionalProps] != false {
+		t.Errorf("expected Person definition to have additionalProperties=false, got: %v", person[schemaKeyAdditionalProps])
 	}
 }
 
@@ -483,16 +492,16 @@ func TestEnsureStrictJSONSchema_RefExpansion(t *testing.T) {
 	schema := map[string]any{
 		"$defs": map[string]any{
 			"BaseType": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
+				schemaKeyType: schemaTypeObject,
+				schemaKeyProperties: map[string]any{
 					"id": map[string]any{
-						"type": "integer",
+						schemaKeyType: "integer",
 					},
 				},
 			},
 		},
-		"type": "object",
-		"properties": map[string]any{
+		schemaKeyType: schemaTypeObject,
+		schemaKeyProperties: map[string]any{
 			"item": map[string]any{
 				"$ref":        "#/$defs/BaseType",
 				"description": "An item with id",
@@ -505,20 +514,21 @@ func TestEnsureStrictJSONSchema_RefExpansion(t *testing.T) {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
-	props, _ := result["properties"].(map[string]any)
+	props, _ := result[schemaKeyProperties].(map[string]any)
+
 	item, ok := props["item"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected item property to be a map, got: %T", props["item"])
 	}
 
 	// $ref should be removed after expansion
-	if _, ok := item["$ref"]; ok {
+	if _, hasRef := item["$ref"]; hasRef {
 		t.Errorf("expected $ref to be removed after expansion, but it still exists")
 	}
 
 	// Properties from BaseType should be present
-	if item["type"] != "object" {
-		t.Errorf("expected type=object from $ref expansion, got: %v", item["type"])
+	if item[schemaKeyType] != schemaTypeObject {
+		t.Errorf("expected type=object from $ref expansion, got: %v", item[schemaKeyType])
 	}
 
 	// Description should be preserved (takes priority over ref)
@@ -532,7 +542,7 @@ func TestEnsureStrictJSONSchema_NonMapInput(t *testing.T) {
 	// This test actually tests ensureStrictJSONSchemaRecursive indirectly
 	// since ensureStrictJSONSchema checks len(schema) == 0 first
 	schema := map[string]any{
-		"properties": "not a map", // Invalid: properties should be a map
+		schemaKeyProperties: "not a map", // Invalid: properties should be a map
 	}
 
 	// This should not error because properties being a string doesn't violate the top-level map requirement
@@ -549,10 +559,10 @@ func TestResolveRef(t *testing.T) {
 	root := map[string]any{
 		"$defs": map[string]any{
 			"Person": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
+				schemaKeyType: schemaTypeObject,
+				schemaKeyProperties: map[string]any{
 					"name": map[string]any{
-						"type": "string",
+						schemaKeyType: "string",
 					},
 				},
 			},
@@ -592,6 +602,7 @@ func TestResolveRef(t *testing.T) {
 				if err != nil {
 					t.Errorf("expected no error for ref %q, got: %v", tt.ref, err)
 				}
+
 				if result == nil {
 					t.Errorf("expected non-nil result for ref %q", tt.ref)
 				}
@@ -606,9 +617,11 @@ func TestResolveRef_InvalidFormat(t *testing.T) {
 	_, err := resolveRef(root, "invalid/ref")
 
 	var refErr *SchemaUnexpectedRefFormatError
+
 	if !reflect.DeepEqual(err, &SchemaUnexpectedRefFormatError{Ref: "invalid/ref"}) {
 		t.Errorf("expected SchemaUnexpectedRefFormatError, got: %v", err)
 	}
+
 	_ = refErr // Just to satisfy linter if we add more checks
 }
 
@@ -620,16 +633,19 @@ func TestResolveRef_NonDictionaryInPath(t *testing.T) {
 	_, err := resolveRef(root, "#/$defs/Person")
 
 	var nonDictErr *SchemaNonDictionaryWhileResolvingRefError
+
 	if err == nil {
 		t.Errorf("expected error when resolving through non-dictionary, got nil")
 	} else {
 		// Check it's the right type of error
 		var ok bool
+
 		nonDictErr, ok = err.(*SchemaNonDictionaryWhileResolvingRefError)
 		if !ok {
 			t.Errorf("expected SchemaNonDictionaryWhileResolvingRefError, got: %T", err)
 		}
 	}
+
 	_ = nonDictErr // Satisfy linter
 }
 
@@ -639,7 +655,7 @@ func TestResolveRef_NestedPath(t *testing.T) {
 		"components": map[string]any{
 			"schemas": map[string]any{
 				"User": map[string]any{
-					"type": "object",
+					schemaKeyType: schemaTypeObject,
 				},
 			},
 		},
@@ -655,8 +671,8 @@ func TestResolveRef_NestedPath(t *testing.T) {
 		t.Fatalf("expected result to be a map, got: %T", result)
 	}
 
-	if resultMap["type"] != "object" {
-		t.Errorf("expected type=object, got: %v", resultMap["type"])
+	if resultMap[schemaKeyType] != schemaTypeObject {
+		t.Errorf("expected type=object, got: %v", resultMap[schemaKeyType])
 	}
 }
 
@@ -719,31 +735,26 @@ func TestHasMoreThanNKeys(t *testing.T) {
 
 // TestEnsureStrictJSONSchema_ComplexRealWorldExample tests a complex real-world schema.
 func TestEnsureStrictJSONSchema_ComplexRealWorldExample(t *testing.T) {
-	schemaJSON := `{
-		"$defs": {
-			"Address": {
-				"type": "object",
-				"properties": {
-					"street": {"type": "string"},
-					"city": {"type": "string"}
-				}
-			}
+	schema := map[string]any{
+		"$defs": map[string]any{
+			"Address": map[string]any{
+				schemaKeyType: schemaTypeObject,
+				schemaKeyProperties: map[string]any{
+					"street": map[string]any{schemaKeyType: "string"},
+					"city":   map[string]any{schemaKeyType: "string"},
+				},
+			},
 		},
-		"type": "object",
-		"properties": {
-			"name": {"type": "string"},
-			"age": {"type": "integer"},
-			"address": {"$ref": "#/$defs/Address"},
-			"tags": {
-				"type": "array",
-				"items": {"type": "string"}
-			}
-		}
-	}`
-
-	var schema map[string]any
-	if err := json.Unmarshal([]byte(schemaJSON), &schema); err != nil {
-		t.Fatalf("failed to parse test schema: %v", err)
+		schemaKeyType: schemaTypeObject,
+		schemaKeyProperties: map[string]any{
+			"name":    map[string]any{schemaKeyType: "string"},
+			"age":     map[string]any{schemaKeyType: "integer"},
+			"address": map[string]any{"$ref": "#/$defs/Address"},
+			"tags": map[string]any{
+				schemaKeyType: "array",
+				"items":       map[string]any{schemaKeyType: "string"},
+			},
+		},
 	}
 
 	result, err := ensureStrictJSONSchema(schema)
@@ -752,8 +763,8 @@ func TestEnsureStrictJSONSchema_ComplexRealWorldExample(t *testing.T) {
 	}
 
 	// Check top-level additionalProperties
-	if result["additionalProperties"] != false {
-		t.Errorf("expected top-level additionalProperties=false, got: %v", result["additionalProperties"])
+	if result[schemaKeyAdditionalProps] != false {
+		t.Errorf("expected top-level additionalProperties=false, got: %v", result[schemaKeyAdditionalProps])
 	}
 
 	// Check required fields
@@ -764,9 +775,10 @@ func TestEnsureStrictJSONSchema_ComplexRealWorldExample(t *testing.T) {
 
 	// Check that $defs Address has been processed
 	defs, _ := result["$defs"].(map[string]any)
+
 	address, _ := defs["Address"].(map[string]any)
-	if address["additionalProperties"] != false {
-		t.Errorf("expected Address definition to have additionalProperties=false, got: %v", address["additionalProperties"])
+	if address[schemaKeyAdditionalProps] != false {
+		t.Errorf("expected Address definition to have additionalProperties=false, got: %v", address[schemaKeyAdditionalProps])
 	}
 
 	addressRequired, ok := address["required"].([]any)
@@ -779,11 +791,11 @@ func TestEnsureStrictJSONSchema_ComplexRealWorldExample(t *testing.T) {
 func TestEnsureStrictJSONSchema_ErrorPropagation(t *testing.T) {
 	// Create a schema with nested additional properties set to true
 	schema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
+		schemaKeyType: schemaTypeObject,
+		schemaKeyProperties: map[string]any{
 			"nested": map[string]any{
-				"type":                 "object",
-				"additionalProperties": true,
+				schemaKeyType:            schemaTypeObject,
+				schemaKeyAdditionalProps: true,
 			},
 		},
 	}
@@ -800,14 +812,17 @@ func TestEnsureStrictJSONSchema_SchemaExpectedMapError(t *testing.T) {
 	_, err := ensureStrictJSONSchemaRecursive("not a map", []string{}, map[string]any{})
 
 	var mapErr *SchemaExpectedMapError
+
 	if err == nil {
 		t.Errorf("expected SchemaExpectedMapError, got nil")
 	} else {
 		var ok bool
+
 		mapErr, ok = err.(*SchemaExpectedMapError)
 		if !ok {
 			t.Errorf("expected SchemaExpectedMapError, got: %T", err)
 		}
+
 		if mapErr != nil && mapErr.Got != "not a map" {
 			t.Errorf("expected error to contain 'not a map', got: %v", mapErr.Got)
 		}
@@ -824,14 +839,17 @@ func TestEnsureStrictJSONSchema_NonStringRef(t *testing.T) {
 	_, err := ensureStrictJSONSchema(schema)
 
 	var refErr *SchemaNonStringRefError
+
 	if err == nil {
 		t.Errorf("expected SchemaNonStringRefError, got nil")
 	} else {
 		var ok bool
+
 		refErr, ok = err.(*SchemaNonStringRefError)
 		if !ok {
 			t.Errorf("expected SchemaNonStringRefError, got: %T", err)
 		}
+
 		if refErr != nil && refErr.RawRef != 123 {
 			t.Errorf("expected error RawRef to be 123, got: %v", refErr.RawRef)
 		}
@@ -843,16 +861,16 @@ func TestEnsureStrictJSONSchema_RefOnlyNoExpansion(t *testing.T) {
 	schema := map[string]any{
 		"$defs": map[string]any{
 			"Person": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
+				schemaKeyType: schemaTypeObject,
+				schemaKeyProperties: map[string]any{
 					"name": map[string]any{
-						"type": "string",
+						schemaKeyType: "string",
 					},
 				},
 			},
 		},
-		"type": "object",
-		"properties": map[string]any{
+		schemaKeyType: schemaTypeObject,
+		schemaKeyProperties: map[string]any{
 			"person": map[string]any{
 				"$ref": "#/$defs/Person",
 			},
@@ -864,7 +882,8 @@ func TestEnsureStrictJSONSchema_RefOnlyNoExpansion(t *testing.T) {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
-	props, _ := result["properties"].(map[string]any)
+	props, _ := result[schemaKeyProperties].(map[string]any)
+
 	person, ok := props["person"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected person property to be a map, got: %T", props["person"])
@@ -882,20 +901,23 @@ func TestEnsureStrictJSONSchema_DefsWithNonMapSchema(t *testing.T) {
 		"$defs": map[string]any{
 			"BadDef": "not a map", // This should cause an error
 		},
-		"type": "object",
+		schemaKeyType: schemaTypeObject,
 	}
 
 	_, err := ensureStrictJSONSchema(schema)
 
 	var mapErr *SchemaExpectedMapError
+
 	if err == nil {
 		t.Errorf("expected SchemaExpectedMapError for invalid $defs entry, got nil")
 	} else {
 		var ok bool
+
 		mapErr, ok = err.(*SchemaExpectedMapError)
 		if !ok {
 			t.Errorf("expected SchemaExpectedMapError, got: %T", err)
 		}
+
 		if mapErr != nil && mapErr.Got != "not a map" {
 			t.Errorf("expected error Got to be 'not a map', got: %v", mapErr.Got)
 		}
@@ -908,11 +930,10 @@ func TestEnsureStrictJSONSchema_DefinitionsWithNonMapSchema(t *testing.T) {
 		"definitions": map[string]any{
 			"BadDef": []string{"invalid"}, // This should cause an error
 		},
-		"type": "object",
+		schemaKeyType: schemaTypeObject,
 	}
 
 	_, err := ensureStrictJSONSchema(schema)
-
 	if err == nil {
 		t.Errorf("expected SchemaExpectedMapError for invalid definitions entry, got nil")
 	} else {
@@ -927,10 +948,10 @@ func TestEnsureStrictJSONSchema_ArrayItemsNonMapSchema(t *testing.T) {
 	// Note: items as string won't trigger the recursive processing since it checks for map[string]any
 	// So we test the actual error case with a nested structure
 	schema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
+		schemaKeyType: schemaTypeObject,
+		schemaKeyProperties: map[string]any{
 			"list": map[string]any{
-				"type": "array",
+				schemaKeyType: "array",
 				"items": map[string]any{
 					"anyOf": []any{
 						"not a map", // This will cause an error
@@ -941,7 +962,6 @@ func TestEnsureStrictJSONSchema_ArrayItemsNonMapSchema(t *testing.T) {
 	}
 
 	_, err := ensureStrictJSONSchema(schema)
-
 	if err == nil {
 		t.Errorf("expected SchemaExpectedMapError for invalid items anyOf entry, got nil")
 	} else {
@@ -955,13 +975,12 @@ func TestEnsureStrictJSONSchema_ArrayItemsNonMapSchema(t *testing.T) {
 func TestEnsureStrictJSONSchema_AnyOfWithNonMapVariant(t *testing.T) {
 	schema := map[string]any{
 		"anyOf": []any{
-			map[string]any{"type": "string"},
+			map[string]any{schemaKeyType: "string"},
 			"not a map", // This should cause an error
 		},
 	}
 
 	_, err := ensureStrictJSONSchema(schema)
-
 	if err == nil {
 		t.Errorf("expected SchemaExpectedMapError for invalid anyOf variant, got nil")
 	} else {
@@ -975,7 +994,7 @@ func TestEnsureStrictJSONSchema_AnyOfWithNonMapVariant(t *testing.T) {
 func TestEnsureStrictJSONSchema_OneOfWithNonMapVariant(t *testing.T) {
 	schema := map[string]any{
 		"oneOf": []any{
-			map[string]any{"type": "string"},
+			map[string]any{schemaKeyType: "string"},
 			42, // This should cause an error
 		},
 	}
@@ -983,14 +1002,17 @@ func TestEnsureStrictJSONSchema_OneOfWithNonMapVariant(t *testing.T) {
 	_, err := ensureStrictJSONSchema(schema)
 
 	var mapErr *SchemaExpectedMapError
+
 	if err == nil {
 		t.Errorf("expected SchemaExpectedMapError for invalid oneOf variant, got nil")
 	} else {
 		var ok bool
+
 		mapErr, ok = err.(*SchemaExpectedMapError)
 		if !ok {
 			t.Errorf("expected SchemaExpectedMapError, got: %T", err)
 		}
+
 		if mapErr != nil && mapErr.Got != 42 {
 			t.Errorf("expected error Got to be 42, got: %v", mapErr.Got)
 		}
@@ -1006,7 +1028,6 @@ func TestEnsureStrictJSONSchema_AllOfSingleWithNonMapEntry(t *testing.T) {
 	}
 
 	_, err := ensureStrictJSONSchema(schema)
-
 	if err == nil {
 		t.Errorf("expected SchemaExpectedMapError for invalid single allOf entry, got nil")
 	} else {
@@ -1020,7 +1041,7 @@ func TestEnsureStrictJSONSchema_AllOfSingleWithNonMapEntry(t *testing.T) {
 func TestEnsureStrictJSONSchema_AllOfMultipleWithNonMapEntry(t *testing.T) {
 	schema := map[string]any{
 		"allOf": []any{
-			map[string]any{"type": "object"},
+			map[string]any{schemaKeyType: schemaTypeObject},
 			12345, // Invalid entry
 		},
 	}
@@ -1028,14 +1049,17 @@ func TestEnsureStrictJSONSchema_AllOfMultipleWithNonMapEntry(t *testing.T) {
 	_, err := ensureStrictJSONSchema(schema)
 
 	var mapErr *SchemaExpectedMapError
+
 	if err == nil {
 		t.Errorf("expected SchemaExpectedMapError for invalid allOf entry, got nil")
 	} else {
 		var ok bool
+
 		mapErr, ok = err.(*SchemaExpectedMapError)
 		if !ok {
 			t.Errorf("expected SchemaExpectedMapError, got: %T", err)
 		}
+
 		if mapErr != nil && mapErr.Got != 12345 {
 			t.Errorf("expected error Got to be 12345, got: %v", mapErr.Got)
 		}
@@ -1048,8 +1072,8 @@ func TestEnsureStrictJSONSchema_RefExpansionWithNonMapResolved(t *testing.T) {
 		"$defs": map[string]any{
 			"NotAnObject": "just a string", // Invalid: should be a map
 		},
-		"type": "object",
-		"properties": map[string]any{
+		schemaKeyType: schemaTypeObject,
+		schemaKeyProperties: map[string]any{
 			"item": map[string]any{
 				"$ref":        "#/$defs/NotAnObject",
 				"description": "triggers expansion", // More than 1 key triggers ref expansion
@@ -1060,14 +1084,17 @@ func TestEnsureStrictJSONSchema_RefExpansionWithNonMapResolved(t *testing.T) {
 	_, err := ensureStrictJSONSchema(schema)
 
 	var mapErr *SchemaExpectedMapError
+
 	if err == nil {
 		t.Errorf("expected SchemaExpectedMapError when ref resolves to non-map, got nil")
 	} else {
 		var ok bool
+
 		mapErr, ok = err.(*SchemaExpectedMapError)
 		if !ok {
 			t.Errorf("expected SchemaExpectedMapError, got: %T", err)
 		}
+
 		if mapErr != nil && mapErr.Got != "just a string" {
 			t.Errorf("expected error Got to be 'just a string', got: %v", mapErr.Got)
 		}
@@ -1077,11 +1104,11 @@ func TestEnsureStrictJSONSchema_RefExpansionWithNonMapResolved(t *testing.T) {
 // TestEnsureStrictJSONSchema_PropertiesRecursiveError tests error propagation from nested properties.
 func TestEnsureStrictJSONSchema_PropertiesRecursiveError(t *testing.T) {
 	schema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
+		schemaKeyType: schemaTypeObject,
+		schemaKeyProperties: map[string]any{
 			"nested": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
+				schemaKeyType: schemaTypeObject,
+				schemaKeyProperties: map[string]any{
 					"deepNested": map[string]any{
 						"anyOf": []any{
 							true, // Invalid: should be a map
@@ -1093,7 +1120,6 @@ func TestEnsureStrictJSONSchema_PropertiesRecursiveError(t *testing.T) {
 	}
 
 	_, err := ensureStrictJSONSchema(schema)
-
 	if err == nil {
 		t.Errorf("expected SchemaExpectedMapError from deeply nested property, got nil")
 	} else {
