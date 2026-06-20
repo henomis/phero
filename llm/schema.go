@@ -21,11 +21,18 @@ import (
 	"strings"
 )
 
+const (
+	schemaTypeObject         = "object"
+	schemaKeyAdditionalProps = "additionalProperties"
+	schemaKeyProperties      = "properties"
+	schemaKeyType            = "type"
+)
+
 var emptySchema = map[string]any{
-	"additionalProperties": false,
-	"type":                 "object",
-	"properties":           map[string]any{},
-	"required":             []any{},
+	schemaKeyAdditionalProps: false,
+	schemaKeyType:                   schemaTypeObject,
+	schemaKeyProperties:      map[string]any{},
+	"required":               []any{},
 }
 
 // ensureStrictJSONSchema mutates the given JSON schema to ensure it conforms to
@@ -82,17 +89,17 @@ func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[str
 	}
 
 	// Handle object types and additionalProperties
-	typ, hasType := schema["type"]
-	if hasType && typ == "object" {
-		if _, hasAdditional := schema["additionalProperties"]; !hasAdditional {
-			schema["additionalProperties"] = false
-		} else if additionalProps := schema["additionalProperties"]; additionalProps == true {
+	typ, hasType := schema[schemaKeyType]
+	if hasType && typ == schemaTypeObject {
+		if _, hasAdditional := schema[schemaKeyAdditionalProps]; !hasAdditional {
+			schema[schemaKeyAdditionalProps] = false
+		} else if additionalProps := schema[schemaKeyAdditionalProps]; additionalProps == true {
 			return nil, ErrSchemaAdditionalPropertiesSet
 		}
 	}
 
 	// Process properties
-	if properties, hasProperties := schema["properties"]; hasProperties {
+	if properties, hasProperties := schema[schemaKeyProperties]; hasProperties {
 		if propsMap, isPropsMap := properties.(map[string]any); isPropsMap {
 			// Set all properties as required
 			required := make([]any, 0, len(propsMap))
@@ -105,7 +112,7 @@ func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[str
 			// Recursively process each property
 			newPropsMap := make(map[string]any, len(propsMap))
 			for key, propSchema := range propsMap {
-				newPath := append(append([]string{}, path...), "properties", key)
+				newPath := append(append([]string{}, path...), schemaKeyProperties, key)
 
 				processed, err := ensureStrictJSONSchemaRecursive(propSchema, newPath, root)
 				if err != nil {
@@ -115,7 +122,7 @@ func ensureStrictJSONSchemaRecursive(jsonSchema any, path []string, root map[str
 				newPropsMap[key] = processed
 			}
 
-			schema["properties"] = newPropsMap
+			schema[schemaKeyProperties] = newPropsMap
 		}
 	}
 

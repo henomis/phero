@@ -90,9 +90,11 @@ const MaxOutputChars = 30000
 
 const randomIDBytes = 8
 
+const rmRFSlash = "rm -rf /"
+
 // safeModeBlocklist contains substring patterns that are blocked when safe mode is enabled.
 var safeModeBlocklist = []string{
-	"rm -rf /",
+	rmRFSlash,
 	"rm -fr /",
 	"dd if=",
 	"mkfs",

@@ -151,7 +151,7 @@ func NewTool[T, R any](name, description string, handler func(ctx context.Contex
 		// Avoid panic in jsonschema when reflecting an anonymous empty struct
 		schema = &jsonschema.Schema{
 			Version:    jsonschema.Version,
-			Type:       "object",
+			Type:       schemaTypeObject,
 			Properties: jsonschema.NewProperties(),
 		}
 		if !reflector.AllowAdditionalProperties {

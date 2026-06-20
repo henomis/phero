@@ -28,6 +28,8 @@ import (
 	"github.com/henomis/phero/vectorstore"
 )
 
+const opEmbed = "embed"
+
 const (
 	contentKey               = "text"
 	defaultTopK              = 4
@@ -137,7 +139,7 @@ func (s *RAG) ingestBatch(ctx context.Context, docs []document.Document, offset 
 
 	vectors, err := s.embedder.Embed(ctx, texts)
 	if err != nil {
-		return &IngestError{Op: "embed", BatchStart: offset, BatchEnd: offset + len(docs), Cause: err}
+		return &IngestError{Op: opEmbed, BatchStart: offset, BatchEnd: offset + len(docs), Cause: err}
 	}
 
 	if len(vectors) != len(docs) {
@@ -258,7 +260,7 @@ func (s *RAG) Query(
 
 	vectors, err := s.embedder.Embed(ctx, []string{queryText})
 	if err != nil {
-		return nil, &QueryError{Op: "embed", Cause: err}
+		return nil, &QueryError{Op: opEmbed, Cause: err}
 	}
 
 	if len(vectors) != 1 {

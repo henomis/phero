@@ -165,15 +165,15 @@ func bytesToUTF8WithHexEscapes(b []byte) string {
 	return out.String()
 }
 
-func truncateRunes(s string, max int) string {
-	if max <= 0 {
+func truncateRunes(s string, limit int) string {
+	if limit <= 0 {
 		return ""
 	}
 
 	r := []rune(s)
-	if len(r) <= max {
+	if len(r) <= limit {
 		return s
 	}
 
-	return string(r[:max])
+	return string(r[:limit])
 }

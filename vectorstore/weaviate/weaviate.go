@@ -36,8 +36,9 @@ var _ vectorstore.Store = (*Store)(nil)
 var idNamespace = uuid.MustParse("1b671a64-40d5-491e-99b0-da01ff1f3341")
 
 const (
-	propID      = "pheroId"
-	propPayload = "pheroPayload"
+	propID          = "pheroId"
+	propPayload     = "pheroPayload"
+	weaviateTypeText = "text"
 )
 
 // Distance is the Weaviate vector-index distance metric.
@@ -151,8 +152,8 @@ func (s *Store) EnsureCollection(ctx context.Context) error {
 			"distance": string(s.distance),
 		},
 		Properties: []*models.Property{
-			{Name: propID, DataType: []string{"text"}},
-			{Name: propPayload, DataType: []string{"text"}},
+			{Name: propID, DataType: []string{weaviateTypeText}},
+			{Name: propPayload, DataType: []string{weaviateTypeText}},
 		},
 	}
 	if createErr := s.client.Schema().ClassCreator().WithClass(class).Do(ctx); createErr != nil {

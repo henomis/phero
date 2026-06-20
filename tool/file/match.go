@@ -22,6 +22,8 @@ import (
 	"strings"
 )
 
+const dotDot = ".."
+
 func resolveSearchRoot(workingDir, inputPath string) (string, error) {
 	if strings.TrimSpace(inputPath) == "" {
 		if strings.TrimSpace(workingDir) != "" {
@@ -75,7 +77,7 @@ func resolveSearchRoot(workingDir, inputPath string) (string, error) {
 		return "", err
 	}
 
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+	if rel == dotDot || strings.HasPrefix(rel, dotDot+string(os.PathSeparator)) {
 		return "", ErrPathOutsideWorkingDirectory
 	}
 

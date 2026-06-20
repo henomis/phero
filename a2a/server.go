@@ -32,7 +32,10 @@ import (
 // restPathPrefix is the URL path segment used for the HTTP+JSON/SSE transport.
 // It is appended to baseURL in AgentCard() and stripped before routing in
 // Mount(), keeping both sites consistent via a single definition.
-const restPathPrefix = "/rest"
+const (
+	restPathPrefix = "/rest"
+	mimeTextPlain  = "text/plain"
+)
 
 // ServerOption configures a [Server].
 type ServerOption func(*serverConfig)
@@ -63,13 +66,13 @@ func WithSkills(skills ...sdka2a.AgentSkill) ServerOption {
 }
 
 // WithInputModes overrides the default input MIME types in the AgentCard.
-// Defaults to ["text/plain"].
+// Defaults to [mimeTextPlain].
 func WithInputModes(modes ...string) ServerOption {
 	return func(cfg *serverConfig) { cfg.inputModes = modes }
 }
 
 // WithOutputModes overrides the default output MIME types in the AgentCard.
-// Defaults to ["text/plain"].
+// Defaults to [mimeTextPlain].
 func WithOutputModes(modes ...string) ServerOption {
 	return func(cfg *serverConfig) { cfg.outputModes = modes }
 }
@@ -214,8 +217,8 @@ func New(a *agent.Agent, baseURL string, opts ...ServerOption) (*Server, error) 
 
 	cfg := &serverConfig{
 		version:     "1.0",
-		inputModes:  []string{"text/plain"},
-		outputModes: []string{"text/plain"},
+		inputModes:  []string{mimeTextPlain},
+		outputModes: []string{mimeTextPlain},
 	}
 
 	for _, o := range opts {

@@ -24,6 +24,8 @@ import (
 	"github.com/henomis/phero/trace"
 )
 
+const noTools = "none"
+
 // ANSI colour/style escape codes.
 const (
 	ansiReset     = "\033[0m"
@@ -113,7 +115,7 @@ func (t *Tracer) format(event trace.Event) string {
 	case trace.AgentRunSummaryEvent:
 		ts := e.Timestamp.Format("15:04:05.000")
 		summary := e.Summary
-		tools := "none"
+		tools := noTools
 
 		if len(summary.Tools) > 0 {
 			parts := make([]string, 0, len(summary.Tools))
@@ -156,7 +158,7 @@ func (t *Tracer) format(event trace.Event) string {
 		agent := agentLabel(e.AgentName)
 		iter := iterLabel(e.Iteration)
 
-		tools := "none"
+		tools := noTools
 		if len(e.ToolNames) > 0 {
 			tools = strings.Join(e.ToolNames, ", ")
 		}

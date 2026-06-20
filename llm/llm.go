@@ -31,6 +31,13 @@ type ContentType string
 const mimeSniffBytes = 512
 
 const (
+	mimeImageJPEG = "image/jpeg"
+	mimeImagePNG  = "image/png"
+	mimeImageGIF  = "image/gif"
+	mimeImageWEBP = "image/webp"
+)
+
+const (
 	// ContentTypeText is a plain-text content part.
 	ContentTypeText ContentType = "text"
 	// ContentTypeImageURL is an image referenced by URL.
@@ -111,7 +118,7 @@ func ImageFile(path string) (ContentPart, error) {
 
 	mimeType := detectImageMIMEType(data, path)
 	switch mimeType {
-	case "image/jpeg", "image/png", "image/gif", "image/webp":
+	case mimeImageJPEG, mimeImagePNG, mimeImageGIF, mimeImageWEBP:
 		// accepted
 	default:
 		return ContentPart{}, fmt.Errorf("llm.ImageFile: unsupported image type %q for %q", mimeType, path)
@@ -139,13 +146,13 @@ func detectImageMIMEType(data []byte, path string) string {
 	// Fall back to extension.
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".jpg", ".jpeg":
-		return "image/jpeg"
+		return mimeImageJPEG
 	case ".png":
-		return "image/png"
+		return mimeImagePNG
 	case ".gif":
-		return "image/gif"
+		return mimeImageGIF
 	case ".webp":
-		return "image/webp"
+		return mimeImageWEBP
 	}
 
 	return mt

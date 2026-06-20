@@ -57,7 +57,7 @@ func resolveToolPath(workingDir, inputPath string) (string, error) {
 		return "", fmt.Errorf("compare path with working directory: %w", err)
 	}
 
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+	if rel == dotDot || strings.HasPrefix(rel, dotDot+string(os.PathSeparator)) {
 		return "", ErrPathOutsideWorkingDirectory
 	}
 

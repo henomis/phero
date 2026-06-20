@@ -105,7 +105,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	attachmentsOkStr := "false"
 	if s.cfg.attachmentsOk {
-		attachmentsOkStr = "true"
+		attachmentsOkStr = attachmentsOkTrue
 	}
 
 	metadata := map[string]string{
@@ -118,7 +118,7 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	svc, err := natsio.AddService(s.nc, natsio.Config{
-		Name:        "agents",
+		Name:        svcNameAgents,
 		Version:     s.cfg.version,
 		Description: fmt.Sprintf("%s/%s — %s", s.cfg.agentID, s.owner, s.name),
 		Metadata:    metadata,
@@ -136,7 +136,7 @@ func (s *Server) Start(ctx context.Context) error {
 	if addErr := svc.AddEndpoint("prompt",
 		natsio.ContextHandler(ctx, s.handlePrompt),
 		natsio.WithEndpointSubject(promptSubject),
-		natsio.WithEndpointQueueGroup("agents"),
+		natsio.WithEndpointQueueGroup(svcNameAgents),
 		natsio.WithEndpointMetadata(map[string]string{
 			"max_payload":    s.cfg.maxPayload,
 			"attachments_ok": attachmentsOkStr,
@@ -149,7 +149,7 @@ func (s *Server) Start(ctx context.Context) error {
 	if addErr := svc.AddEndpoint("status",
 		natsio.ContextHandler(ctx, s.handleStatus),
 		natsio.WithEndpointSubject(statusSubject),
-		natsio.WithEndpointQueueGroup("agents"),
+		natsio.WithEndpointQueueGroup(svcNameAgents),
 	); addErr != nil {
 		_ = svc.Stop()
 		return fmt.Errorf("nats: register status endpoint: %w", addErr)

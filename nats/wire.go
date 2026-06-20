@@ -23,6 +23,13 @@ import (
 	natsclient "github.com/nats-io/nats.go"
 )
 
+const (
+	chunkTypeResponse  = "response"
+	chunkTypeStatus    = "status"
+	svcNameAgents      = "agents"
+	attachmentsOkTrue  = "true"
+)
+
 // envelope is the JSON request payload (§5.1).
 type envelope struct {
 	Prompt      string       `json:"prompt"`
@@ -122,7 +129,7 @@ func encodeResponseChunk(text string) []byte {
 		Data string `json:"data"`
 	}
 
-	b, _ := json.Marshal(chunk{Type: "response", Data: text})
+	b, _ := json.Marshal(chunk{Type: chunkTypeResponse, Data: text})
 
 	return b
 }
@@ -134,7 +141,7 @@ func encodeStatusChunk(status string) []byte {
 		Data string `json:"data"`
 	}
 
-	b, _ := json.Marshal(chunk{Type: "status", Data: status})
+	b, _ := json.Marshal(chunk{Type: chunkTypeStatus, Data: status})
 
 	return b
 }

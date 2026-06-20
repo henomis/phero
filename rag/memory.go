@@ -67,22 +67,22 @@ func (m *Memory) Retrieve(ctx context.Context, query string) ([]llm.Message, err
 	return m.rag.retrieve(ctx, query)
 }
 
-func (s *RAG) save(ctx context.Context, messages []llm.Message) error {
+func (r *RAG) save(ctx context.Context, messages []llm.Message) error {
 	content := formatSessionContent(messages)
 
-	if err := s.ensureCollection(ctx); err != nil {
+	if err := r.ensureCollection(ctx); err != nil {
 		return err
 	}
 
-	return s.ingestBatch(ctx, []document.Document{{Content: content}}, 0)
+	return r.ingestBatch(ctx, []document.Document{{Content: content}}, 0)
 }
 
-func (s *RAG) clear(ctx context.Context) error {
-	return s.store.Clear(ctx)
+func (r *RAG) clear(ctx context.Context) error {
+	return r.store.Clear(ctx)
 }
 
-func (s *RAG) retrieve(ctx context.Context, query string) ([]llm.Message, error) {
-	points, err := s.Query(ctx, query)
+func (r *RAG) retrieve(ctx context.Context, query string) ([]llm.Message, error) {
+	points, err := r.Query(ctx, query)
 	if err != nil {
 		return nil, err
 	}

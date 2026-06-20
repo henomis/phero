@@ -21,6 +21,11 @@ import (
 	"github.com/henomis/phero/llm"
 )
 
+const (
+	stageInput  = "input"
+	stageOutput = "output"
+)
+
 // MessageGuard checks the outbound message list before it is sent to the model.
 // Returning a non-nil error blocks execution.
 type MessageGuard func(ctx context.Context, messages []llm.Message) error
@@ -115,7 +120,7 @@ type guardrailsLLM struct {
 func (g *guardrailsLLM) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
 	for _, guard := range g.cfg.messageGuards {
 		if err := guard.guard(ctx, messages); err != nil {
-			return nil, &GuardrailError{Stage: "input", Name: guard.name, Err: err}
+			return nil, &GuardrailError{Stage: stageInput, Name: guard.name, Err: err}
 		}
 	}
 
@@ -126,7 +131,7 @@ func (g *guardrailsLLM) Execute(ctx context.Context, messages []llm.Message, too
 
 	for _, guard := range g.cfg.resultGuards {
 		if guardErr := guard.guard(ctx, result); guardErr != nil {
-			return nil, &GuardrailError{Stage: "output", Name: guard.name, Err: guardErr}
+			return nil, &GuardrailError{Stage: stageOutput, Name: guard.name, Err: guardErr}
 		}
 	}
 

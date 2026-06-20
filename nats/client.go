@@ -253,7 +253,7 @@ func (s *Stream) Text(ctx context.Context) (string, error) {
 			continue // §6.6: silently ignore unknown or unparseable chunks
 		}
 
-		if chunk.Type == "response" {
+		if chunk.Type == chunkTypeResponse {
 			sb.WriteString(decodeResponseText(chunk.Data))
 		}
 		// "status" ack chunks and unknown types are silently ignored (§6.4, §6.6).
@@ -289,7 +289,7 @@ func parseAgentInfo(data []byte) *AgentInfo {
 		return nil
 	}
 
-	if svc.Name != "agents" {
+	if svc.Name != svcNameAgents {
 		return nil
 	}
 
@@ -315,12 +315,12 @@ func parseAgentInfo(data []byte) *AgentInfo {
 				}
 			}
 
-			if v := ep.Metadata["attachments_ok"]; v == "true" {
+			if v := ep.Metadata["attachments_ok"]; v == attachmentsOkTrue {
 				info.AttachmentsOk = true
 			}
 
 			info.Name = instanceNameFromSubject(ep.Subject)
-		case "status":
+		case chunkTypeStatus:
 			info.StatusSubject = ep.Subject
 		}
 	}
