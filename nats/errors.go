@@ -14,7 +14,10 @@
 
 package nats
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 var (
 	// ErrNilConn is returned when a nil *nats.Conn is passed to New or NewClient.
@@ -56,3 +59,36 @@ var (
 	// decoded as a valid envelope (§5.3).
 	ErrMalformedEnvelope = errors.New("nats: malformed request envelope")
 )
+
+// ServiceError carries the structured detail of a NATS micro service error
+// response (§9.1): the numeric status Code and its Description. It wraps
+// ErrServiceError, so errors.Is(err, ErrServiceError) keeps matching; use
+// errors.As(err, &se) to read the fields. Callers can classify the fault
+// without parsing the error string — a 4xx Code (see ClientError) means the
+// agent rejected the request as malformed, so a retry cannot help, whereas a
+// 5xx Code is a transient server-side failure.
+type ServiceError struct {
+	// Code is the micro service error code (Nats-Service-Error-Code header),
+	// 0 when the agent sent a non-numeric or absent code.
+	Code int
+	// Description is the human-readable error text (Nats-Service-Error header).
+	Description string
+}
+
+// Error renders the same form the package has always produced
+// ("nats: agent returned a service error: code=<n> <desc>") so existing log
+// output and string matches are unaffected.
+func (e *ServiceError) Error() string {
+	return fmt.Sprintf("%s: code=%d %s", ErrServiceError.Error(), e.Code, e.Description)
+}
+
+// Unwrap reports ErrServiceError so errors.Is(err, ErrServiceError) matches a
+// *ServiceError.
+func (e *ServiceError) Unwrap() error { return ErrServiceError }
+
+// ClientError reports whether the code is 4xx-class — the agent rejected the
+// request as malformed (a permanent fault), as opposed to a 5xx transient
+// server-side failure.
+func (e *ServiceError) ClientError() bool {
+	return e.Code >= 400 && e.Code < 500
+}
