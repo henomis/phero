@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	natsclient "github.com/nats-io/nats.go"
@@ -164,12 +165,16 @@ func isServiceError(msg *natsclient.Msg) bool {
 	return msg.Header.Get(errorCodeHeader) != ""
 }
 
-// parseServiceError extracts error information from a service-error message (§9.1).
+// parseServiceError extracts error information from a service-error message
+// (§9.1) into a typed *ServiceError. A non-numeric or absent code yields Code 0,
+// which ServiceError.ClientError treats as a transient (non-4xx) fault.
 func parseServiceError(msg *natsclient.Msg) error {
-	code := msg.Header.Get(errorCodeHeader)
-	desc := msg.Header.Get(errorHeader)
+	code, _ := strconv.Atoi(msg.Header.Get(errorCodeHeader))
 
-	return fmt.Errorf("%w: code=%s %s", ErrServiceError, code, desc)
+	return &ServiceError{
+		Code:        code,
+		Description: msg.Header.Get(errorHeader),
+	}
 }
 
 // decodeResponseText extracts the text value from a response chunk data field.
