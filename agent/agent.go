@@ -388,10 +388,11 @@ func (a *Agent) processToolCalls(
 	if emit != nil {
 		for _, toolCall := range toolCalls {
 			emit(Event{
-				Type:      EventToolCall,
-				ToolName:  toolCall.Function.Name,
-				ToolArgs:  toolCall.Function.Arguments,
-				Iteration: iteration,
+				Type:       EventToolCall,
+				ToolCallID: toolCall.ID,
+				ToolName:   toolCall.Function.Name,
+				ToolArgs:   toolCall.Function.Arguments,
+				Iteration:  iteration,
 			})
 		}
 	}
@@ -416,6 +417,7 @@ func (a *Agent) processToolCalls(
 		for i, result := range results {
 			emit(Event{
 				Type:       EventToolResult,
+				ToolCallID: toolCalls[i].ID,
 				ToolName:   toolCalls[i].Function.Name,
 				ToolResult: llm.TextContent(result.Parts...),
 				ToolError:  result.ToolError,

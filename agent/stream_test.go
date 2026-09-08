@@ -125,11 +125,16 @@ func TestRunStream_EmitsToolEventsViaBufferedFallback(t *testing.T) {
 
 		switch ev.Type {
 		case agent.EventToolCall:
-			if ev.ToolName == "echo_tool" {
+			if ev.ToolCallID == "c1" &&
+				ev.ToolName == "echo_tool" &&
+				ev.ToolArgs == `{}` {
 				sawToolCall = true
 			}
 		case agent.EventToolResult:
-			if ev.ToolName == "echo_tool" && ev.ToolResult == "echoed" && !ev.ToolError {
+			if ev.ToolCallID == "c1" &&
+				ev.ToolName == "echo_tool" &&
+				ev.ToolResult == "echoed" &&
+				!ev.ToolError {
 				sawToolResult = true
 			}
 		case agent.EventDone:

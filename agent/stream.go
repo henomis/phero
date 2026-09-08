@@ -47,6 +47,8 @@ type Event struct {
 	TextDelta string
 	// ReasoningDelta holds incremental reasoning text (EventReasoningDelta).
 	ReasoningDelta string
+	// ToolCallID correlates EventToolCall with its EventToolResult.
+	ToolCallID string
 	// ToolName is the tool being called or that returned (EventToolCall / EventToolResult).
 	ToolName string
 	// ToolArgs is the raw JSON argument string of a tool call (EventToolCall).
