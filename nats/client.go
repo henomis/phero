@@ -39,9 +39,12 @@ type AgentInfo struct {
 	Agent string
 	// Owner is the metadata.owner value.
 	Owner string
-	// Session is the optional metadata.session value.
+	// Session is the optional metadata.session value — the session the agent was
+	// served with, not the instance name it produces. Filter on it with
+	// [FilterBySession].
 	Session string
 	// Name is the instance name — the 5th token of the prompt endpoint subject.
+	// For a sessioned agent that is [InstanceName](name, session).
 	Name string
 	// ProtocolVersion is the metadata.protocol_version value.
 	ProtocolVersion string
@@ -101,8 +104,18 @@ func NewClient(nc *natsclient.Conn, opts ...ClientOption) *Client {
 // last response, capped by a 2 s absolute deadline (both configurable via
 // [WithDiscoveryTimeout]). Any DiscoverOption filters are applied client-side.
 //
-// Returns [ErrNoAgentsFound] if the filtered result set is empty.
-func (c *Client) Discover(_ context.Context, opts ...DiscoverOption) ([]*AgentHandle, error) {
+// ctx bounds the collection: an earlier deadline wins over the discovery
+// timeout, and a cancellation ends it immediately. That matters most during a
+// shutdown, where a resolve that ignored its context would spend the caller's
+// whole drain budget waiting for replies nobody is going to use.
+//
+// Returns [ErrNoAgentsFound] if the filtered result set is empty, or ctx's error
+// if the context ended before anything was collected.
+func (c *Client) Discover(ctx context.Context, opts ...DiscoverOption) ([]*AgentHandle, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	filter := &discoverFilter{}
 
 	for _, opt := range opts {
@@ -124,6 +137,9 @@ func (c *Client) Discover(_ context.Context, opts ...DiscoverOption) ([]*AgentHa
 	}
 
 	deadline := time.Now().Add(c.cfg.discoveryTimeout)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
+	}
 
 	var infos []*AgentHandle
 
@@ -135,9 +151,13 @@ func (c *Client) Discover(_ context.Context, opts ...DiscoverOption) ([]*AgentHa
 
 		timeout := min(c.cfg.stallTimeout, remaining)
 
-		msg, msgErr := sub.NextMsg(timeout)
+		msgCtx, cancel := context.WithTimeout(ctx, timeout)
+		msg, msgErr := sub.NextMsgWithContext(msgCtx)
+
+		cancel()
+
 		if msgErr != nil {
-			break // stall or deadline — stop collecting
+			break // stall, deadline or cancellation — stop collecting
 		}
 
 		info := parseAgentInfo(msg.Data)
@@ -153,6 +173,12 @@ func (c *Client) Discover(_ context.Context, opts ...DiscoverOption) ([]*AgentHa
 	}
 
 	if len(infos) == 0 {
+		// A cancelled context is a different answer from "nobody is there", and
+		// a caller retrying on ErrNoAgentsFound must not spin on a dead context.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+
 		return nil, ErrNoAgentsFound
 	}
 
@@ -162,7 +188,16 @@ func (c *Client) Discover(_ context.Context, opts ...DiscoverOption) ([]*AgentHa
 // Prompt sends a plain-text prompt to the agent described by info and returns
 // a [Stream] for consuming the streamed response.  The caller must call
 // [Stream.Close] when done.
-func (c *Client) Prompt(_ context.Context, info *AgentInfo, text string) (*Stream, error) {
+//
+// An already-ended ctx returns its error without publishing: the send itself
+// does not block, but starting work on behalf of a call that is already over
+// means an agent runs — and bills — a prompt with nobody left to read it.
+// Reading the reply is bounded by the ctx passed to [Stream.Text].
+func (c *Client) Prompt(ctx context.Context, info *AgentInfo, text string) (*Stream, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	if strings.TrimSpace(text) == "" {
 		return nil, ErrEmptyPrompt
 	}
@@ -174,8 +209,19 @@ func (c *Client) Prompt(_ context.Context, info *AgentInfo, text string) (*Strea
 		return nil, fmt.Errorf("nats: encode prompt: %w", err)
 	}
 
+	// Both caps, because they are different facts. The advertised one is the
+	// agent's policy; the connection's is what the transport will actually
+	// carry, and exceeding it fails at publish as `nats: maximum payload
+	// exceeded` — the opaque error ErrPayloadTooLarge exists to replace. The
+	// comparison is exact: nats.go rejects on len(data)+len(headers), and a
+	// prompt request carries no headers.
 	if info.MaxPayloadBytes > 0 && int64(len(body)) > info.MaxPayloadBytes {
 		return nil, ErrPayloadTooLarge
+	}
+
+	if connLimit := c.nc.MaxPayload(); connLimit > 0 && int64(len(body)) > connLimit {
+		return nil, fmt.Errorf("%w: %d bytes exceeds this connection's max_payload (%d bytes)",
+			ErrPayloadTooLarge, len(body), connLimit)
 	}
 
 	inbox := c.nc.NewInbox()
@@ -293,16 +339,16 @@ func parseAgentInfo(data []byte) *AgentInfo {
 		return nil
 	}
 
-	if svc.Metadata["protocol_version"] == "" {
+	if svc.Metadata[metaProtocolVersion] == "" {
 		return nil
 	}
 
 	info := &AgentInfo{
 		InstanceID:      svc.ID,
-		Agent:           svc.Metadata["agent"],
-		Owner:           svc.Metadata["owner"],
-		Session:         svc.Metadata["session"],
-		ProtocolVersion: svc.Metadata["protocol_version"],
+		Agent:           svc.Metadata[metaAgent],
+		Owner:           svc.Metadata[metaOwner],
+		Session:         svc.Metadata[metaSession],
+		ProtocolVersion: svc.Metadata[metaProtocolVersion],
 	}
 
 	for _, ep := range svc.Endpoints {
@@ -354,6 +400,10 @@ func matchFilter(info *AgentInfo, f *discoverFilter) bool {
 	}
 
 	if f.name != "" && info.Name != f.name {
+		return false
+	}
+
+	if f.session != "" && info.Session != f.session {
 		return false
 	}
 

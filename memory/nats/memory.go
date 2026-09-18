@@ -22,6 +22,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 
+	"github.com/henomis/phero/internal/natskv"
 	"github.com/henomis/phero/llm"
 	"github.com/henomis/phero/memory"
 )
@@ -68,6 +69,23 @@ func New(kv nats.KeyValue, sessionID string, options ...Option) (*Memory, error)
 	}
 
 	return m, nil
+}
+
+// Open binds the JetStream key-value bucket named bucket on nc — creating it if
+// it does not exist — and returns a Memory over it, scoped to sessionID.
+//
+// It exists because [New] takes an already-provisioned bucket, leaving every
+// caller to write the same create-then-bind dance: CreateKeyValue reports
+// ErrStreamNameAlreadyInUse for a bucket that is already there, which is the
+// normal case for every process after the first and a race for two starting at
+// once. Treating that as an error means a second replica cannot start.
+func Open(nc *nats.Conn, bucket, sessionID string, options ...Option) (*Memory, error) {
+	kv, err := natskv.OpenBucket(nc, bucket)
+	if err != nil {
+		return nil, err
+	}
+
+	return New(kv, sessionID, options...)
 }
 
 // WithSummarization enables automatic summarization when the number of stored

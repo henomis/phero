@@ -99,3 +99,47 @@ func TestIsAgentOnline_IndependentFromInstanceIndex(t *testing.T) {
 		t.Error("agent key must not resolve through the instance index")
 	}
 }
+
+// A sub-second cadence has no representation in interval_s (§8.1 makes it an
+// integer number of seconds), and truncating it to 0 used to tell every reader
+// to compute a zero staleness threshold — so an agent beating five times a
+// second advertised itself as permanently offline. This was invisible until
+// something actually depended on liveness for correctness.
+func TestHeartbeatIntervalSecondsFloorsAtOne(t *testing.T) {
+	cases := []struct {
+		interval time.Duration
+		want     int
+	}{
+		{30 * time.Second, 30},
+		{time.Second, 1},
+		{200 * time.Millisecond, 1},
+		{time.Nanosecond, 1},
+		{0, 1},
+		{-time.Second, 1},
+	}
+
+	for _, tc := range cases {
+		if got := heartbeatIntervalSeconds(tc.interval); got != tc.want {
+			t.Errorf("heartbeatIntervalSeconds(%s) = %d, want %d", tc.interval, got, tc.want)
+		}
+	}
+}
+
+// The reader's half of the same defect: a beat carrying no interval_s at all —
+// which a peer implementation can produce by omitting the field — must not read
+// as stale on arrival.
+func TestZeroIntervalBeatIsNotInstantlyStale(t *testing.T) {
+	tr := newTestTracker()
+	tr.byAgent[agentKey("acme", "worker")] = beat(0, 10*time.Millisecond)
+
+	if !tr.IsAgentOnline("acme", "worker") {
+		t.Error("a fresh beat with no interval_s must not read as offline")
+	}
+
+	// It must still go stale eventually, on the assumed one-second cadence.
+	tr.byAgent[agentKey("acme", "old")] = beat(0, 10*time.Second)
+
+	if tr.IsAgentOnline("acme", "old") {
+		t.Error("a beat older than 3× the assumed interval must read as offline")
+	}
+}

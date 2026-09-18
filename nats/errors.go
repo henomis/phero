@@ -26,6 +26,9 @@ var (
 	// ErrNilHandler is returned when a nil Handler is passed to New.
 	ErrNilHandler = errors.New("nats: handler must not be nil")
 
+	// ErrNilClient is returned when a nil *Client is passed to NewResolver.
+	ErrNilClient = errors.New("nats: client must not be nil")
+
 	// ErrEmptyOwner is returned when the owner field is empty.
 	ErrEmptyOwner = errors.New("nats: owner must not be empty")
 
@@ -58,7 +61,77 @@ var (
 	// ErrMalformedEnvelope is returned when the request payload cannot be
 	// decoded as a valid envelope (§5.3).
 	ErrMalformedEnvelope = errors.New("nats: malformed request envelope")
+
+	// ErrDrainIncomplete is returned by [Server.Drain], and by [Server.Start] on
+	// shutdown, when prompt handlers were still running after the drain budget
+	// was spent *and* cancelling them did not make them return. The server has
+	// stopped accepting and its subscriptions are gone; those goroutines are not.
+	ErrDrainIncomplete = errors.New("nats: drain did not complete")
+
+	// ErrServerStopped is returned by [Server.Start] on a Server that has
+	// already drained. A Server serves once; build a new one to serve again.
+	ErrServerStopped = errors.New("nats: server has been stopped")
+
+	// ErrInvalidMaxPayload is returned by [New] when the advertised max_payload
+	// cannot be parsed, or when a configured one exceeds what the connection
+	// will carry.
+	ErrInvalidMaxPayload = errors.New("nats: invalid max_payload")
+
+	// ErrInvalidSubjectToken is returned by [ValidateSubjectToken], and by [New]
+	// for an owner, name, session or agent id that cannot safely become a token
+	// of the protocol's subject hierarchy (§3.2).
+	ErrInvalidSubjectToken = errors.New("nats: invalid subject token")
 )
+
+// Permanent reports whether err is a fault that retrying cannot fix.
+//
+// The taxonomy belongs here, beside the errors it classifies, because a caller
+// that enumerates them is holding a copy of phero's knowledge: when phero adds
+// an error kind, that copy silently misfiles it. Misfiling in the direction
+// callers default to — retryable — means a new permanent fault is retried to
+// exhaustion at LLM prices before it is reported, and reported as "gave up"
+// rather than as the fault that caused it.
+//
+// Permanent covers a request the agent will reject however often it arrives (an
+// empty or oversized prompt, a rejected attachment, a malformed envelope, a
+// 4xx-class service error) and the construction faults that mean the caller is
+// misconfigured (a nil dependency, an empty or invalid identifier).
+//
+// Everything else is treated as worth another attempt, including
+// [ErrNoAgentsFound] and [ErrStreamTimeout]: nobody answering *now* and a
+// stream going quiet are both states a later attempt may not meet. Context
+// errors are deliberately not permanent — the deadline belongs to the caller,
+// and a fresh one may well succeed.
+func Permanent(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	switch {
+	case errors.Is(err, ErrEmptyPrompt),
+		errors.Is(err, ErrPayloadTooLarge),
+		errors.Is(err, ErrAttachmentsNotAllowed),
+		errors.Is(err, ErrMalformedEnvelope),
+		errors.Is(err, ErrInvalidSubjectToken),
+		errors.Is(err, ErrInvalidMaxPayload),
+		errors.Is(err, ErrNilConn),
+		errors.Is(err, ErrNilHandler),
+		errors.Is(err, ErrNilClient),
+		errors.Is(err, ErrEmptyOwner),
+		errors.Is(err, ErrEmptyName),
+		errors.Is(err, ErrServerStopped):
+		return true
+	}
+
+	// A 4xx service error means the agent rejected the request as malformed.
+	// Read from the typed error rather than the string.
+	var svcErr *ServiceError
+	if errors.As(err, &svcErr) {
+		return svcErr.ClientError()
+	}
+
+	return false
+}
 
 // ServiceError carries the structured detail of a NATS micro service error
 // response (§9.1): the numeric status Code and its Description. It wraps
