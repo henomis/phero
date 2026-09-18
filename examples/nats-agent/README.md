@@ -11,7 +11,8 @@ This example shows:
 ## What you'll learn
 
 - How to use `nats.New` / `nats.NewClient` to expose and call agents over NATS
-- How `nats.Client.AsTool()` lets one Phero agent call another as a tool
+- How `nats.Client.AsTool()` lets one Phero agent call another as a tool, and
+  when to reach for `nats.Resolver.AsTool()` instead
 - That any client speaking the NATS Agent Protocol — not just Phero — can discover and prompt Phero agents
 
 ## Requirements
@@ -173,6 +174,28 @@ text, _ := stream.Text(ctx)
 tool, _ := c.AsTool(agents[0], "remote-agent", "Call the remote NATS agent")
 localAgent.AddTool(tool)
 ```
+
+### Long-lived callers: use a Resolver
+
+`Client.AsTool` binds the one `AgentInfo` that discovery returned, for the life
+of the tool. That is fine for a script that discovers, prompts and exits. It is
+the wrong shape for anything that stays up: when the target restarts it comes
+back at a new instance, and a tool holding the old snapshot keeps prompting an
+address that is gone.
+
+`Resolver` joins discovery to the heartbeat tracker — it caches each handle,
+serves it only while the agent is still beating, and re-resolves after a failed
+prompt:
+
+```go
+resolver, _ := natsagent.NewResolver(c)
+defer resolver.Close()
+
+tool, _ := resolver.AsTool("alice", "demo", "remote-agent", "Call the remote NATS agent")
+localAgent.AddTool(tool)
+```
+
+The [multi-agent orchestrator](multi-agent/orchestrator/) uses this form.
 
 ## Note on conversation memory
 

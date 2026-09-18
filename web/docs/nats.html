@@ -54,6 +54,11 @@
           prompts. <code>Client.AsTool()</code> wraps a remote agent as an <code>llm.Tool</code> that any local
           Phero agent can call.
         </li>
+        <li>
+          <strong><code>nats.Resolver</code></strong>: combines discovery with heartbeat tracking for callers
+          that stay running. It caches each agent's handle, reuses it only while the agent keeps sending
+          heartbeats, and looks the agent up again after a failed prompt.
+        </li>
       </ul>
       <p>
         Unlike the <a href="a2a.html">A2A</a> transport (HTTP-based), the NATS transport uses pub/sub messaging,
@@ -71,6 +76,7 @@
 
 import (
     "context"
+    "log"
     "os"
     "os/signal"
     "syscall"
@@ -95,14 +101,102 @@ func main() {
     ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
     defer stop()
 
-    srv.Start(ctx) // blocks until ctx is cancelled
+    // Serves until ctx is cancelled, then drains in-flight prompts.
+    if err := srv.Start(ctx); err != nil {
+        log.Println(err)
+    }
 }</code></pre>
 
       <p>
         <code>New(nc, agent, owner, name)</code> registers the agent as a NATS micro service.
         The <code>owner</code> and <code>name</code> values become the 4th and 5th tokens of the prompt subject
         (<code>agents.prompt.phero.&lt;owner&gt;.&lt;name&gt;</code>).
-        <code>Start(ctx)</code> blocks until the context is cancelled, then drains cleanly.
+        <code>Start(ctx)</code> serves until the context is cancelled, then drains (see
+        <a href="#graceful-shutdown">Graceful shutdown</a>). A <code>Server</code> serves once: calling
+        <code>Start</code> again after it has drained returns <code>ErrServerStopped</code>.
+      </p>
+    </section>
+
+    <section id="graceful-shutdown">
+      <h2>Graceful shutdown</h2>
+      <p>
+        Cancelling the context passed to <code>Start</code> shuts the server down. It does not abandon prompts
+        that are already running. The shutdown happens in this order:
+      </p>
+      <ol>
+        <li>The prompt endpoint is unsubscribed, so NATS sends new prompts to another replica in the
+          <code>agents</code> queue group. A prompt already buffered on this instance gets a
+          <code>503 server is draining</code> reply instead of being served.</li>
+        <li>Heartbeats stop, so this instance no longer shows as live.</li>
+        <li>Handlers that are already running keep their own context and finish their LLM call.</li>
+        <li>If they are still running when most of the drain budget is used up, their context is cancelled. The
+          last fifth of the budget is left for them to return.</li>
+      </ol>
+      <p>
+        <code>WithDrainTimeout(d)</code> sets the total budget for all of this (default 30 s). Set it to cover a
+        typical completion: those calls are already paid for. A zero or negative value cancels in-flight handlers
+        immediately. If handlers still have not returned when the budget runs out, <code>Start</code> returns
+        <code>ErrDrainIncomplete</code>.
+      </p>
+      <p>
+        To trigger the same shutdown from elsewhere, for example from a signal handler, call
+        <code>srv.Drain(ctx)</code>. It is safe to call concurrently and more than once, and it also makes a
+        blocked <code>Start</code> return. The <code>ctx</code> you pass limits only how long that caller waits;
+        it does not limit the drain itself.
+      </p>
+
+      <pre><code class="language-go">srv, _ := natsagent.New(nc, a, "alice", "demo",
+    natsagent.WithDrainTimeout(2*time.Minute),
+)
+
+sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+defer stop()
+
+go func() {
+    &lt;-sigCtx.Done()
+    shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+    defer cancel()
+    if err := srv.Drain(shutdownCtx); err != nil {
+        log.Printf("drain: %v", err)
+    }
+}()
+
+_ = srv.Start(context.Background())</code></pre>
+    </section>
+
+    <section>
+      <h2>Identifiers, sessions and payload limits</h2>
+      <p>
+        The agent id, owner, name and session are inserted into NATS subjects, so <code>New</code> checks each
+        one with <code>ValidateSubjectToken</code>. Only <code>[A-Za-z0-9_-]</code> is allowed, up to 64
+        characters. <code>.</code>, <code>*</code> and <code>&gt;</code> are rejected because they would change
+        which subjects the server subscribes to. For example, an owner of <code>*</code> would create a wildcard
+        subscription in the shared queue group. Invalid values return <code>ErrInvalidSubjectToken</code>.
+        <code>ValidateSubjectToken</code> is exported, so you can check identifiers when you load your config.
+      </p>
+      <p>
+        With <code>WithSession(s)</code>, the agent registers under the instance name
+        <code>InstanceName(name, s)</code> (<code>name-s</code>). It advertises <code>s</code> itself as
+        <code>metadata.session</code> in its service info, heartbeats and status replies. To address agents by
+        session, use <code>FilterBySession(s)</code>, which saves you from building the combined name yourself.
+      </p>
+
+      <pre><code class="language-go">srv, _ := natsagent.New(nc, a, "acme", "worker", natsagent.WithSession("prod"))
+// registers as agents.prompt.phero.acme.worker-prod, metadata.session = "prod"
+
+agents, _ := c.Discover(ctx,
+    natsagent.FilterByOwner("acme"),
+    natsagent.FilterBySession("prod"),
+)</code></pre>
+
+      <p>
+        <code>WithMaxPayload</code> sets the prompt size limit that the agent advertises (default <code>"1MB"</code>).
+        <code>New</code> compares it with the <code>max_payload</code> of the NATS connection. If you did not set
+        a limit, the default is lowered to the connection's limit. If you set one higher than the connection
+        allows, <code>New</code> returns <code>ErrInvalidMaxPayload</code>. On the client side,
+        <code>Prompt</code> checks the prompt against both limits and returns <code>ErrPayloadTooLarge</code>
+        before publishing. Without that check, the failure would be the less clear
+        <code>nats: maximum payload exceeded</code> error.
       </p>
     </section>
 
@@ -136,8 +230,14 @@ fmt.Println(text)</code></pre>
       <p>
         <code>Discover</code> uses a stall strategy: it collects responses to a <code>$SRV.INFO.agents</code>
         fan-out request for up to 750 ms of silence (configurable), capped by a 2-second absolute deadline.
-        Discovery options such as <code>FilterByOwner</code> and <code>FilterByName</code> narrow the results
-        client-side.
+        Discovery options such as <code>FilterByOwner</code>, <code>FilterByName</code> and
+        <code>FilterBySession</code> narrow the results client-side.
+      </p>
+      <p>
+        Both calls respect <code>ctx</code>. If <code>ctx</code> has an earlier deadline than the discovery
+        timeout, <code>Discover</code> stops at that deadline. A cancelled <code>ctx</code> returns its own error
+        instead of <code>ErrNoAgentsFound</code>. <code>Prompt</code> returns immediately if <code>ctx</code> has
+        already ended, so no agent starts a prompt that nobody will read.
       </p>
     </section>
 
@@ -163,6 +263,73 @@ orchestrator.AddTool(tool)</code></pre>
         The tool sends a JSON-encoded prompt to the remote agent's prompt subject and collects the streamed
         response chunks before returning the full text to the LLM.
       </p>
+      <p>
+        This tool keeps the one handle that discovery returned for as long as the tool exists. That works for a
+        script that discovers, prompts and exits. For a process that stays up, use a
+        <a href="#resolver">Resolver</a> instead: when the target restarts, it gets a new instance, and a tool
+        holding the old handle keeps prompting an address that no longer exists.
+      </p>
+    </section>
+
+    <section id="resolver">
+      <h2>Resolver: long-lived callers</h2>
+      <p>
+        <code>Resolver</code> looks up an agent by <code>(owner, name)</code> and returns a live
+        <code>AgentHandle</code> without running discovery on every call. It adds a
+        <code>HeartbeatTracker</code> to the <code>Client</code>:
+      </p>
+      <ul>
+        <li>A cached handle is reused only while the agent is still sending heartbeats and the cache TTL (default
+          5 min, see <code>WithResolverCacheTTL</code>) has not expired.</li>
+        <li>When several callers miss the cache for the same agent at the same time, only one discovery runs.</li>
+        <li><code>Invalidate(owner, name)</code> removes a cached handle, so the next <code>Resolve</code> runs
+          discovery again.</li>
+        <li><code>Resolver.AsTool</code> looks the agent up on every call and invalidates the handle when a prompt
+          fails. If the target restarts between calls, the next call finds the new instance.</li>
+      </ul>
+
+      <pre><code class="language-go">c := natsagent.NewClient(nc)
+
+resolver, err := natsagent.NewResolver(c)
+if err != nil {
+    panic(err)
+}
+defer resolver.Close()
+
+// Optional: wait until the agents have sent a heartbeat. This uses no NATS traffic.
+err = resolver.WaitReady(ctx, []natsagent.AgentKey{
+    {Owner: "newsroom", Name: "researcher"},
+}, 30*time.Second, 0)
+
+tool, err := resolver.AsTool("newsroom", "researcher",
+    "researcher", "Research a topic and return key facts.")
+if err != nil {
+    panic(err)
+}
+
+orchestrator.AddTool(tool)</code></pre>
+
+      <p>
+        The heartbeat tracker starts when <code>NewResolver</code> returns, so create the resolver
+        <em>before</em> starting the agents whose first heartbeats <code>WaitReady</code> has to see.
+      </p>
+    </section>
+
+    <section>
+      <h2>Retrying: permanent vs transient errors</h2>
+      <p>
+        <code>nats.Permanent(err)</code> reports whether retrying cannot fix an error. It returns true for
+        requests the agent will always reject: an empty or oversized prompt, attachments the agent does not
+        accept, a malformed envelope, or a 4xx <code>ServiceError</code>. It also returns true for configuration
+        errors, such as a nil dependency or an empty or invalid identifier. It returns false for everything else,
+        including <code>ErrNoAgentsFound</code>, <code>ErrStreamTimeout</code> and context errors. Use it instead
+        of listing error kinds yourself, so new error kinds are classified correctly without changes on your side.
+      </p>
+
+      <pre><code class="language-go">text, err := stream.Text(ctx)
+if err != nil &amp;&amp; !natsagent.Permanent(err) {
+    // worth retrying, perhaps against another replica
+}</code></pre>
     </section>
 
     <section>
@@ -171,8 +338,9 @@ orchestrator.AddTool(tool)</code></pre>
         For a production-style example, see
         <a href="https://github.com/henomis/phero/tree/main/examples/nats-agent/multi-agent">examples/nats-agent/multi-agent</a>.
         It shows three specialised agents (researcher, writer, editor) each running as a NATS micro service,
-        coordinated by a local orchestrator that discovers them via <code>$SRV.INFO.agents</code> and calls
-        each one as an <code>llm.Tool</code>.
+        coordinated by a local orchestrator that finds them through a <a href="#resolver"><code>Resolver</code></a>
+        and calls each one as an <code>llm.Tool</code>. If a worker restarts during a run, the orchestrator finds
+        the new instance.
       </p>
 
       <pre><code class="language-bash">docker run --rm -p 4222:4222 nats
@@ -195,15 +363,21 @@ OPENAI_API_KEY=&lt;key&gt; go run ./examples/nats-agent/multi-agent/orchestrator
 
       <h3>Server</h3>
       <ul>
-        <li><code>nats.New(nc, agent, owner, name, opts...) (*Server, error)</code> — create a server</li>
-        <li><code>srv.Start(ctx context.Context)</code> — start serving; blocks until ctx is cancelled</li>
+        <li><code>nats.New(nc, handler, owner, name, opts...) (*Server, error)</code> — create a server; <code>handler</code> is any <code>Handler</code>, e.g. <code>*agent.Agent</code></li>
+        <li><code>srv.Start(ctx) error</code> — serve until ctx is cancelled, then drain; returns <code>ErrServerStopped</code> if the server has already drained</li>
+        <li><code>srv.Drain(ctx) error</code> — stop accepting prompts and wait for in-flight ones; safe to call concurrently and more than once</li>
       </ul>
 
       <h4>Server options</h4>
       <ul>
-        <li><code>WithHeartbeatInterval(d time.Duration)</code> — how often to publish a heartbeat (default: 10 s)</li>
-        <li><code>WithMaxPayloadBytes(n int64)</code> — advertised max payload size in the AgentCard</li>
-        <li><code>WithAttachmentsOk(ok bool)</code> — advertise attachment support in discovery metadata</li>
+        <li><code>WithAgentID(id string)</code> — the <code>metadata.agent</code> value and 3rd subject token (default: <code>"phero"</code>)</li>
+        <li><code>WithSession(session string)</code> — register as <code>InstanceName(name, session)</code> and advertise <code>metadata.session</code></li>
+        <li><code>WithVersion(v string)</code> — the micro service version (default: <code>"0.1.0"</code>)</li>
+        <li><code>WithMaxPayload(s string)</code> — advertised max prompt size, e.g. <code>"512KB"</code> (default: <code>"1MB"</code>, lowered to the connection's limit)</li>
+        <li><code>WithAttachmentsOk(ok bool)</code> — advertise attachment support in endpoint metadata</li>
+        <li><code>WithHeartbeatInterval(d time.Duration)</code> — how often to publish a heartbeat (default: 30 s)</li>
+        <li><code>WithKeepaliveInterval(d time.Duration)</code> — how often to send a keepalive chunk during a long response (default: 30 s)</li>
+        <li><code>WithDrainTimeout(d time.Duration)</code> — total shutdown budget for in-flight prompts (default: 30 s)</li>
       </ul>
 
       <h3>Client</h3>
@@ -216,39 +390,71 @@ OPENAI_API_KEY=&lt;key&gt; go run ./examples/nats-agent/multi-agent/orchestrator
 
       <h4>Client options</h4>
       <ul>
-        <li><code>WithDiscoveryTimeout(d time.Duration)</code> — absolute deadline for discovery (default: 2 s)</li>
-        <li><code>WithStallTimeout(d time.Duration)</code> — silence window before discovery ends (default: 750 ms)</li>
-        <li><code>WithInactivityTimeout(d time.Duration)</code> — stream read timeout per chunk (default: 30 s)</li>
+        <li><code>WithDiscoveryTimeout(d time.Duration)</code> — absolute deadline for discovery (default: 2 s; discovery also stops after 750 ms with no new replies)</li>
+        <li><code>WithInactivityTimeout(d time.Duration)</code> — how long a stream waits for the next chunk (default: 60 s)</li>
       </ul>
 
       <h4>Discovery options</h4>
       <ul>
         <li><code>FilterByAgent(agent string)</code> — keep only agents with matching <code>metadata.agent</code></li>
         <li><code>FilterByOwner(owner string)</code> — keep only agents with matching <code>metadata.owner</code></li>
-        <li><code>FilterByName(name string)</code> — keep only agents with matching instance name</li>
+        <li><code>FilterByName(name string)</code> — keep only agents with a matching instance name (for sessioned agents, the <code>InstanceName</code>)</li>
+        <li><code>FilterBySession(session string)</code> — keep only agents with matching <code>metadata.session</code></li>
       </ul>
 
       <h3>AgentHandle</h3>
       <ul>
         <li><code>handle.Prompt(ctx, text) (*Stream, error)</code> — shorthand for <code>Client.Prompt</code></li>
         <li><code>handle.AsTool(toolName, toolDesc) (*llm.Tool, error)</code> — shorthand for <code>Client.AsTool</code></li>
-        <li><code>handle.AgentInfo</code> — embedded <code>AgentInfo</code> with name, owner, subjects, etc.</li>
+        <li><code>handle.AgentInfo</code> — embedded <code>AgentInfo</code> with name, owner, session, subjects, etc.</li>
       </ul>
 
       <h3>Stream</h3>
       <ul>
         <li><code>stream.Text(ctx) (string, error)</code> — collect all chunks into a single string</li>
-        <li><code>stream.Close() error</code> — unsubscribe from the reply subject</li>
+        <li><code>stream.Close()</code> — unsubscribe from the reply subject</li>
+      </ul>
+
+      <h3>Resolver</h3>
+      <ul>
+        <li><code>nats.NewResolver(client, opts...) (*Resolver, error)</code> — create a resolver and start its heartbeat tracker</li>
+        <li><code>resolver.Resolve(ctx, owner, name) (*AgentHandle, error)</code> — return the cached handle while the agent is live, otherwise run discovery</li>
+        <li><code>resolver.Invalidate(owner, name)</code> — remove a cached handle</li>
+        <li><code>resolver.AsTool(owner, name, toolName, toolDesc) (*llm.Tool, error)</code> — a tool that looks the agent up on every call</li>
+        <li><code>resolver.WaitReady(ctx, keys, timeout, poll) error</code> — wait until every <code>AgentKey</code> has sent a heartbeat</li>
+        <li><code>resolver.Close() error</code> — stop the heartbeat tracker (the <code>Client</code> stays open)</li>
+        <li><code>WithResolverCacheTTL(d time.Duration)</code> — how long a handle stays cached before discovery runs again (default: 5 min)</li>
+      </ul>
+
+      <h3>HeartbeatTracker</h3>
+      <ul>
+        <li><code>nats.NewHeartbeatTracker(nc) (*HeartbeatTracker, error)</code> — subscribe to <code>agents.hb.*.*.*</code></li>
+        <li><code>tracker.IsAgentOnline(owner, name) bool</code> / <code>tracker.IsOnline(instanceID) bool</code> — true if a heartbeat arrived within 3× its interval</li>
+        <li><code>tracker.Stop() error</code> — unsubscribe</li>
+      </ul>
+
+      <h3>Helpers</h3>
+      <ul>
+        <li><code>nats.InstanceName(name, session) string</code> — the instance name an agent registers under with <code>WithSession</code></li>
+        <li><code>nats.ValidateSubjectToken(token) error</code> — check that an identifier is usable as a subject token</li>
+        <li><code>nats.Permanent(err) bool</code> — whether retrying cannot fix the error</li>
       </ul>
 
       <h3>Errors</h3>
       <ul>
-        <li><code>ErrNoAgentsFound</code> — <code>Discover</code> found no matching agents</li>
+        <li><code>ErrNilConn</code> / <code>ErrNilHandler</code> / <code>ErrNilClient</code> — nil dependency passed to <code>New</code> or <code>NewResolver</code></li>
+        <li><code>ErrEmptyOwner</code> / <code>ErrEmptyName</code> — blank owner or name passed to <code>New</code></li>
+        <li><code>ErrInvalidSubjectToken</code> — an identifier contains characters that are not allowed in a subject token</li>
+        <li><code>ErrInvalidMaxPayload</code> — <code>max_payload</code> cannot be parsed, or is above the connection's limit</li>
         <li><code>ErrEmptyPrompt</code> — empty prompt passed to <code>Prompt</code></li>
-        <li><code>ErrPayloadTooLarge</code> — prompt exceeds the agent's advertised max payload</li>
-        <li><code>ErrAgentRequired</code> — nil agent passed to <code>New</code></li>
-        <li><code>ErrConnectionRequired</code> — nil NATS connection passed to <code>New</code> or <code>NewClient</code></li>
-        <li><code>ErrOwnerRequired</code> / <code>ErrNameRequired</code> — blank owner or name passed to <code>New</code></li>
+        <li><code>ErrPayloadTooLarge</code> — prompt exceeds the agent's advertised or the connection's max payload</li>
+        <li><code>ErrAttachmentsNotAllowed</code> — the agent does not accept attachments</li>
+        <li><code>ErrMalformedEnvelope</code> — the request payload is not a valid envelope</li>
+        <li><code>ErrNoAgentsFound</code> — <code>Discover</code> found no matching agents</li>
+        <li><code>ErrStreamTimeout</code> — no chunk arrived within the inactivity timeout</li>
+        <li><code>ErrServiceError</code> — the agent returned an error; use <code>errors.As</code> with <code>*ServiceError</code> to read <code>Code</code> and <code>Description</code></li>
+        <li><code>ErrDrainIncomplete</code> — handlers were still running when the drain budget ran out</li>
+        <li><code>ErrServerStopped</code> — <code>Start</code> called on a server that has already drained</li>
       </ul>
     </section>
 
@@ -282,7 +488,8 @@ uv run python examples/02-prompt-text.py --url nats://127.0.0.1:4222 "What is 2+
       <h2>Related packages</h2>
       <ul>
         <li><a href="a2a.html">a2a</a>: HTTP-based agent-to-agent transport — use when NATS is not available</li>
-        <li><a href="memory.html">memory</a>: <code>memory/nats</code> stores conversation history in NATS JetStream KV</li>
+        <li><a href="memory.html">memory</a>: <code>memory/nats</code> stores conversation history in NATS JetStream KV; <code>memory/nats.Open(nc, bucket, sessionID)</code> creates the bucket if it does not exist, or binds the existing one</li>
+        <li><a href="tool.html">tool</a>: <code>tool/kv</code> gives an agent <code>kv_read</code> / <code>kv_write</code> tools over a JetStream KV bucket (<code>kv.Open(nc, bucket)</code>, then <code>store.Tools()</code>)</li>
         <li><a href="agent.html">agent</a>: the agent type wrapped by both <code>Server</code> and <code>Client.AsTool</code></li>
         <li><a href="llm.html">llm</a>: <code>AsTool()</code> returns an <code>*llm.Tool</code></li>
       </ul>

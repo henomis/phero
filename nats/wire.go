@@ -55,6 +55,16 @@ type responseData struct {
 	Text string `json:"text"`
 }
 
+// Service metadata keys (§3.2). The server writes them at registration and the
+// client reads them back at discovery, so they are named once here rather than
+// agreed between two files by literal.
+const (
+	metaAgent           = "agent"
+	metaOwner           = "owner"
+	metaSession         = "session"
+	metaProtocolVersion = "protocol_version"
+)
+
 // heartbeatPayload is the JSON body published on the heartbeat subject (§8.3)
 // and returned by the status endpoint (§8.7).
 type heartbeatPayload struct {
@@ -193,6 +203,14 @@ func decodeResponseText(data json.RawMessage) string {
 	return ""
 }
 
+// Size suffixes accepted in a max_payload string (§2.1).
+const (
+	unitB  = "B"
+	unitKB = "KB"
+	unitMB = "MB"
+	unitGB = "GB"
+)
+
 // parseMaxPayload converts a size string ("512KB", "1MB", "4GB") to bytes.
 func parseMaxPayload(s string) (int64, error) {
 	s = strings.TrimSpace(s)
@@ -206,10 +224,10 @@ func parseMaxPayload(s string) (int64, error) {
 	}
 
 	units := []unit{
-		{"GB", 1 << 30},
-		{"MB", 1 << 20},
-		{"KB", 1 << 10},
-		{"B", 1},
+		{unitGB, 1 << 30},
+		{unitMB, 1 << 20},
+		{unitKB, 1 << 10},
+		{unitB, 1},
 	}
 
 	for _, u := range units {

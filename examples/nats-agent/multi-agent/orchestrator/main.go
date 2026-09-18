@@ -14,9 +14,16 @@
 
 // Package main is the newsroom orchestrator.
 //
-// It discovers the researcher, writer, and editor agents on the NATS bus,
-// wraps each one as an llm.Tool, and runs a local orchestrator agent that
-// chains them together to produce a polished article on any topic.
+// It resolves the researcher, writer, and editor agents on the NATS bus, wraps
+// each one as an llm.Tool, and runs a local orchestrator agent that chains them
+// together to produce a polished article on any topic.
+//
+// Resolution goes through a natsagent.Resolver rather than a one-shot Discover.
+// That is the difference between a demo and something you would leave running:
+// the resolver caches each handle, gates it on the agent's heartbeats, and
+// re-resolves when a prompt fails — so a worker restarted mid-run is found
+// again. A tool built from a single discovery snapshot keeps prompting an
+// address that is gone.
 //
 // Pipeline:
 //  1. researcher  → structured research notes
@@ -52,6 +59,9 @@ import (
 	"github.com/henomis/phero/trace/text"
 )
 
+// newsroomOwner is the owner partition the three worker agents register under.
+const newsroomOwner = "newsroom"
+
 func main() {
 	topic := flag.String("topic", "quantum computing", "topic to research and write about")
 	natsURL := flag.String("nats-url", "", "NATS server URL (overrides NATS_URL env var; default nats://localhost:4222)")
@@ -73,30 +83,41 @@ func main() {
 		natsagent.WithInactivityTimeout(120*time.Second),
 	)
 
-	// ── Discover the three newsroom agents ──────────────────────────────────
-	researcher, err := discoverOne(ctx, c, "researcher")
+	resolver, err := natsagent.NewResolver(c)
 	if err != nil {
-		log.Fatalf("discover researcher: %v", err)
+		log.Fatalf("resolver: %v", err)
+	}
+	defer resolver.Close() //nolint:errcheck
+
+	// ── Resolve the three newsroom agents ───────────────────────────────────
+	researcher, err := resolver.Resolve(ctx, newsroomOwner, "researcher")
+	if err != nil {
+		log.Fatalf("resolve researcher: %v", err)
 	}
 
-	writer, err := discoverOne(ctx, c, "writer")
+	writer, err := resolver.Resolve(ctx, newsroomOwner, "writer")
 	if err != nil {
-		log.Fatalf("discover writer: %v", err)
+		log.Fatalf("resolve writer: %v", err)
 	}
 
-	editor, err := discoverOne(ctx, c, "editor")
+	editor, err := resolver.Resolve(ctx, newsroomOwner, "editor")
 	if err != nil {
-		log.Fatalf("discover editor: %v", err)
+		log.Fatalf("resolve editor: %v", err)
 	}
 
-	// ── Print discovered agents ──────────────────────────────────────────────
+	// ── Print resolved agents ────────────────────────────────────────────────
 	printInfo("researcher", researcher)
 	printInfo("writer", writer)
 	printInfo("editor", editor)
 	fmt.Println()
 
 	// ── Wrap each remote agent as a local tool ──────────────────────────────
-	researchTool, err := researcher.AsTool(
+	//
+	// Built from the resolver, not from the handles above: each call resolves
+	// again (from cache while the agent keeps beating) and a failed prompt
+	// invalidates, so a worker that restarts between steps is picked up rather
+	// than prompted at a dead address for the rest of the run.
+	researchTool, err := resolver.AsTool(newsroomOwner, "researcher",
 		"researcher",
 		"Research a topic and produce structured notes with key facts, context, and open questions.",
 	)
@@ -104,7 +125,7 @@ func main() {
 		log.Fatalf("build researcher tool: %v", err)
 	}
 
-	writeTool, err := writer.AsTool(
+	writeTool, err := resolver.AsTool(newsroomOwner, "writer",
 		"writer",
 		"Write a clear, engaging 300-500 word article from the supplied research notes.",
 	)
@@ -112,7 +133,7 @@ func main() {
 		log.Fatalf("build writer tool: %v", err)
 	}
 
-	editTool, err := editor.AsTool(
+	editTool, err := resolver.AsTool(newsroomOwner, "editor",
 		"editor",
 		"Edit and polish an article draft for grammar, clarity, style, and consistency.",
 	)
@@ -170,18 +191,6 @@ Return the final polished article as your answer.`,
 
 // discoverOne discovers the first agent on the bus matching owner="newsroom"
 // and the given name, failing if none is found.
-func discoverOne(ctx context.Context, c *natsagent.Client, agentName string) (*natsagent.AgentHandle, error) {
-	handles, err := c.Discover(ctx,
-		natsagent.FilterByOwner("newsroom"),
-		natsagent.FilterByName(agentName),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return handles[0], nil
-}
-
 func printInfo(label string, info *natsagent.AgentHandle) {
 	fmt.Printf("%-12s agent=%-8s owner=%-10s name=%-12s protocol=%s\n",
 		label,

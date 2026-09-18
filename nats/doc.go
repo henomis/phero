@@ -37,7 +37,13 @@
 //	a, _ := agent.New(llmClient, "my-agent", "A helpful assistant")
 //
 //	srv, _ := natsagent.New(nc, a, "alice", "my-agent")
-//	srv.Start(ctx) // blocks until ctx is cancelled
+//	srv.Start(ctx) // serves until ctx is cancelled, then drains
+//
+// Cancelling that context means "shut down", not "abandon what you are doing":
+// the prompt endpoint is unsubscribed so further prompts go to another replica,
+// and the handlers already running keep a context of their own and finish. See
+// [Server.Drain] and [WithDrainTimeout] for the budget. Drain is also how you
+// trigger the same shutdown from elsewhere, on a context of your own.
 //
 // Quick start — client:
 //

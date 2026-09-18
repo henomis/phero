@@ -53,9 +53,19 @@ type heartbeatEntry struct {
 
 // online reports whether this beat is within the 3× interval_s staleness
 // threshold (§8.2).
+//
+// An absent or zero interval_s is read as one second rather than as zero. A
+// zero threshold would make *every* beat stale the instant it arrived, so an
+// agent that is beating perfectly would read as permanently offline — the
+// worst possible reading of a missing field, and one a peer implementation can
+// produce simply by omitting it.
 func (e *heartbeatEntry) online() bool {
-	threshold := time.Duration(e.payload.IntervalS) * time.Second * heartbeatMissedFactor
-	return time.Since(e.lastSeen) <= threshold
+	interval := time.Duration(e.payload.IntervalS) * time.Second
+	if interval <= 0 {
+		interval = time.Second
+	}
+
+	return time.Since(e.lastSeen) <= interval*heartbeatMissedFactor
 }
 
 // NewHeartbeatTracker subscribes to agents.hb.*.*.* on nc and starts
@@ -114,9 +124,30 @@ func (t *HeartbeatTracker) IsAgentOnline(owner, name string) bool {
 	return ok && e.online()
 }
 
-// Stop cancels the wildcard subscription.
+// Stop cancels the wildcard subscription. It is safe on a tracker that never
+// subscribed.
 func (t *HeartbeatTracker) Stop() error {
+	if t.sub == nil {
+		return nil
+	}
+
 	return t.sub.Unsubscribe()
+}
+
+// heartbeatIntervalSeconds renders a cadence for the wire, where §8.1 makes
+// interval_s an integer number of seconds.
+//
+// A sub-second cadence has no representation there, and truncating it to 0
+// would tell every reader to compute a zero staleness threshold — so an agent
+// beating five times a second would advertise itself as permanently offline.
+// It floors at 1: the advertised value is then slower than the real cadence,
+// which errs towards patience rather than towards declaring a live agent dead.
+func heartbeatIntervalSeconds(d time.Duration) int {
+	if s := int(d.Seconds()); s > 0 {
+		return s
+	}
+
+	return 1
 }
 
 // agentKey is the composite map key for the (owner, name) index.
@@ -148,7 +179,7 @@ func (s *Server) startHeartbeats(ctx context.Context, subject, instanceID string
 			Session:    s.cfg.session,
 			InstanceID: instanceID,
 			TS:         time.Now().UTC().Format(time.RFC3339),
-			IntervalS:  int(s.cfg.heartbeatInterval.Seconds()),
+			IntervalS:  heartbeatIntervalSeconds(s.cfg.heartbeatInterval),
 		}
 		_ = s.nc.Publish(subject, encodeHeartbeat(p))
 	}

@@ -29,6 +29,10 @@ import (
 
 const protocolVersion = "0.3"
 
+// drainingMessage is the 503 description returned to a prompt that arrives after
+// the server has stopped accepting work.
+const drainingMessage = "server is draining"
+
 // Handler is implemented by anything that can process a prompt — *agent.Agent
 // and workflow executors both satisfy it.
 type Handler interface {
@@ -49,14 +53,58 @@ type Server struct {
 	owner   string
 	name    string
 
-	svc natsio.Service
-	wg  sync.WaitGroup
+	// gate admits prompt handlers while the server is serving and counts the
+	// ones in flight, so a drain can stop admitting and then wait. hbWG tracks
+	// the heartbeat publisher, which is bound to the serving lifetime rather
+	// than to the prompts in flight.
+	gate *gate
+	hbWG sync.WaitGroup
+
+	// mu guards the handles Start publishes for a drain to act on. Drain may be
+	// called from any goroutine, including before Start has registered anything.
+	mu            sync.Mutex
+	svc           natsio.Service
+	stopServing   context.CancelFunc
+	cancelPrompts context.CancelFunc
+	// draining is set, under mu, in the same step that a drain snapshots the
+	// handles above. A Start that finds it set must not publish a handle the
+	// drain has already missed.
+	draining bool
+
+	drainOnce sync.Once
+	drained   chan struct{}
+	drainErr  error
+}
+
+// InstanceName returns the name an agent is registered under: its own name,
+// suffixed with the session when [WithSession] is set. An empty session yields
+// the name unchanged.
+//
+// It is exported because the rule is shared. The server composes the name; a
+// client that addresses that agent by name — via [FilterByName], or by building
+// the prompt subject itself — has to reproduce it, and a private join character
+// would be a secret two codebases had to agree on by convention. Prefer
+// [FilterBySession] where you can: it needs no composition at all.
+func InstanceName(name, session string) string {
+	if session == "" {
+		return name
+	}
+
+	return name + "-" + session
 }
 
 // New creates a Server that wraps h and serves it on NATS.
 // owner and name are required positional arguments (§3.2):
 //   - owner identifies the operator or account.
 //   - name is the per-instance label (the 5th token in the subject hierarchy).
+//
+// With [WithSession] set, the agent registers as [InstanceName](name, session)
+// and advertises the session itself as metadata.session (§3.2).
+//
+// owner, name, the session and the agent id all become tokens of the subjects
+// this Server subscribes, so each must satisfy [ValidateSubjectToken]; New
+// returns [ErrInvalidSubjectToken] otherwise. This is not cosmetic — see that
+// function for what an owner of "*" does to a shared queue group.
 func New(nc *natsclient.Conn, h Handler, owner, name string, opts ...ServerOption) (*Server, error) {
 	if nc == nil {
 		return nil, ErrNilConn
@@ -82,9 +130,19 @@ func New(nc *natsclient.Conn, h Handler, owner, name string, opts ...ServerOptio
 		}
 	}
 
-	if cfg.session != "" {
-		name = name + "-" + cfg.session
-		cfg.session = name
+	// The session suffixes the registered instance name; it does *not* become
+	// it. Overwriting cfg.session here would put the instance name into every
+	// place the session is advertised — the service metadata, each heartbeat and
+	// the status reply — so an agent "worker" with session "prod" would report
+	// session="worker-prod", and nothing could group instances by session.
+	name = InstanceName(name, cfg.session)
+
+	if err := validateSubjectIdentity(cfg.agentID, owner, name, cfg.session); err != nil {
+		return nil, err
+	}
+
+	if err := reconcileMaxPayload(cfg, nc.MaxPayload()); err != nil {
+		return nil, err
 	}
 
 	return &Server{
@@ -93,28 +151,91 @@ func New(nc *natsclient.Conn, h Handler, owner, name string, opts ...ServerOptio
 		cfg:     cfg,
 		owner:   owner,
 		name:    name,
+		gate:    newGate(),
+		drained: make(chan struct{}),
 	}, nil
 }
 
 // Start registers the NATS micro service, begins publishing heartbeats, and
-// blocks until ctx is cancelled.  Call Stop to drain subscriptions after Start
-// returns, or cancel ctx and let Start handle cleanup automatically.
+// blocks until ctx is cancelled — at which point it drains (see [Server.Drain])
+// rather than returning immediately.
+//
+// Cancelling ctx therefore means "shut down", not "abandon what you are doing":
+// the prompt endpoint is unsubscribed so no further work is admitted, and the
+// handlers already running keep their own context and finish. Start returns once
+// they have, or [ErrDrainIncomplete] if the drain budget (see
+// [WithDrainTimeout]) was spent and cancelling them did not make them return.
+//
+// A Server serves once. Start on a Server that has already drained returns
+// [ErrServerStopped].
 func (s *Server) Start(ctx context.Context) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	if s.hasDrained() {
+		return ErrServerStopped
+	}
 
+	// Two lifetimes, deliberately. serveCtx is the server's: cancelling it stops
+	// registration and heartbeats. promptCtx is the work's, and a shutdown does
+	// not cancel it — a handler in the middle of an LLM call has already been
+	// paid for, and killing it throws the answer away without refunding the
+	// tokens. The drain cancels promptCtx only once its budget is spent.
+	serveCtx, stopServing := context.WithCancel(ctx)
+	defer stopServing()
+
+	promptCtx, cancelPrompts := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelPrompts()
+
+	// Registration is atomic with respect to a drain. runDrain snapshots the
+	// handles under s.mu, so holding it from the draining check through the last
+	// handle means the drain sees either nothing or everything. Without that, a
+	// drain landing mid-registration stops a service that Start then adds
+	// endpoints to — micro subscribes them regardless, and nothing ever
+	// unsubscribes them — or Waits on hbWG while Start is adding to it. None of
+	// the calls below waits on a round-trip, so the hold is short.
+	s.mu.Lock()
+	if s.draining {
+		s.mu.Unlock()
+		return ErrServerStopped
+	}
+
+	s.stopServing = stopServing
+	s.cancelPrompts = cancelPrompts
+
+	svc, err := s.register(serveCtx, promptCtx)
+	if err == nil {
+		s.svc = svc
+	}
+	s.mu.Unlock()
+
+	if err != nil {
+		return err
+	}
+
+	<-serveCtx.Done()
+
+	// ctx is done — that is the shutdown signal — so waiting on it would end the
+	// wait before it began. WithoutCancel keeps its values and drops both its
+	// cancellation and its deadline: a deadline is just another way ctx ends,
+	// and when it is what fired, it has already passed. The drain is bounded by
+	// WithDrainTimeout instead. A caller who wants a tighter bound on its own
+	// wait should call Drain with a context of its own.
+	return s.Drain(context.WithoutCancel(ctx))
+}
+
+// register adds the micro service and its endpoints and starts the heartbeat
+// publisher. Callers hold s.mu. On error nothing is left registered.
+func (s *Server) register(serveCtx, promptCtx context.Context) (natsio.Service, error) {
 	attachmentsOkStr := "false"
 	if s.cfg.attachmentsOk {
 		attachmentsOkStr = attachmentsOkTrue
 	}
 
 	metadata := map[string]string{
-		"agent":            s.cfg.agentID,
-		"owner":            s.owner,
-		"protocol_version": protocolVersion,
+		metaAgent:           s.cfg.agentID,
+		metaOwner:           s.owner,
+		metaProtocolVersion: protocolVersion,
 	}
 	if s.cfg.session != "" {
-		metadata["session"] = s.cfg.session
+		metadata[metaSession] = s.cfg.session
 	}
 
 	svc, err := natsio.AddService(s.nc, natsio.Config{
@@ -124,17 +245,20 @@ func (s *Server) Start(ctx context.Context) error {
 		Metadata:    metadata,
 	})
 	if err != nil {
-		return fmt.Errorf("nats: register micro service: %w", err)
+		return nil, fmt.Errorf("nats: register micro service: %w", err)
 	}
-
-	s.svc = svc
 
 	promptSubject := fmt.Sprintf("agents.prompt.%s.%s.%s", s.cfg.agentID, s.owner, s.name)
 	statusSubject := fmt.Sprintf("agents.status.%s.%s.%s", s.cfg.agentID, s.owner, s.name)
 	hbSubject := fmt.Sprintf("agents.hb.%s.%s.%s", s.cfg.agentID, s.owner, s.name)
 
+	// Admit prompts before the endpoint exists, not after: a request delivered
+	// between the two would otherwise find the gate shut and be refused by a
+	// server that is perfectly healthy.
+	s.gate.unlock()
+
 	if addErr := svc.AddEndpoint("prompt",
-		natsio.ContextHandler(ctx, s.handlePrompt),
+		natsio.ContextHandler(promptCtx, s.handlePrompt),
 		natsio.WithEndpointSubject(promptSubject),
 		natsio.WithEndpointQueueGroup(svcNameAgents),
 		natsio.WithEndpointMetadata(map[string]string{
@@ -143,43 +267,47 @@ func (s *Server) Start(ctx context.Context) error {
 		}),
 	); addErr != nil {
 		_ = svc.Stop()
-		return fmt.Errorf("nats: register prompt endpoint: %w", addErr)
+		return nil, fmt.Errorf("nats: register prompt endpoint: %w", addErr)
 	}
 
 	if addErr := svc.AddEndpoint("status",
-		natsio.ContextHandler(ctx, s.handleStatus),
+		natsio.ContextHandler(serveCtx, s.handleStatus),
 		natsio.WithEndpointSubject(statusSubject),
 		natsio.WithEndpointQueueGroup(svcNameAgents),
 	); addErr != nil {
 		_ = svc.Stop()
-		return fmt.Errorf("nats: register status endpoint: %w", addErr)
+		return nil, fmt.Errorf("nats: register status endpoint: %w", addErr)
 	}
 
 	instanceID := svc.Info().ID
 
-	s.wg.Go(func() { s.startHeartbeats(ctx, hbSubject, instanceID) })
+	s.hbWG.Go(func() { s.startHeartbeats(serveCtx, hbSubject, instanceID) })
 
-	<-ctx.Done()
-
-	_ = svc.Stop()
-
-	s.wg.Wait()
-
-	return nil
-}
-
-// Stop is a convenience method that cancels any Start context and drains
-// in-flight prompt handlers.  It is a no-op if Start has not been called or
-// has already returned.
-func (s *Server) Stop() {
-	s.wg.Wait()
+	return svc, nil
 }
 
 // handlePrompt dispatches each prompt request into a goroutine so that the
 // NATS subscription callback returns immediately and the subscription remains
 // responsive to further requests (§3.4).
+//
+// A request that arrives once a drain has begun is refused rather than served.
+// Unsubscribing the endpoint is asynchronous — the micro service drains its
+// subscriptions — so a request buffered before that can still land here, and
+// serving it would mean admitting work into a shutdown nobody is waiting on. A
+// 503 lets the caller retry against a replica that is not going away.
 func (s *Server) handlePrompt(ctx context.Context, req natsio.Request) {
-	s.wg.Go(func() { s.processPrompt(ctx, req) })
+	if !s.gate.enter() {
+		_ = req.Error("503", drainingMessage, encodeErrorBody("server_draining", drainingMessage))
+		_ = req.Respond(nil) // terminator (§9.3)
+
+		return
+	}
+
+	go func() {
+		defer s.gate.leave()
+
+		s.processPrompt(ctx, req)
+	}()
 }
 
 // processPrompt decodes the envelope, invokes the agent, streams the result,
@@ -249,8 +377,13 @@ func (s *Server) processPrompt(ctx context.Context, req natsio.Request) {
 // The request body is ignored per the spec.
 func (s *Server) handleStatus(_ context.Context, req natsio.Request) {
 	instanceID := ""
-	if s.svc != nil {
-		instanceID = s.svc.Info().ID
+
+	s.mu.Lock()
+	svc := s.svc
+	s.mu.Unlock()
+
+	if svc != nil {
+		instanceID = svc.Info().ID
 	}
 
 	p := heartbeatPayload{
@@ -259,7 +392,7 @@ func (s *Server) handleStatus(_ context.Context, req natsio.Request) {
 		Session:    s.cfg.session,
 		InstanceID: instanceID,
 		TS:         time.Now().UTC().Format(time.RFC3339),
-		IntervalS:  int(s.cfg.heartbeatInterval.Seconds()),
+		IntervalS:  heartbeatIntervalSeconds(s.cfg.heartbeatInterval),
 	}
 	_ = req.Respond(encodeHeartbeat(p))
 }
