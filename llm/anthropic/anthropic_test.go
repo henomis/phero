@@ -663,3 +663,127 @@ func TestExecute_WithPromptCaching_MarksSystemAndLastTool(t *testing.T) {
 		t.Fatalf("expected cache_control on last tool: %s", body)
 	}
 }
+
+// wireEffortRequest is a minimal view of the request fields touched by
+// WithEffort and WithAdaptiveThinking.
+type wireEffortRequest struct {
+	Temperature  *float64 `json:"temperature"`
+	OutputConfig *struct {
+		Effort string `json:"effort"`
+	} `json:"output_config"`
+	Thinking *struct {
+		Type         string `json:"type"`
+		BudgetTokens int64  `json:"budget_tokens"`
+	} `json:"thinking"`
+}
+
+// executeAndDecode runs a single Execute against a capturing server and returns
+// the decoded request body.
+func executeAndDecode(t *testing.T, opts ...anthropic.Option) wireEffortRequest {
+	t.Helper()
+
+	var body []byte
+
+	srv := capturingServer(t, &body)
+	defer srv.Close()
+
+	c := anthropic.New("key", append([]anthropic.Option{anthropic.WithBaseURL(srv.URL)}, opts...)...)
+	if _, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))}, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var req wireEffortRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("unmarshal request: %v (body: %s)", err, body)
+	}
+
+	return req
+}
+
+func TestExecute_WithEffort_SetsOutputConfig(t *testing.T) {
+	for _, effort := range []anthropic.Effort{
+		anthropic.EffortLow,
+		anthropic.EffortMedium,
+		anthropic.EffortHigh,
+		anthropic.EffortXHigh,
+		anthropic.EffortMax,
+	} {
+		t.Run(string(effort), func(t *testing.T) {
+			req := executeAndDecode(t, anthropic.WithEffort(effort))
+
+			if req.OutputConfig == nil || req.OutputConfig.Effort != string(effort) {
+				t.Fatalf("output_config = %+v, want effort %q", req.OutputConfig, effort)
+			}
+		})
+	}
+}
+
+// TestExecute_NoEffort_OmitsOutputConfig verifies the field is absent when the
+// option is not used, so unconfigured clients keep the API default.
+func TestExecute_NoEffort_OmitsOutputConfig(t *testing.T) {
+	req := executeAndDecode(t)
+
+	if req.OutputConfig != nil {
+		t.Fatalf("output_config = %+v, want omitted", req.OutputConfig)
+	}
+}
+
+// TestExecute_WithEffort_TemperatureHandling verifies that setting an effort
+// suppresses the default temperature — models that accept output_config.effort
+// generally reject temperature — while an explicit WithTemperature still wins.
+func TestExecute_WithEffort_TemperatureHandling(t *testing.T) {
+	t.Run("default temperature omitted", func(t *testing.T) {
+		req := executeAndDecode(t, anthropic.WithEffort(anthropic.EffortXHigh))
+
+		if req.Temperature != nil {
+			t.Fatalf("temperature = %v, want omitted under effort", *req.Temperature)
+		}
+	})
+
+	t.Run("explicit temperature kept", func(t *testing.T) {
+		req := executeAndDecode(t,
+			anthropic.WithEffort(anthropic.EffortLow),
+			anthropic.WithTemperature(0.3),
+		)
+
+		if req.Temperature == nil || *req.Temperature != float64(float32(0.3)) {
+			t.Fatalf("temperature = %v, want 0.3", req.Temperature)
+		}
+	})
+}
+
+func TestExecute_WithAdaptiveThinking_SetsAdaptiveAndOmitsTemperature(t *testing.T) {
+	req := executeAndDecode(t,
+		anthropic.WithAdaptiveThinking(),
+		anthropic.WithEffort(anthropic.EffortMax),
+	)
+
+	if req.Thinking == nil || req.Thinking.Type != "adaptive" {
+		t.Fatalf("thinking = %+v, want type adaptive", req.Thinking)
+	}
+
+	if req.Thinking.BudgetTokens != 0 {
+		t.Fatalf("budget_tokens = %d, want omitted under adaptive thinking", req.Thinking.BudgetTokens)
+	}
+
+	if req.Temperature != nil {
+		t.Fatalf("temperature = %v, want omitted under adaptive thinking", *req.Temperature)
+	}
+
+	if req.OutputConfig == nil || req.OutputConfig.Effort != string(anthropic.EffortMax) {
+		t.Fatalf("output_config = %+v, want effort max", req.OutputConfig)
+	}
+}
+
+// TestExecute_AdaptiveThinking_TakesPrecedenceOverBudget verifies that a client
+// configured with both forms sends the adaptive config, never budget_tokens.
+func TestExecute_AdaptiveThinking_TakesPrecedenceOverBudget(t *testing.T) {
+	req := executeAndDecode(t,
+		anthropic.WithThinking(2048),
+		anthropic.WithAdaptiveThinking(),
+	)
+
+	if req.Thinking == nil || req.Thinking.Type != "adaptive" || req.Thinking.BudgetTokens != 0 {
+		t.Fatalf("thinking = %+v, want adaptive without budget_tokens", req.Thinking)
+	}
+}

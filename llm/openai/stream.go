@@ -41,11 +41,12 @@ func (c *Client) ExecuteStream(
 ) iter.Seq2[llm.StreamChunk, error] {
 	return func(yield func(llm.StreamChunk, error) bool) {
 		request := openai.ChatCompletionRequest{
-			Model:         c.model,
-			Messages:      messagesToOpenAI(messages),
-			Temperature:   c.temperature,
-			Stream:        true,
-			StreamOptions: &openai.StreamOptions{IncludeUsage: true},
+			Model:           c.model,
+			Messages:        messagesToOpenAI(messages),
+			Temperature:     c.temperature,
+			ReasoningEffort: c.reasoningEffort,
+			Stream:          true,
+			StreamOptions:   &openai.StreamOptions{IncludeUsage: true},
 		}
 		if len(tools) > 0 {
 			request.Tools = c.openaiTools(tools)

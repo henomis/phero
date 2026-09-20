@@ -37,10 +37,11 @@ const (
 type Client struct {
 	client *openai.Client
 
-	model       string
-	apiKey      string
-	temperature float32
-	config      openai.ClientConfig
+	model           string
+	apiKey          string
+	temperature     float32
+	reasoningEffort string
+	config          openai.ClientConfig
 }
 
 // Option configures a Client created by New.
@@ -72,9 +73,10 @@ func New(apiKey string, opts ...Option) *Client {
 // model's next message.
 func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
 	request := openai.ChatCompletionRequest{
-		Model:       c.model,
-		Messages:    messagesToOpenAI(messages),
-		Temperature: c.temperature,
+		Model:           c.model,
+		Messages:        messagesToOpenAI(messages),
+		Temperature:     c.temperature,
+		ReasoningEffort: c.reasoningEffort,
 	}
 
 	if len(tools) > 0 {
@@ -277,5 +279,21 @@ func WithOllamaBaseURL() Option {
 func WithTemperature(temp float32) Option {
 	return func(c *Client) {
 		c.temperature = temp
+	}
+}
+
+// WithReasoningEffort sets the reasoning_effort request field used for chat
+// completions.
+//
+// It tells a reasoning model how much thinking to spend before answering —
+// typically one of "minimal", "low", "medium" or "high", though the accepted set
+// is defined by the provider and the model. When unset, the field is omitted and
+// the provider default applies.
+//
+// The field is ignored by non-reasoning models and may be rejected outright by
+// OpenAI-compatible endpoints that do not implement it.
+func WithReasoningEffort(effort string) Option {
+	return func(c *Client) {
+		c.reasoningEffort = effort
 	}
 }
