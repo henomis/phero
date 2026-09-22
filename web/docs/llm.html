@@ -94,7 +94,18 @@ llmClient := anthropic.New(
           (<code>CacheReadTokens</code> / <code>CacheWriteTokens</code>).</li>
         <li><code>WithThinking(budget)</code>: enable extended thinking with the given token budget. Reasoning is
           returned as <code>ContentTypeReasoning</code> parts (read it with <code>Message.ReasoningContent()</code>)
-          and replayed on later turns so tool use keeps working. Reasoning never leaks into <code>TextContent()</code>.</li>
+          and replayed on later turns so tool use keeps working. Reasoning never leaks into <code>TextContent()</code>.
+          Recent models have removed <code>budget_tokens</code> and reject this configuration &mdash; use
+          <code>WithAdaptiveThinking()</code> there and keep <code>WithThinking</code> for Haiku 4.5 and older models.</li>
+        <li><code>WithAdaptiveThinking()</code>: enable adaptive extended thinking. The model decides on its own when
+          and how much to reason; steer the depth with <code>WithEffort</code>. Reasoning is surfaced exactly as with
+          <code>WithThinking</code>. When both are set, adaptive thinking wins.</li>
+        <li><code>WithEffort(e)</code>: set the <code>output_config.effort</code> request field, which controls how much
+          reasoning and output effort the model spends. Values are <code>EffortLow</code>, <code>EffortMedium</code>,
+          <code>EffortHigh</code>, <code>EffortXHigh</code> and <code>EffortMax</code>; when unset the field is omitted
+          and the API default applies. Lower effort means fewer thinking tokens, less preamble and more consolidated
+          tool calls. Because effort-capable models generally reject <code>temperature</code>, setting an effort
+          suppresses the default temperature &mdash; an explicit <code>WithTemperature</code> is still honoured.</li>
       </ul>
 
       <pre><code class="language-go">llmClient := anthropic.New(
@@ -107,6 +118,19 @@ llmClient := anthropic.New(
 result, _ := llmClient.Execute(ctx, messages, tools)
 fmt.Println("reasoning:", result.Message.ReasoningContent())
 fmt.Println("answer:", result.Message.TextContent())</code></pre>
+
+      <p>
+        On models where the fixed thinking budget has been removed, adaptive thinking plus an effort level is the
+        equivalent configuration:
+      </p>
+
+      <pre><code class="language-go">llmClient := anthropic.New(
+    os.Getenv("ANTHROPIC_API_KEY"),
+    anthropic.WithModel("claude-opus-4-5"),
+    anthropic.WithPromptCaching(),
+    anthropic.WithAdaptiveThinking(),
+    anthropic.WithEffort(anthropic.EffortXHigh),
+)</code></pre>
     </section>
 
     <section>
@@ -131,6 +155,11 @@ llmClient := openai.New(
       <ul>
         <li><code>WithModel(m)</code>: model name (e.g. <code>"gpt-4o"</code>, <code>"gpt-4o-mini"</code>)</li>
         <li><code>WithTemperature(t)</code>: sampling temperature</li>
+        <li><code>WithReasoningEffort(e)</code>: set the <code>reasoning_effort</code> field, telling a reasoning model
+          how much thinking to spend before answering (typically <code>"minimal"</code>, <code>"low"</code>,
+          <code>"medium"</code> or <code>"high"</code> &mdash; the accepted set is defined by the provider and the
+          model). When unset the field is omitted, which keeps OpenAI-compatible endpoints that do not implement it
+          working.</li>
         <li><code>WithBaseURL(url)</code>: override the API base URL (e.g. point at a local proxy)</li>
         <li><code>WithOllamaBaseURL()</code>: shortcut to point at a local Ollama server</li>
       </ul>

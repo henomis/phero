@@ -47,17 +47,41 @@ const (
 	DefaultTemperature float32 = 1.0
 )
 
+// Effort is the value of the Anthropic output_config.effort request field, which
+// controls how much reasoning and output effort the model spends on a request.
+//
+// Higher effort trades token spend for thoroughness. The API default is
+// EffortHigh; leaving the option unset omits the field entirely.
+type Effort string
+
+const (
+	// EffortLow is the cheapest setting, suited to simple tasks and sub-agents.
+	EffortLow Effort = "low"
+	// EffortMedium trades some thoroughness for a lower token spend.
+	EffortMedium Effort = "medium"
+	// EffortHigh is the API default.
+	EffortHigh Effort = "high"
+	// EffortXHigh sits between EffortHigh and EffortMax and is a good default for
+	// coding and agentic work on recent models.
+	EffortXHigh Effort = "xhigh"
+	// EffortMax is the most thorough and most expensive setting.
+	EffortMax Effort = "max"
+)
+
 // Client is an llm.LLM implementation that uses github.com/anthropics/anthropic-sdk-go.
 type Client struct {
 	client anthropicapi.Client
 
-	apiKey         string
-	baseURL        string
-	model          string
-	temperature    float32
-	maxTokens      int64
-	promptCaching  bool
-	thinkingbudget int64
+	apiKey           string
+	baseURL          string
+	model            string
+	temperature      float32
+	temperatureSet   bool
+	maxTokens        int64
+	promptCaching    bool
+	thinkingbudget   int64
+	thinkingAdaptive bool
+	effort           Effort
 }
 
 // Option configures a Client created by New.
@@ -98,10 +122,21 @@ func New(apiKey string, opts ...Option) *Client {
 // Execute calls the Anthropic Messages API with the given messages and tools.
 //
 // It converts the response to a Phero assistant message, including any tool calls.
+//
+// A request whose max_tokens implies more than ten minutes of generation cannot
+// be made as a single buffered call — the SDK refuses it outright ("streaming is
+// required for operations that may take longer than 10 minutes"). Rather than
+// hand that constraint to every caller, Execute then streams the same request
+// and assembles the reply, so a large max_tokens (which agentic and coding work
+// wants) behaves like any other call. See executeStreaming.
 func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
 	params, err := c.buildParams(messages, tools)
 	if err != nil {
 		return nil, err
+	}
+
+	if requiresStreaming(params) {
+		return c.executeStreaming(ctx, messages, tools)
 	}
 
 	res, err := c.client.Messages.New(ctx, params)
@@ -147,7 +182,20 @@ func (c *Client) buildParams(messages []llm.Message, tools []*llm.Tool) (anthrop
 		System:   system,
 	}
 
-	if c.thinkingbudget > 0 {
+	if c.effort != "" {
+		params.OutputConfig = anthropicapi.OutputConfigParam{
+			Effort: anthropicapi.OutputConfigEffort(c.effort),
+		}
+	}
+
+	switch {
+	case c.thinkingAdaptive:
+		// Adaptive thinking lets the model decide when and how much to reason; its
+		// depth is steered by WithEffort. Temperature is omitted, as the models
+		// that support adaptive thinking reject it.
+		adaptive := anthropicapi.NewThinkingConfigAdaptiveParam()
+		params.Thinking = anthropicapi.ThinkingConfigParamUnion{OfAdaptive: &adaptive}
+	case c.thinkingbudget > 0:
 		// Extended thinking requires max_tokens > budget and disallows a custom
 		// temperature, so we omit temperature and ensure headroom above the budget.
 		if maxTokens <= c.thinkingbudget {
@@ -155,7 +203,10 @@ func (c *Client) buildParams(messages []llm.Message, tools []*llm.Tool) (anthrop
 		}
 
 		params.Thinking = anthropicapi.ThinkingConfigParamOfEnabled(c.thinkingbudget)
-	} else {
+	case c.effort != "" && !c.temperatureSet:
+		// Models that accept output_config.effort generally reject temperature, so
+		// the default is not sent unless the caller asked for it explicitly.
+	default:
 		params.Temperature = param.NewOpt(float64(c.temperature))
 	}
 
@@ -559,6 +610,7 @@ func WithMaxTokens(maxTokens int64) Option {
 func WithTemperature(temp float32) Option {
 	return func(c *Client) {
 		c.temperature = temp
+		c.temperatureSet = true
 	}
 }
 
@@ -574,6 +626,40 @@ func WithPromptCaching() Option {
 	}
 }
 
+// WithEffort sets the Anthropic output_config.effort request field.
+//
+// Effort controls how much reasoning and output effort the model spends: lower
+// effort means fewer thinking tokens, less preamble and more consolidated tool
+// calls, higher effort means more thorough answers at a higher token spend. When
+// unset, the field is omitted and the API default (EffortHigh) applies.
+//
+// Effort pairs with WithAdaptiveThinking: adaptive thinking decides when to
+// reason, effort decides how deeply. It replaces the fixed token budget of
+// WithThinking on models where budget_tokens has been removed. Because those
+// models also reject the temperature parameter, setting an effort suppresses the
+// default temperature; an explicit WithTemperature is still honoured.
+func WithEffort(effort Effort) Option {
+	return func(c *Client) {
+		c.effort = effort
+	}
+}
+
+// WithAdaptiveThinking enables adaptive extended thinking.
+//
+// The model decides on its own when and how much to reason; use WithEffort to
+// steer the depth. This is the current form of extended thinking: recent models
+// (Opus 4.7 and later, Sonnet 5 and the Fable family) reject the fixed
+// budget_tokens configuration that WithThinking sends. Reasoning is returned as
+// ContentTypeReasoning parts, exactly as with WithThinking.
+//
+// When both are set, adaptive thinking wins. As with WithThinking, the
+// temperature option is not sent.
+func WithAdaptiveThinking() Option {
+	return func(c *Client) {
+		c.thinkingAdaptive = true
+	}
+}
+
 // WithThinking enables extended thinking with the given token budget.
 //
 // budgetTokens is the maximum number of tokens the model may spend reasoning; it
@@ -582,6 +668,10 @@ func WithPromptCaching() Option {
 // replayed on later turns so tool use works under extended thinking. When enabled,
 // max_tokens is raised above the budget if needed and the temperature option is
 // not sent, as required by the Anthropic API.
+//
+// budget_tokens has been removed from recent Anthropic models, which reject this
+// configuration; use WithAdaptiveThinking together with WithEffort there and keep
+// WithThinking for Haiku 4.5 and older models.
 func WithThinking(budgetTokens int64) Option {
 	return func(c *Client) {
 		if budgetTokens > 0 {

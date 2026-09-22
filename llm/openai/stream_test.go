@@ -16,6 +16,8 @@ package openai_test
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -126,5 +128,41 @@ func TestExecuteStream_AssemblesToolCall(t *testing.T) {
 
 	if final.Message == nil || len(final.Message.ToolCalls) != 1 {
 		t.Fatalf("final message tool calls = %v, want 1", final.Message)
+	}
+}
+
+// TestExecuteStream_ForwardsReasoningEffort verifies the streaming path sends the
+// same reasoning_effort field as the buffered one.
+func TestExecuteStream_ForwardsReasoningEffort(t *testing.T) {
+	var payload map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+
+		if unmarshalErr := json.Unmarshal(body, &payload); unmarshalErr != nil {
+			t.Errorf("unmarshal request: %v", unmarshalErr)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`data: {"choices":[{"index":0,"delta":{"content":"ok"},` +
+			`"finish_reason":"stop"}]}` + "\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"), openai.WithReasoningEffort("low"))
+
+	for _, err := range c.ExecuteStream(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))}, nil) {
+		if err != nil {
+			t.Fatalf("ExecuteStream: %v", err)
+		}
+	}
+
+	if got, ok := payload["reasoning_effort"].(string); !ok || got != "low" {
+		t.Fatalf("reasoning_effort = %v, want %q", payload["reasoning_effort"], "low")
 	}
 }

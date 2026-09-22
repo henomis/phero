@@ -298,3 +298,74 @@ func TestExecute_APIError_ReturnsError(t *testing.T) {
 		t.Fatal("expected error from 401 response, got nil")
 	}
 }
+
+// payloadCapturingServer records the decoded JSON body of each request and
+// replies with a minimal successful chat completion.
+func payloadCapturingServer(t *testing.T, payload *map[string]any) *httptest.Server {
+	t.Helper()
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			_ = r.Body.Close()
+		}()
+
+		var decoded map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&decoded); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+
+		*payload = decoded
+
+		w.Header().Set("Content-Type", "application/json")
+
+		if err := json.NewEncoder(w).Encode(chatCompletionResponse{
+			Object: "chat.completion",
+			ID:     "chatcmpl-effort",
+			Model:  openai.DefaultModel,
+			Choices: []choice{
+				{Message: message{Role: "assistant", Content: "ok"}, Reason: "stop"},
+			},
+			Usage: usage{PromptTokens: 7, CompletionTokens: 2},
+		}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	}))
+}
+
+func TestExecute_WithReasoningEffort(t *testing.T) {
+	var payload map[string]any
+
+	srv := payloadCapturingServer(t, &payload)
+	defer srv.Close()
+
+	c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"), openai.WithReasoningEffort("high"))
+	msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
+
+	if _, err := c.Execute(context.Background(), msgs, nil); err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+
+	if got, ok := payload["reasoning_effort"].(string); !ok || got != "high" {
+		t.Fatalf("reasoning_effort = %v, want %q", payload["reasoning_effort"], "high")
+	}
+}
+
+// TestExecute_NoReasoningEffort_OmitsField keeps unconfigured clients compatible
+// with endpoints that reject the field.
+func TestExecute_NoReasoningEffort_OmitsField(t *testing.T) {
+	var payload map[string]any
+
+	srv := payloadCapturingServer(t, &payload)
+	defer srv.Close()
+
+	c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"))
+	msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
+
+	if _, err := c.Execute(context.Background(), msgs, nil); err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+
+	if _, present := payload["reasoning_effort"]; present {
+		t.Fatalf("reasoning_effort = %v, want omitted", payload["reasoning_effort"])
+	}
+}
