@@ -122,10 +122,21 @@ func New(apiKey string, opts ...Option) *Client {
 // Execute calls the Anthropic Messages API with the given messages and tools.
 //
 // It converts the response to a Phero assistant message, including any tool calls.
+//
+// A request whose max_tokens implies more than ten minutes of generation cannot
+// be made as a single buffered call — the SDK refuses it outright ("streaming is
+// required for operations that may take longer than 10 minutes"). Rather than
+// hand that constraint to every caller, Execute then streams the same request
+// and assembles the reply, so a large max_tokens (which agentic and coding work
+// wants) behaves like any other call. See executeStreaming.
 func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
 	params, err := c.buildParams(messages, tools)
 	if err != nil {
 		return nil, err
+	}
+
+	if requiresStreaming(params) {
+		return c.executeStreaming(ctx, messages, tools)
 	}
 
 	res, err := c.client.Messages.New(ctx, params)
