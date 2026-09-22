@@ -60,3 +60,11 @@ func (e *ToolArgumentsParseError) Error() string {
 func (e *ToolArgumentsParseError) Unwrap() error {
 	return e.Err
 }
+
+// IncompleteStreamError is returned when a streamed response ends before its
+// terminal chunk, leaving no assembled message to return.
+type IncompleteStreamError struct{}
+
+func (e *IncompleteStreamError) Error() string {
+	return "anthropic: stream ended without a complete message"
+}

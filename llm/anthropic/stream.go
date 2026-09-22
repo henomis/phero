@@ -107,3 +107,37 @@ func (c *Client) ExecuteStream(
 		}, nil)
 	}
 }
+
+// requiresStreaming reports whether params must be sent as a stream: the SDK
+// refuses a buffered request whose max_tokens implies more than ten minutes of
+// generation, and a model with a declared non-streaming ceiling refuses one
+// above it. Asking the SDK keeps the rule in one place — its own — so a change
+// to either limit arrives with the dependency.
+func requiresStreaming(params anthropicapi.MessageNewParams) bool {
+	_, err := anthropicapi.CalculateNonStreamingTimeout(int(params.MaxTokens), params.Model, nil)
+
+	return err != nil
+}
+
+// executeStreaming runs a request over the streaming API and returns the
+// assembled reply, so a caller of Execute never sees the stream. It is the
+// fallback Execute takes for requests that cannot be buffered.
+func (c *Client) executeStreaming(
+	ctx context.Context, messages []llm.Message, tools []*llm.Tool,
+) (*llm.Result, error) {
+	for chunk, err := range c.ExecuteStream(ctx, messages, tools) {
+		if err != nil {
+			return nil, err
+		}
+
+		if !chunk.Done {
+			continue
+		}
+
+		return &llm.Result{Message: chunk.Message, Model: chunk.Model, Usage: chunk.Usage}, nil
+	}
+
+	// The stream ended without its terminal chunk: no message was assembled, so
+	// there is nothing to hand back as a reply.
+	return nil, &IncompleteStreamError{}
+}
