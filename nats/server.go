@@ -74,6 +74,17 @@ type Server struct {
 	drainOnce sync.Once
 	drained   chan struct{}
 	drainErr  error
+
+	// serving is closed once registration has completed and the endpoints are
+	// subscribed on the server, so a caller can wait for "this agent is
+	// callable" instead of polling discovery. stopped is closed when Start
+	// gives up before reaching that point, so a waiter is woken by a failure
+	// rather than by its own timeout; startErr holds why.
+	servingOnce sync.Once
+	serving     chan struct{}
+	stoppedOnce sync.Once
+	stopped     chan struct{}
+	startErr    error
 }
 
 // InstanceName returns the name an agent is registered under: its own name,
@@ -170,7 +181,7 @@ func New(nc *natsclient.Conn, h Handler, owner, name string, opts ...ServerOptio
 // [ErrServerStopped].
 func (s *Server) Start(ctx context.Context) error {
 	if s.hasDrained() {
-		return ErrServerStopped
+		return s.startFailed(ErrServerStopped)
 	}
 
 	// Two lifetimes, deliberately. serveCtx is the server's: cancelling it stops
@@ -194,7 +205,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.mu.Lock()
 	if s.draining {
 		s.mu.Unlock()
-		return ErrServerStopped
+		return s.startFailed(ErrServerStopped)
 	}
 
 	s.stopServing = stopServing
@@ -207,8 +218,19 @@ func (s *Server) Start(ctx context.Context) error {
 	s.mu.Unlock()
 
 	if err != nil {
-		return err
+		return s.startFailed(err)
 	}
+
+	// Registration only queued the subscriptions; the flush is what puts them on
+	// the server, and only then does a discovery request reach this agent. Ready
+	// would otherwise promise callability a beat before it exists. A flush that
+	// does not come back means the connection is not usable, so it fails the
+	// start rather than reporting a server nothing can reach.
+	if err = s.nc.FlushTimeout(readyFlushTimeout); err != nil {
+		return s.startFailed(err)
+	}
+
+	s.markServing()
 
 	<-serveCtx.Done()
 

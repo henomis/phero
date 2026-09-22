@@ -187,6 +187,10 @@ func (s *Server) runDrain() {
 	// cannot grow underneath the wait.
 	idle := s.gate.close()
 
+	// A Server serves once, so one that drains without having served never
+	// will: wake anything waiting on readiness rather than leave it to time out.
+	_ = s.startFailed(ErrServerStopped)
+
 	s.mu.Lock()
 	s.draining = true
 	svc, stopServing, cancelPrompts := s.svc, s.stopServing, s.cancelPrompts
