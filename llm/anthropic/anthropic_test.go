@@ -208,6 +208,7 @@ func TestExecute_ToolUse_NormalizesLegacyAntmlParameterDelimiter(t *testing.T) {
 	defer srv.Close()
 
 	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
+
 	result, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("list streams"))}, nil)
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
