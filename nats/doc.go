@@ -45,6 +45,11 @@
 // [Server.Drain] and [WithDrainTimeout] for the budget. Drain is also how you
 // trigger the same shutdown from elsewhere, on a context of your own.
 //
+// Start blocks for the server's whole life; [Server.Ready] is closed once the
+// broker has the registration and the first heartbeat, so the agent can be
+// discovered and prompted. It is never closed if Start fails or the server
+// drains first, so wait on it together with Start's result.
+//
 // A prompt must fit in one NATS message, so it is limited by the agent's
 // advertised max_payload. An answer is not: one larger than the server
 // connection's max_payload is sent as several response chunks, which

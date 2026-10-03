@@ -166,6 +166,36 @@ go func() {
 _ = srv.Start(context.Background())</code></pre>
     </section>
 
+    <section id="readiness">
+      <h2>Readiness</h2>
+      <p>
+        <code>Start</code> blocks for the server's whole life. To know when the agent can take prompts, wait on
+        <code>srv.Ready()</code>. The channel closes once the service is registered, the first heartbeat is
+        published, and the broker has acknowledged both with a flush. From then on, any connection can discover
+        and prompt the agent.
+      </p>
+      <p>
+        <code>Ready()</code> never closes if <code>Start</code> fails or the server drains first, so wait on it
+        together with <code>Start</code>'s result:
+      </p>
+
+      <pre><code class="language-go">errc := make(chan error, 1)
+go func() { errc &lt;- srv.Start(ctx) }()
+
+select {
+case &lt;-srv.Ready():
+    // registered and reachable
+case err := &lt;-errc:
+    return err
+}</code></pre>
+
+      <p>
+        It is a one-time startup signal, not a health check: it stays closed after a lost connection and after a
+        drain. A <code>Resolver</code> in the same process still needs to receive a heartbeat of its own before it
+        reports the agent online; <code>WaitReady</code> covers that.
+      </p>
+    </section>
+
     <section>
       <h2>Identifiers, sessions and payload limits</h2>
       <p>
@@ -525,6 +555,7 @@ OPENAI_API_KEY=&lt;key&gt; go run ./examples/nats-agent/multi-agent/orchestrator
       <ul>
         <li><code>nats.New(nc, handler, owner, name, opts...) (*Server, error)</code> — create a server; <code>handler</code> is any <code>Handler</code>, e.g. <code>*agent.Agent</code></li>
         <li><code>srv.Start(ctx) error</code> — serve until ctx is cancelled, then drain; returns <code>ErrServerStopped</code> if the server has already drained</li>
+        <li><code>srv.Ready() &lt;-chan struct{}</code> — closed once the service is registered and the broker has acknowledged it and the first heartbeat; never closed if <code>Start</code> fails or the server drains first</li>
         <li><code>srv.Drain(ctx) error</code> — stop accepting prompts and wait for in-flight ones; safe to call concurrently and more than once</li>
       </ul>
 

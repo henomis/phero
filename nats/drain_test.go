@@ -44,6 +44,7 @@ func newTestServer(t *testing.T, drainTimeout time.Duration) (*Server, context.C
 		name:          "worker",
 		gate:          newGate(),
 		drained:       make(chan struct{}),
+		ready:         make(chan struct{}),
 		stopServing:   stopServing,
 		cancelPrompts: cancelPrompts,
 	}
@@ -435,5 +436,78 @@ func TestStartDuringDrainIsRejected(t *testing.T) {
 	// AddService rather than return.
 	if err := s.Start(context.Background()); !errors.Is(err, ErrServerStopped) {
 		t.Fatalf("Start during drain = %v, want ErrServerStopped", err)
+	}
+}
+
+// TestReadyStaysOpenWhenStartIsRejected pins that Ready is never closed by a
+// Start that did not serve: a caller waiting on it must take Start's error
+// instead, so a closed Ready always means "reachable".
+func TestReadyStaysOpenWhenStartIsRejected(t *testing.T) {
+	t.Run("after drain", func(t *testing.T) {
+		s, _ := newTestServer(t, time.Second)
+
+		if err := s.Drain(context.Background()); err != nil {
+			t.Fatalf("Drain: %v", err)
+		}
+
+		if err := s.Start(context.Background()); !errors.Is(err, ErrServerStopped) {
+			t.Fatalf("Start = %v, want ErrServerStopped", err)
+		}
+
+		assertNotReady(t, s)
+	})
+
+	t.Run("during drain", func(t *testing.T) {
+		s, _ := newTestServer(t, time.Second)
+
+		s.mu.Lock()
+		s.draining = true
+		s.mu.Unlock()
+
+		if err := s.Start(context.Background()); !errors.Is(err, ErrServerStopped) {
+			t.Fatalf("Start = %v, want ErrServerStopped", err)
+		}
+
+		assertNotReady(t, s)
+	})
+}
+
+// TestMarkReadyLosesToADrain pins the race between readiness and a drain: once
+// a drain has begun, the server is going away, and announcing it as ready
+// would send callers to it.
+func TestMarkReadyLosesToADrain(t *testing.T) {
+	s, _ := newTestServer(t, time.Second)
+
+	s.mu.Lock()
+	s.draining = true
+	s.mu.Unlock()
+
+	s.markReady()
+	assertNotReady(t, s)
+}
+
+func assertNotReady(t *testing.T, s *Server) {
+	t.Helper()
+
+	select {
+	case <-s.Ready():
+		t.Fatal("Ready is closed, want open")
+	default:
+	}
+}
+
+// TestMarkReadyTwiceDoesNotPanic pins that readiness is idempotent: a second
+// Start on a live server reaches markReady again, and closing ready twice
+// would panic.
+func TestMarkReadyTwiceDoesNotPanic(t *testing.T) {
+	s, _ := newTestServer(t, time.Second)
+
+	s.markReady()
+	s.markReady()
+
+	select {
+	case <-s.Ready():
+	default:
+		t.Fatal("Ready is open, want closed")
 	}
 }

@@ -45,6 +45,15 @@ const (
 	errCodeResponseFailed   = "response_failed"
 )
 
+// readyFlushTimeout bounds each flush that confirms registration with the
+// broker, and readyRetryInterval spaces the retries while the connection is
+// down. Neither bounds readiness itself: Start keeps trying until it serves or
+// shuts down.
+const (
+	readyFlushTimeout  = 5 * time.Second
+	readyRetryInterval = 250 * time.Millisecond
+)
+
 // natsDefaultMaxPayload is NATS's default max_payload (1MB), assumed when the
 // connection does not report its own.
 const natsDefaultMaxPayload = 1 << 20
@@ -90,6 +99,10 @@ type Server struct {
 	drainOnce sync.Once
 	drained   chan struct{}
 	drainErr  error
+
+	// ready is closed, under mu, when the broker has the registration and the
+	// first heartbeat. It stays open if Start fails or a drain gets there first.
+	ready chan struct{}
 }
 
 // InstanceName returns the name an agent is registered under: its own name,
@@ -169,6 +182,7 @@ func New(nc *natsclient.Conn, h Handler, owner, name string, opts ...ServerOptio
 		name:    name,
 		gate:    newGate(),
 		drained: make(chan struct{}),
+		ready:   make(chan struct{}),
 	}, nil
 }
 
@@ -226,6 +240,8 @@ func (s *Server) Start(ctx context.Context) error {
 		return err
 	}
 
+	s.awaitReady(serveCtx)
+
 	<-serveCtx.Done()
 
 	// ctx is done — that is the shutdown signal — so waiting on it would end the
@@ -235,6 +251,74 @@ func (s *Server) Start(ctx context.Context) error {
 	// WithDrainTimeout instead. A caller who wants a tighter bound on its own
 	// wait should call Drain with a context of its own.
 	return s.Drain(context.WithoutCancel(ctx))
+}
+
+// Ready returns a channel that is closed once [Server.Start] has registered the
+// service and the broker has acknowledged it: from then on, any connection can
+// discover and prompt this agent, and the first heartbeat has been published.
+//
+// It is never closed if Start fails or the server drains first, so wait on it
+// together with Start's result:
+//
+//	errc := make(chan error, 1)
+//	go func() { errc <- srv.Start(ctx) }()
+//
+//	select {
+//	case <-srv.Ready():
+//	case err := <-errc:
+//		return err
+//	}
+//
+// Ready is a one-time startup signal, not a health check: it stays closed
+// through a lost connection and after a drain.
+func (s *Server) Ready() <-chan struct{} {
+	return s.ready
+}
+
+// awaitReady closes ready once the broker has processed the registration and
+// the first heartbeat. When register returns, both are only buffered — micro
+// subscribes without flushing — and a prompt sent before the broker has the
+// subscriptions finds no responders. The broker handles a connection's
+// protocol in order, so a flush round-trip confirms everything before it.
+//
+// While the connection is down the flush fails; the subscriptions are replayed
+// on reconnect, so it retries until serving ends.
+func (s *Server) awaitReady(ctx context.Context) {
+	for {
+		flushCtx, cancel := context.WithTimeout(ctx, readyFlushTimeout)
+		err := s.nc.FlushWithContext(flushCtx)
+
+		cancel()
+
+		if err == nil {
+			s.markReady()
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(readyRetryInterval):
+		}
+	}
+}
+
+// markReady closes ready unless a drain has begun: a server that is going away
+// must not announce itself. Holding s.mu makes the check-then-close atomic, so
+// a second Start on the same server cannot close it twice.
+func (s *Server) markReady() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.draining {
+		return
+	}
+
+	select {
+	case <-s.ready:
+	default:
+		close(s.ready)
+	}
 }
 
 // promptSubject is the subject the prompt endpoint serves on (§2).
@@ -260,6 +344,12 @@ func (s *Server) promptMetadata() map[string]string {
 // register adds the micro service and its endpoints and starts the heartbeat
 // publisher. Callers hold s.mu. On error nothing is left registered.
 func (s *Server) register(serveCtx, promptCtx context.Context) (natsio.Service, error) {
+	// micro.AddService dereferences nil on a closed connection (nats.go v1.52.0)
+	// instead of returning an error.
+	if s.nc.IsClosed() {
+		return nil, fmt.Errorf("nats: register micro service: %w", natsclient.ErrConnectionClosed)
+	}
+
 	metadata := map[string]string{
 		metaAgent:           s.cfg.agentID,
 		metaOwner:           s.owner,
@@ -308,6 +398,9 @@ func (s *Server) register(serveCtx, promptCtx context.Context) (natsio.Service, 
 
 	instanceID := svc.Info().ID
 
+	// The first heartbeat goes out now rather than from the publisher, so the
+	// flush that marks the server ready covers it too.
+	s.publishHeartbeat(hbSubject, instanceID)
 	s.hbWG.Go(func() { s.startHeartbeats(serveCtx, hbSubject, instanceID) })
 
 	return svc, nil

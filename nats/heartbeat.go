@@ -181,18 +181,18 @@ func agentFromHeartbeatSubject(subject string) (owner, name string, ok bool) {
 	return parts[3], parts[4], true
 }
 
-// startHeartbeats publishes heartbeats on agents.hb.{agent}.{owner}.{name}
-// per §8.1.  The first heartbeat is published immediately so that subscribers
-// who connect after the server does not need to wait a full interval (§8.5).
-//
-// The goroutine exits when ctx is done; callers must call wg.Done() when
-// this returns.
-func (s *Server) startHeartbeats(ctx context.Context, subject, instanceID string) {
-	publish := func() {
-		_ = s.nc.Publish(subject, encodeHeartbeat(s.heartbeat(instanceID)))
-	}
+// publishHeartbeat publishes one heartbeat on agents.hb.{agent}.{owner}.{name}
+// (§8.1). A failed publish is not retried: the next tick is the retry.
+func (s *Server) publishHeartbeat(subject, instanceID string) {
+	_ = s.nc.Publish(subject, encodeHeartbeat(s.heartbeat(instanceID)))
+}
 
-	publish()
+// startHeartbeats publishes a heartbeat every interval until ctx is done. The
+// first one is published by register, before this starts, so that subscribers
+// who connect after the server do not wait a full interval (§8.5) and so that
+// readiness covers it.
+func (s *Server) startHeartbeats(ctx context.Context, subject, instanceID string) {
+	publish := func() { s.publishHeartbeat(subject, instanceID) }
 
 	ticker := time.NewTicker(s.cfg.heartbeatInterval)
 	defer ticker.Stop()
