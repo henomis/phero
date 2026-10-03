@@ -129,12 +129,14 @@ func (c *Client) buildRequest(messages []llm.Message, opts []llm.CallOption) (op
 		}
 	}
 
+	// tool_choice goes only with tools: Validate already rejects required and
+	// forced choices without them, and with no tools auto and none hold anyway.
 	if len(cfg.Tools) > 0 {
 		request.Tools = c.openaiTools(cfg.Tools)
-	}
 
-	if cfg.ToolChoice != nil {
-		request.ToolChoice = toolChoiceToOpenAI(cfg.ToolChoice)
+		if cfg.ToolChoice != nil {
+			request.ToolChoice = toolChoiceToOpenAI(cfg.ToolChoice)
+		}
 	}
 
 	if f := cfg.ResponseFormat; f != nil {

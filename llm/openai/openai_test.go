@@ -516,3 +516,28 @@ func TestExecute_InvalidCallOptions_FailBeforeRequest(t *testing.T) {
 		t.Fatal("request was sent despite invalid options")
 	}
 }
+
+// TestExecute_ToolChoiceWithoutTools_IsOmitted verifies that auto or none on a
+// call that offers no tools sends no tool_choice: OpenAI rejects tool_choice
+// without tools, and with no tools both modes already hold.
+func TestExecute_ToolChoiceWithoutTools_IsOmitted(t *testing.T) {
+	for _, mode := range []llm.ToolChoiceMode{llm.ToolChoiceAuto, llm.ToolChoiceNone} {
+		t.Run(string(mode), func(t *testing.T) {
+			var payload map[string]any
+
+			srv := payloadCapturingServer(t, &payload)
+			defer srv.Close()
+
+			c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"))
+
+			if _, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))},
+				llm.WithToolChoice(mode)); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+
+			if _, present := payload["tool_choice"]; present {
+				t.Fatalf("tool_choice = %#v, want omitted", payload["tool_choice"])
+			}
+		})
+	}
+}

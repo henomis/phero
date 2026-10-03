@@ -917,3 +917,33 @@ func TestExecute_InvalidCallOptions_FailBeforeRequest(t *testing.T) {
 		t.Fatal("request was sent despite invalid options")
 	}
 }
+
+// TestExecute_ToolChoiceWithoutTools_IsOmitted verifies that auto or none on a
+// call that offers no tools sends no tool_choice: with no tools both modes
+// already hold, and providers may reject tool_choice without tools.
+func TestExecute_ToolChoiceWithoutTools_IsOmitted(t *testing.T) {
+	for _, mode := range []llm.ToolChoiceMode{llm.ToolChoiceAuto, llm.ToolChoiceNone} {
+		t.Run(string(mode), func(t *testing.T) {
+			var body []byte
+
+			srv := capturingServer(t, &body)
+			defer srv.Close()
+
+			c := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
+
+			if _, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))},
+				llm.WithToolChoice(mode)); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+
+			var req map[string]any
+			if err := json.Unmarshal(body, &req); err != nil {
+				t.Fatalf("unmarshal request: %v (body: %s)", err, body)
+			}
+
+			if _, present := req["tool_choice"]; present {
+				t.Fatalf("tool_choice = %#v, want omitted", req["tool_choice"])
+			}
+		})
+	}
+}

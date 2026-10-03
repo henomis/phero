@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -461,7 +462,7 @@ func (s *Server) sendResponse(req natsio.Request, text string) {
 	for _, chunk := range chunks {
 		if err := req.Respond(chunk); err != nil {
 			errCode := errCodeResponseFailed
-			if errors.Is(err, natsclient.ErrMaxPayload) {
+			if isMaxPayloadError(err) {
 				errCode = errCodeResponseTooLarge
 			}
 
@@ -472,6 +473,14 @@ func (s *Server) sendResponse(req natsio.Request, text string) {
 	}
 
 	_ = req.Respond(nil) // terminator (§6.5)
+}
+
+// isMaxPayloadError reports whether err is a publish rejected for exceeding
+// max_payload. micro.Request.Respond wraps the publish error with %s, not %w,
+// so ErrMaxPayload only survives as text.
+func isMaxPayloadError(err error) bool {
+	return errors.Is(err, natsclient.ErrMaxPayload) ||
+		strings.Contains(err.Error(), natsclient.ErrMaxPayload.Error())
 }
 
 // maxPublishBytes is the largest message this server can publish: the

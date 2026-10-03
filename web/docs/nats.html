@@ -228,7 +228,7 @@ if err != nil {
 }
 
 // Stream a prompt to the first discovered agent
-stream, err := c.Prompt(ctx, agents[0], "What is NATS?")
+stream, err := agents[0].Prompt(ctx, "What is NATS?")
 if err != nil {
     panic(err)
 }
@@ -258,7 +258,7 @@ fmt.Println(text)</code></pre>
         attachments (raw bytes; the base64 encoding is done for you) and extra NATS headers:
       </p>
 
-      <pre><code class="language-go">stream, err := c.Send(ctx, agents[0], &amp;natsagent.Request{
+      <pre><code class="language-go">stream, err := agents[0].Send(ctx, &amp;natsagent.Request{
     Prompt:      "Summarise this report",
     Attachments: []natsagent.Attachment{{Filename: "report.pdf", Content: pdfBytes}},
     Header:      nats.Header{"X-Tenant": []string{"acme"}},

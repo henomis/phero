@@ -17,6 +17,7 @@ package nats
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -51,7 +52,9 @@ func (r *fakeRequest) Error(code, description string, data []byte, _ ...natsio.R
 
 func (r *fakeRequest) Respond(data []byte, _ ...natsio.RespondOpt) error {
 	if r.maxPayload > 0 && len(data) > r.maxPayload {
-		return natsclient.ErrMaxPayload
+		// micro.Request.Respond flattens the publish error into text, so
+		// ErrMaxPayload does not survive in the chain (nats.go micro/request.go).
+		return fmt.Errorf("%w: %s", natsio.ErrRespond, natsclient.ErrMaxPayload)
 	}
 
 	r.responses = append(r.responses, data)

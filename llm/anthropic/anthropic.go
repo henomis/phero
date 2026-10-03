@@ -223,12 +223,14 @@ func (c *Client) buildParams(messages []llm.Message, opts []llm.CallOption) (ant
 
 	params.MaxTokens = maxTokens
 
+	// tool_choice goes only with tools: Validate already rejects required and
+	// forced choices without them, and with no tools auto and none hold anyway.
 	if len(cfg.Tools) > 0 {
 		params.Tools = anthropicTools(cfg.Tools)
-	}
 
-	if cfg.ToolChoice != nil {
-		params.ToolChoice = toolChoiceToAnthropic(cfg.ToolChoice)
+		if cfg.ToolChoice != nil {
+			params.ToolChoice = toolChoiceToAnthropic(cfg.ToolChoice)
+		}
 	}
 
 	if c.promptCaching {
