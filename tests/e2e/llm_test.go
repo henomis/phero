@@ -37,7 +37,7 @@ func TestOpenAILLM_TextGeneration(t *testing.T) {
 		llm.UserMessage(llm.Text("Reply with exactly the word PONG and nothing else.")),
 	}
 
-	result, err := client.Execute(ctx, messages, nil)
+	result, err := client.Execute(ctx, messages)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestOpenAILLM_SystemPrompt(t *testing.T) {
 		llm.UserMessage(llm.Text("What is the answer?")),
 	}
 
-	result, err := client.Execute(ctx, messages, nil)
+	result, err := client.Execute(ctx, messages)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestOpenAILLM_ToolCall(t *testing.T) {
 		llm.UserMessage(llm.Text("Please ping.")),
 	}
 
-	result, err := client.Execute(ctx, messages, []*llm.Tool{tool})
+	result, err := client.Execute(ctx, messages, llm.WithTools(tool))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestAnthropicLLM_TextGeneration(t *testing.T) {
 		llm.UserMessage(llm.Text("Reply with exactly the word PONG and nothing else.")),
 	}
 
-	result, err := client.Execute(ctx, messages, nil)
+	result, err := client.Execute(ctx, messages)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestAnthropicLLM_ToolCall(t *testing.T) {
 		llm.UserMessage(llm.Text("Please call the echo tool with message 'hello'.")),
 	}
 
-	result, err := client.Execute(ctx, messages, []*llm.Tool{tool})
+	result, err := client.Execute(ctx, messages, llm.WithTools(tool))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestOpenAILLM_MultiTurn(t *testing.T) {
 		llm.UserMessage(llm.Text("My name is Alice.")),
 	}
 
-	result, err := client.Execute(ctx, messages, nil)
+	result, err := client.Execute(ctx, messages)
 	if err != nil {
 		t.Fatalf("first turn Execute: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestOpenAILLM_MultiTurn(t *testing.T) {
 	messages = append(messages, *result.Message)
 	messages = append(messages, llm.UserMessage(llm.Text("What is my name?")))
 
-	result, err = client.Execute(ctx, messages, nil)
+	result, err = client.Execute(ctx, messages)
 	if err != nil {
 		t.Fatalf("second turn Execute: %v", err)
 	}

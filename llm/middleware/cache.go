@@ -16,6 +16,8 @@ package middleware
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"sort"
 	"strings"
@@ -33,6 +35,9 @@ const (
 	defaultSimilarityThreshold = 0.95
 	// cachePayloadKey is the vectorstore payload key holding the serialized result.
 	cachePayloadKey = "result"
+	// cacheContractKey is the vectorstore payload key holding the call contract
+	// fingerprint (see callContract).
+	cacheContractKey = "contract"
 )
 
 // SemanticCacheOption configures a SemanticCache middleware.
@@ -129,35 +134,38 @@ type semanticCacheLLM struct {
 // Cache failures (embedding, store) never block a call: they degrade to a
 // normal, uncached Execute.
 func (s *semanticCacheLLM) Execute(
-	ctx context.Context, messages []llm.Message, tools []*llm.Tool,
+	ctx context.Context, messages []llm.Message, opts ...llm.CallOption,
 ) (*llm.Result, error) {
-	if s.cfg.skipWithTools && len(tools) > 0 {
-		return s.inner.Execute(ctx, messages, tools)
+	cfg := llm.NewCallConfig(opts...)
+
+	if s.cfg.skipWithTools && len(cfg.Tools) > 0 {
+		return s.inner.Execute(ctx, messages, opts...)
 	}
 
 	if err := s.ensureCollection(ctx); err != nil {
-		return s.inner.Execute(ctx, messages, tools)
+		return s.inner.Execute(ctx, messages, opts...)
 	}
 
-	key := cacheKey(messages, tools)
+	contract := callContract(cfg)
+	key := cacheKey(messages, cfg.Tools)
 
 	vectors, err := s.embedder.Embed(ctx, []string{key})
 	if err != nil || len(vectors) == 0 {
-		return s.inner.Execute(ctx, messages, tools)
+		return s.inner.Execute(ctx, messages, opts...)
 	}
 
 	vector := vectors[0]
 
-	if cached := s.lookup(ctx, vector); cached != nil {
+	if cached := s.lookup(ctx, vector, contract); cached != nil {
 		return cached, nil
 	}
 
-	result, err := s.inner.Execute(ctx, messages, tools)
+	result, err := s.inner.Execute(ctx, messages, opts...)
 	if err != nil {
 		return nil, err
 	}
 
-	s.persist(ctx, vector, result)
+	s.persist(ctx, vector, contract, result)
 
 	return result, nil
 }
@@ -172,15 +180,28 @@ func (s *semanticCacheLLM) ensureCollection(ctx context.Context) error {
 }
 
 // lookup returns a cached result when the nearest neighbour meets the
-// configured similarity threshold, or nil on a miss or any failure.
-func (s *semanticCacheLLM) lookup(ctx context.Context, vector vectorstore.Vector) *llm.Result {
-	scored, err := s.store.Query(ctx, vector, 1)
+// configured similarity threshold and was stored under the same call contract,
+// or nil on a miss or any failure.
+func (s *semanticCacheLLM) lookup(ctx context.Context, vector vectorstore.Vector, contract string) *llm.Result {
+	// Filter in the store, not after it: the nearest point overall may belong to
+	// another contract while a matching entry sits just behind it.
+	filter := vectorstore.NewFilter(vectorstore.Eq(cacheContractKey, contract))
+
+	scored, err := s.store.Query(ctx, vector, 1, vectorstore.WithFilter(filter))
 	if err != nil || len(scored) == 0 {
 		return nil
 	}
 
 	best := scored[0]
 	if best.Score < s.cfg.threshold {
+		return nil
+	}
+
+	// Similarity is about the conversation; the contract is exact. An answer
+	// stored as free text must never be served to a call that demands a schema,
+	// however close the conversations are. Re-checked here in case a store
+	// applies filters loosely.
+	if stored, _ := best.Payload[cacheContractKey].(string); stored != contract {
 		return nil
 	}
 
@@ -203,7 +224,9 @@ func (s *semanticCacheLLM) lookup(ctx context.Context, vector vectorstore.Vector
 
 // persist stores a result against its conversation embedding for future hits.
 // Failures are silently ignored so caching never breaks a successful call.
-func (s *semanticCacheLLM) persist(ctx context.Context, vector vectorstore.Vector, result *llm.Result) {
+func (s *semanticCacheLLM) persist(
+	ctx context.Context, vector vectorstore.Vector, contract string, result *llm.Result,
+) {
 	if result == nil {
 		return
 	}
@@ -216,8 +239,43 @@ func (s *semanticCacheLLM) persist(ctx context.Context, vector vectorstore.Vecto
 	_ = s.store.Upsert(ctx, []vectorstore.Point{{
 		ID:      uuid.NewString(),
 		Vector:  vector,
-		Payload: map[string]any{cachePayloadKey: string(raw)},
+		Payload: map[string]any{cachePayloadKey: string(raw), cacheContractKey: contract},
 	}})
+}
+
+// callContract fingerprints the parts of a call that constrain the shape of the
+// answer — the response format and the tool choice — so that a cached answer is
+// only served to a call that asked for the same shape. It is empty for an
+// unconstrained call. Entries stored before contracts existed carry none, so
+// they no longer match anything and the cache re-warms.
+func callContract(cfg *llm.CallConfig) string {
+	if cfg.ResponseFormat == nil && cfg.ToolChoice == nil {
+		return ""
+	}
+
+	type contract struct {
+		Format     string          `json:"format,omitempty"`
+		Schema     map[string]any  `json:"schema,omitempty"`
+		ToolChoice *llm.ToolChoice `json:"tool_choice,omitempty"`
+	}
+
+	c := contract{ToolChoice: cfg.ToolChoice}
+	if f := cfg.ResponseFormat; f != nil {
+		c.Format = f.Name()
+		c.Schema = f.Schema()
+	}
+
+	// encoding/json sorts map keys, so equal schemas encode identically.
+	raw, err := json.Marshal(c)
+	if err != nil {
+		// An unencodable contract cannot be compared; a fresh UUID never matches,
+		// so the call is answered by the model rather than from a wrong entry.
+		return uuid.NewString()
+	}
+
+	sum := sha256.Sum256(raw)
+
+	return hex.EncodeToString(sum[:])
 }
 
 // cacheKey builds a stable textual representation of the request used as the

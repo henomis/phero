@@ -137,7 +137,7 @@ func main() {
 
       <pre><code class="language-go">tracedClient := trace.NewLLM(client, text.New(os.Stderr))
 
-result, err := tracedClient.Execute(ctx, messages, tools)</code></pre>
+result, err := tracedClient.Execute(ctx, messages, llm.WithTools(tools...))</code></pre>
 
       <p>
         When the wrapper runs inside an agent, request and response events are automatically annotated with the agent name and

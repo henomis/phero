@@ -161,7 +161,7 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 
 		history := memory.FormatSummaryPrompt(toSummarize)
 
-		summaryMsg, err := m.llm.Execute(ctx, []llm.Message{history}, nil)
+		summaryMsg, err := m.llm.Execute(ctx, []llm.Message{history})
 		if err != nil {
 			return err
 		}

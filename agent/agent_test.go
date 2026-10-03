@@ -38,7 +38,7 @@ type stubLLM struct {
 	delay     time.Duration
 }
 
-func (s *stubLLM) Execute(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+func (s *stubLLM) Execute(_ context.Context, _ []llm.Message, _ ...llm.CallOption) (*llm.Result, error) {
 	if s.delay > 0 {
 		time.Sleep(s.delay)
 	}
@@ -768,5 +768,71 @@ func TestRun_HandoffWithPrecedingToolCall(t *testing.T) {
 
 	if result.HandoffAgents[0].Name() != "worker" {
 		t.Errorf("HandoffAgents[0] = %q, want %q", result.HandoffAgents[0].Name(), "worker")
+	}
+}
+
+// optionRecordingLLM records the resolved call options of every Execute.
+type optionRecordingLLM struct {
+	configs []*llm.CallConfig
+}
+
+func (o *optionRecordingLLM) Execute(_ context.Context, _ []llm.Message, opts ...llm.CallOption) (*llm.Result, error) {
+	o.configs = append(o.configs, llm.NewCallConfig(opts...))
+
+	return &llm.Result{Message: &llm.Message{Role: llm.RoleAssistant, Parts: []llm.ContentPart{llm.Text(`{"answer":"42"}`)}}}, nil
+}
+
+func TestAgent_SendsToolsAndResponseFormat(t *testing.T) {
+	rec := &optionRecordingLLM{}
+	a := mustNew(t, rec, "agent", "desc")
+
+	tool, err := llm.NewTool("echo", "echo", func(_ context.Context, _ struct{}) (string, error) { return "", nil })
+	if err != nil {
+		t.Fatalf("NewTool: %v", err)
+	}
+
+	if addErr := a.AddTool(tool); addErr != nil {
+		t.Fatalf("AddTool: %v", addErr)
+	}
+
+	format, err := llm.NewResponseFormat[struct {
+		Answer string `json:"answer"`
+	}]("answer", "")
+	if err != nil {
+		t.Fatalf("NewResponseFormat: %v", err)
+	}
+
+	a.SetResponseFormat(format)
+
+	if _, runErr := a.Run(context.Background(), llm.Text("q")); runErr != nil {
+		t.Fatalf("Run: %v", runErr)
+	}
+
+	for _, ev := range a.RunStream(context.Background(), llm.Text("q")) {
+		_ = ev
+	}
+
+	if len(rec.configs) != 2 {
+		t.Fatalf("LLM calls = %d, want 2 (Run and RunStream)", len(rec.configs))
+	}
+
+	for i, cfg := range rec.configs {
+		if len(cfg.Tools) != 1 || cfg.Tools[0] != tool {
+			t.Fatalf("call %d: tools = %v, want [echo]", i, cfg.Tools)
+		}
+
+		if cfg.ResponseFormat != format {
+			t.Fatalf("call %d: response format = %v, want %v", i, cfg.ResponseFormat, format)
+		}
+	}
+
+	a.SetResponseFormat(nil)
+
+	if _, runErr := a.Run(context.Background(), llm.Text("q")); runErr != nil {
+		t.Fatalf("Run: %v", runErr)
+	}
+
+	if last := rec.configs[len(rec.configs)-1]; last.ResponseFormat != nil {
+		t.Fatalf("response format = %v after SetResponseFormat(nil), want nil", last.ResponseFormat)
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/henomis/phero/llm"
@@ -115,7 +116,7 @@ func TestExecute_TextResponse(t *testing.T) {
 	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
 	msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
 
-	result, err := c.Execute(context.Background(), msgs, nil)
+	result, err := c.Execute(context.Background(), msgs)
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -170,7 +171,7 @@ func TestExecute_WithToolUse(t *testing.T) {
 	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
 	msgs := []llm.Message{llm.UserMessage(llm.Text("weather in Paris?"))}
 
-	result, err := c.Execute(context.Background(), msgs, []*llm.Tool{tool})
+	result, err := c.Execute(context.Background(), msgs, llm.WithTools(tool))
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -237,7 +238,7 @@ func TestExecute_SystemMessage_Converted(t *testing.T) {
 		llm.UserMessage(llm.Text("hello")),
 	}
 
-	result, err := c.Execute(context.Background(), msgs, nil)
+	result, err := c.Execute(context.Background(), msgs)
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -260,7 +261,7 @@ func TestExecute_UnsupportedRole_ReturnsError(t *testing.T) {
 		{Role: "banana", Parts: []llm.ContentPart{llm.Text("bad role")}},
 	}
 
-	_, err := c.Execute(context.Background(), msgs, nil)
+	_, err := c.Execute(context.Background(), msgs)
 	if err == nil {
 		t.Fatal("expected error for unsupported role")
 	}
@@ -283,7 +284,7 @@ func TestExecute_ToolMessage_MissingToolCallID_ReturnsError(t *testing.T) {
 		llm.ToolResultMessage("", llm.Text("result")), // missing ToolCallID — must error
 	}
 
-	_, err := c.Execute(context.Background(), msgs, nil)
+	_, err := c.Execute(context.Background(), msgs)
 	if !errors.Is(err, anthropic.ErrToolMessageMissingToolCallID) {
 		t.Fatalf("expected ErrToolMessageMissingToolCallID, got %v", err)
 	}
@@ -346,7 +347,7 @@ func TestExecute_ParallelToolResults_MergedIntoSingleUserMessage(t *testing.T) {
 		llm.ToolResultMessage("call_b", llm.Text("rainy")),
 	}
 
-	if _, err := c.Execute(context.Background(), msgs, nil); err != nil {
+	if _, err := c.Execute(context.Background(), msgs); err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
 
@@ -404,7 +405,7 @@ func TestExecute_ToolError_MapsToIsError(t *testing.T) {
 		errResult,
 	}
 
-	if _, err := c.Execute(context.Background(), msgs, nil); err != nil {
+	if _, err := c.Execute(context.Background(), msgs); err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
 
@@ -447,7 +448,7 @@ func TestExecute_DefaultTemperature_MatchesAnthropicSpec(t *testing.T) {
 		defer srv.Close()
 
 		c := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
-		if _, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))}, nil); err != nil {
+		if _, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))}); err != nil {
 			t.Fatalf("Execute: %v", err)
 		}
 
@@ -472,7 +473,7 @@ func TestExecute_DefaultTemperature_MatchesAnthropicSpec(t *testing.T) {
 		defer srv.Close()
 
 		c := anthropic.New("key", anthropic.WithBaseURL(srv.URL), anthropic.WithTemperature(0.2))
-		if _, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))}, nil); err != nil {
+		if _, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))}); err != nil {
 			t.Fatalf("Execute: %v", err)
 		}
 
@@ -498,7 +499,7 @@ func TestExecute_APIError_ReturnsError(t *testing.T) {
 	c := anthropic.New("bad-key", anthropic.WithBaseURL(srv.URL))
 	msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
 
-	_, err := c.Execute(context.Background(), msgs, nil)
+	_, err := c.Execute(context.Background(), msgs)
 	if err == nil {
 		t.Fatal("expected error from 401 response, got nil")
 	}
@@ -523,7 +524,7 @@ func TestExecute_ThinkingResponse_ParsedAsReasoning(t *testing.T) {
 
 	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL), anthropic.WithThinking(1024))
 
-	res, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("q"))}, nil)
+	res, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("q"))})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -560,7 +561,7 @@ func TestExecute_WithThinking_SetsConfigAndOmitsTemperature(t *testing.T) {
 		anthropic.WithMaxTokens(512),
 		anthropic.WithThinking(2048),
 	)
-	if _, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))}, nil); err != nil {
+	if _, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))}); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 
@@ -605,7 +606,7 @@ func TestExecute_ReasoningRoundTrip_EmitsThinkingBlockFirst(t *testing.T) {
 		}),
 		llm.UserMessage(llm.Text("follow up")),
 	}
-	if _, err := c.Execute(context.Background(), msgs, nil); err != nil {
+	if _, err := c.Execute(context.Background(), msgs); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 
@@ -666,7 +667,7 @@ func TestExecute_WithPromptCaching_MarksSystemAndLastTool(t *testing.T) {
 		llm.SystemMessage("you are helpful"),
 		llm.UserMessage(llm.Text("hi")),
 	}
-	if _, execErr := c.Execute(context.Background(), msgs, []*llm.Tool{tool}); execErr != nil {
+	if _, execErr := c.Execute(context.Background(), msgs, llm.WithTools(tool)); execErr != nil {
 		t.Fatalf("Execute: %v", execErr)
 	}
 
@@ -719,7 +720,7 @@ func executeAndDecode(t *testing.T, opts ...anthropic.Option) wireEffortRequest 
 	defer srv.Close()
 
 	c := anthropic.New("key", append([]anthropic.Option{anthropic.WithBaseURL(srv.URL)}, opts...)...)
-	if _, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))}, nil); err != nil {
+	if _, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))}); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 
@@ -816,5 +817,103 @@ func TestExecute_AdaptiveThinking_TakesPrecedenceOverBudget(t *testing.T) {
 
 	if req.Thinking == nil || req.Thinking.Type != "adaptive" || req.Thinking.BudgetTokens != 0 {
 		t.Fatalf("thinking = %+v, want adaptive without budget_tokens", req.Thinking)
+	}
+}
+
+func TestExecute_ToolChoiceAndResponseFormat(t *testing.T) {
+	tool, err := llm.NewTool("lookup", "look something up", func(_ context.Context, _ struct{}) (string, error) {
+		return "", nil
+	})
+	if err != nil {
+		t.Fatalf("NewTool: %v", err)
+	}
+
+	format, err := llm.NewResponseFormat[struct {
+		Answer string `json:"answer"`
+	}]("answer", "the final answer")
+	if err != nil {
+		t.Fatalf("NewResponseFormat: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		choice     llm.CallOption
+		wantChoice map[string]any
+	}{
+		{name: "auto", choice: llm.WithToolChoice(llm.ToolChoiceAuto), wantChoice: map[string]any{"type": "auto"}},
+		{name: "none", choice: llm.WithToolChoice(llm.ToolChoiceNone), wantChoice: map[string]any{"type": "none"}},
+		{name: "required", choice: llm.WithToolChoice(llm.ToolChoiceRequired), wantChoice: map[string]any{"type": "any"}},
+		{
+			name:       "forced",
+			choice:     llm.WithForcedTool("lookup"),
+			wantChoice: map[string]any{"type": "tool", "name": "lookup"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var body []byte
+
+			srv := capturingServer(t, &body)
+			defer srv.Close()
+
+			c := anthropic.New("key", anthropic.WithBaseURL(srv.URL), anthropic.WithEffort(anthropic.EffortLow))
+
+			if _, execErr := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))},
+				llm.WithTools(tool), tt.choice, llm.WithResponseFormat(format)); execErr != nil {
+				t.Fatalf("Execute: %v", execErr)
+			}
+
+			var req struct {
+				ToolChoice   map[string]any `json:"tool_choice"`
+				OutputConfig struct {
+					Effort string `json:"effort"`
+					Format struct {
+						Type   string         `json:"type"`
+						Schema map[string]any `json:"schema"`
+					} `json:"format"`
+				} `json:"output_config"`
+			}
+			if jsonErr := json.Unmarshal(body, &req); jsonErr != nil {
+				t.Fatalf("unmarshal request: %v (body: %s)", jsonErr, body)
+			}
+
+			if !reflect.DeepEqual(req.ToolChoice, tt.wantChoice) {
+				t.Fatalf("tool_choice = %#v, want %#v", req.ToolChoice, tt.wantChoice)
+			}
+
+			// Effort and format share output_config; setting one must not drop the other.
+			if req.OutputConfig.Effort != string(anthropic.EffortLow) {
+				t.Fatalf("output_config.effort = %q, want %q", req.OutputConfig.Effort, anthropic.EffortLow)
+			}
+
+			f := req.OutputConfig.Format
+			if f.Type != "json_schema" || f.Schema["type"] != "object" || f.Schema["description"] != "the final answer" {
+				t.Fatalf("output_config.format = %#v", f)
+			}
+		})
+	}
+
+	if _, ok := format.Schema()["description"]; ok {
+		t.Fatal("the format's own schema was mutated with the description")
+	}
+}
+
+func TestExecute_InvalidCallOptions_FailBeforeRequest(t *testing.T) {
+	var body []byte
+
+	srv := capturingServer(t, &body)
+	defer srv.Close()
+
+	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
+
+	_, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))},
+		llm.WithForcedTool("missing"))
+	if !errors.Is(err, llm.ErrInvalidToolChoice) {
+		t.Fatalf("Execute() = %v, want ErrInvalidToolChoice", err)
+	}
+
+	if body != nil {
+		t.Fatal("request was sent despite invalid options")
 	}
 }

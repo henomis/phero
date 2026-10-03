@@ -119,3 +119,31 @@ func (e *ToolArgumentParseError) Error() string {
 func (e *ToolArgumentParseError) Unwrap() error {
 	return e.Err
 }
+
+// ErrInvalidToolChoice is returned when a call's tool choice is incoherent: an
+// unknown mode, a forced tool that is not offered, or a tool requirement on a
+// call that offers no tools.
+var ErrInvalidToolChoice = errors.New("invalid tool choice")
+
+// ErrInvalidResponseFormat is returned when a response format has no name or
+// no schema.
+var ErrInvalidResponseFormat = errors.New("invalid response format: name and schema are required")
+
+// ErrUnsupportedCallOption is returned by a backend that cannot honor a call
+// option it was given, rather than silently ignoring it.
+var ErrUnsupportedCallOption = errors.New("call option not supported by this LLM")
+
+// ResponseFormatSchemaError is returned when building a response format's JSON
+// schema fails.
+type ResponseFormatSchemaError struct {
+	Name string
+	Err  error
+}
+
+func (e *ResponseFormatSchemaError) Error() string {
+	return fmt.Sprintf("failed to build response format %q schema: %v", e.Name, e.Err)
+}
+
+func (e *ResponseFormatSchemaError) Unwrap() error {
+	return e.Err
+}

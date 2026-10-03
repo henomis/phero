@@ -302,10 +302,64 @@ type Result struct {
 
 // LLM is the minimal interface implemented by chat-model backends.
 //
-// Implementations are expected to accept a list of messages and return the next
-// assistant message. Tools can be configured via WithTools.
+// Implementations accept a list of messages and return the next assistant
+// message. Everything else about the call — the tools offered ([WithTools]),
+// how they may be used ([WithToolChoice], [WithForcedTool]) and the shape of the
+// answer ([WithResponseFormat]) — travels as [CallOption]s, so adding a setting
+// never changes this interface. Implementations resolve them with
+// [NewCallConfig] and should reject, with [ErrUnsupportedCallOption], any they
+// cannot honor rather than ignore it.
 type LLM interface {
-	Execute(context.Context, []Message, []*Tool) (*Result, error)
+	Execute(ctx context.Context, messages []Message, opts ...CallOption) (*Result, error)
+}
+
+// Func adapts an ordinary function to the [LLM] interface. It is the shortest
+// way to write a middleware or a test double:
+//
+//	logging := func(next llm.LLM) llm.LLM {
+//		return llm.Func(func(ctx context.Context, msgs []llm.Message, opts ...llm.CallOption) (*llm.Result, error) {
+//			log.Printf("calling LLM with %d messages", len(msgs))
+//			return next.Execute(ctx, msgs, opts...)
+//		})
+//	}
+type Func func(ctx context.Context, messages []Message, opts ...CallOption) (*Result, error)
+
+// Execute calls f.
+func (f Func) Execute(ctx context.Context, messages []Message, opts ...CallOption) (*Result, error) {
+	return f(ctx, messages, opts...)
+}
+
+// LegacyLLM is the v1 shape of [LLM], with tools as a positional argument.
+type LegacyLLM interface {
+	Execute(ctx context.Context, messages []Message, tools []*Tool) (*Result, error)
+}
+
+// FromLegacy adapts a v1 backend to the [LLM] interface, so a custom
+// implementation written against phero v1 keeps working unchanged.
+//
+// The v1 interface can only carry tools. A call that sets a tool choice or a
+// response format fails with [ErrUnsupportedCallOption] rather than silently
+// running without the constraint.
+func FromLegacy(legacy LegacyLLM) LLM {
+	return &legacyLLM{inner: legacy}
+}
+
+type legacyLLM struct {
+	inner LegacyLLM
+}
+
+func (l *legacyLLM) Execute(ctx context.Context, messages []Message, opts ...CallOption) (*Result, error) {
+	cfg := NewCallConfig(opts...)
+
+	if cfg.ToolChoice != nil {
+		return nil, fmt.Errorf("%w: tool choice", ErrUnsupportedCallOption)
+	}
+
+	if cfg.ResponseFormat != nil {
+		return nil, fmt.Errorf("%w: response format", ErrUnsupportedCallOption)
+	}
+
+	return l.inner.Execute(ctx, messages, cfg.Tools)
 }
 
 // Middleware wraps an LLM, decorating its Execute method with additional behavior.

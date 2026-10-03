@@ -136,7 +136,7 @@ func (a *Agent) streamIteration(
 		gotFinal bool
 	)
 
-	for chunk, err := range llm.StreamOrBuffer(ctx, a.llm, session, a.tools) {
+	for chunk, err := range llm.StreamOrBuffer(ctx, a.llm, session, a.callOptions()...) {
 		if err != nil {
 			stats.recordLLM(time.Since(start), "", nil)
 			return nil, err

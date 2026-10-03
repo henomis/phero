@@ -201,6 +201,37 @@ if result.Summary != nil {
     </section>
 
     <section>
+      <h2>Structured output</h2>
+      <p>
+        <code>SetResponseFormat</code> constrains the agent's final answer to a JSON schema built with
+        <code>llm.NewResponseFormat</code> (see <a href="llm.html">llm</a>). The model still calls tools freely; the format
+        applies to the answer it gives once it stops. Pass <code>nil</code> to go back to free text.
+      </p>
+
+      <pre><code class="language-go">type Verdict struct {
+    Approved bool   `json:"approved"`
+    Reason   string `json:"reason"`
+}
+
+format, err := llm.NewResponseFormat[Verdict]("verdict", "the review decision")
+if err != nil {
+    panic(err)
+}
+
+a.SetResponseFormat(format)
+
+result, err := a.Run(ctx, llm.Text("Review this pull request: ..."))
+if err != nil {
+    panic(err)
+}
+
+var v Verdict
+if err := json.Unmarshal([]byte(result.TextContent()), &v); err != nil {
+    panic(err)
+}</code></pre>
+    </section>
+
+    <section>
       <h2>Streaming output</h2>
       <p>
         <code>Agent.RunStream</code> runs the agent like <code>Run</code> but yields progress as a sequence of

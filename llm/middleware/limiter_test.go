@@ -26,21 +26,21 @@ import (
 
 // stubLLM is a minimal llm.LLM for testing.
 type stubLLM struct {
-	fn func(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error)
+	fn func(ctx context.Context, messages []llm.Message, tools []llm.CallOption) (*llm.Result, error)
 }
 
-func (s *stubLLM) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
-	return s.fn(ctx, messages, tools)
+func (s *stubLLM) Execute(ctx context.Context, messages []llm.Message, opts ...llm.CallOption) (*llm.Result, error) {
+	return s.fn(ctx, messages, opts)
 }
 
 func okLLM(content string) *stubLLM {
-	return &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+	return &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []llm.CallOption) (*llm.Result, error) {
 		return &llm.Result{Message: &llm.Message{Parts: []llm.ContentPart{llm.Text(content)}}}, nil
 	}}
 }
 
 func errLLM(err error) *stubLLM {
-	return &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+	return &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []llm.CallOption) (*llm.Result, error) {
 		return nil, err
 	}}
 }
@@ -82,7 +82,7 @@ func TestNewLimiter_ForwardsResult(t *testing.T) {
 
 	client := llm.Use(okLLM("hello"), mw)
 
-	result, err := client.Execute(context.Background(), nil, nil)
+	result, err := client.Execute(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestNewLimiter_ForwardsError(t *testing.T) {
 
 	client := llm.Use(errLLM(sentinel), mw)
 
-	_, err = client.Execute(context.Background(), nil, nil)
+	_, err = client.Execute(context.Background(), nil)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("got %v, want %v", err, sentinel)
 	}
@@ -122,7 +122,7 @@ func TestNewLimiter_MaxConcurrency(t *testing.T) {
 	)
 
 	gate := make(chan struct{})
-	blocking := &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+	blocking := &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []llm.CallOption) (*llm.Result, error) {
 		mu.Lock()
 
 		current++
@@ -156,7 +156,7 @@ func TestNewLimiter_MaxConcurrency(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			_, _ = client.Execute(context.Background(), nil, nil)
+			_, _ = client.Execute(context.Background(), nil)
 		}()
 	}
 
@@ -190,7 +190,7 @@ func TestNewLimiter_RateLimit(t *testing.T) {
 	// At high RPS the bucket fills almost instantly; just measure that
 	// the next call after a fresh limiter doesn't take longer than 2 intervals.
 	start := time.Now()
-	_, err = client.Execute(context.Background(), nil, nil)
+	_, err = client.Execute(context.Background(), nil)
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -217,7 +217,7 @@ func TestNewLimiter_StopUnblocksTokenWaiter(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		_, execErr := client.Execute(context.Background(), nil, nil)
+		_, execErr := client.Execute(context.Background(), nil)
 		errCh <- execErr
 	}()
 
@@ -244,7 +244,7 @@ func TestNewLimiter_StopUnblocksSemaphoreWaiter(t *testing.T) {
 	}
 
 	gate := make(chan struct{})
-	blocking := &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+	blocking := &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []llm.CallOption) (*llm.Result, error) {
 		<-gate
 		return &llm.Result{Message: &llm.Message{}}, nil
 	}}
@@ -252,7 +252,7 @@ func TestNewLimiter_StopUnblocksSemaphoreWaiter(t *testing.T) {
 	client := llm.Use(blocking, mw)
 
 	// First call occupies the single concurrency slot.
-	go func() { _, _ = client.Execute(context.Background(), nil, nil) }()
+	go func() { _, _ = client.Execute(context.Background(), nil) }()
 
 	time.Sleep(20 * time.Millisecond)
 
@@ -260,7 +260,7 @@ func TestNewLimiter_StopUnblocksSemaphoreWaiter(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		_, execErr := client.Execute(context.Background(), nil, nil)
+		_, execErr := client.Execute(context.Background(), nil)
 		errCh <- execErr
 	}()
 
@@ -305,7 +305,7 @@ func TestNewLimiter_ContextCancelToken(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		_, execErr := client.Execute(ctx, nil, nil)
+		_, execErr := client.Execute(ctx, nil)
 		errCh <- execErr
 	}()
 
@@ -332,7 +332,7 @@ func TestNewLimiter_ContextCancelSemaphore(t *testing.T) {
 	defer stop()
 
 	gate := make(chan struct{})
-	blocking := &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+	blocking := &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []llm.CallOption) (*llm.Result, error) {
 		<-gate
 		return &llm.Result{Message: &llm.Message{}}, nil
 	}}
@@ -340,14 +340,14 @@ func TestNewLimiter_ContextCancelSemaphore(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	client := llm.Use(blocking, mw)
 
-	go func() { _, _ = client.Execute(context.Background(), nil, nil) }()
+	go func() { _, _ = client.Execute(context.Background(), nil) }()
 
 	time.Sleep(20 * time.Millisecond)
 
 	errCh := make(chan error, 1)
 
 	go func() {
-		_, execErr := client.Execute(ctx, nil, nil)
+		_, execErr := client.Execute(ctx, nil)
 		errCh <- execErr
 	}()
 
@@ -378,7 +378,7 @@ func TestNewLimiter_MultiAgentSharedConcurrency(t *testing.T) {
 	)
 
 	gate := make(chan struct{})
-	blocking := &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+	blocking := &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []llm.CallOption) (*llm.Result, error) {
 		mu.Lock()
 
 		current++
@@ -417,7 +417,7 @@ func TestNewLimiter_MultiAgentSharedConcurrency(t *testing.T) {
 			go func(a llm.LLM) {
 				defer wg.Done()
 
-				_, _ = a.Execute(context.Background(), nil, nil)
+				_, _ = a.Execute(context.Background(), nil)
 			}(agent)
 		}
 	}
@@ -452,7 +452,7 @@ func TestNewLimiter_MultiAgentSharedRate(t *testing.T) {
 
 	for _, a := range []llm.LLM{agent1, agent2} {
 		go func(a llm.LLM) {
-			_, execErr := a.Execute(context.Background(), nil, nil)
+			_, execErr := a.Execute(context.Background(), nil)
 			results <- execErr
 		}(a)
 	}

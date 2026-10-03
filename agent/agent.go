@@ -36,11 +36,12 @@ type Agent struct {
 	name        string
 	description string
 
-	maxIterations int
-	tools         []*llm.Tool
-	memory        memory.Memory
-	tracer        trace.Tracer
-	handoffs      map[string]*Agent
+	maxIterations  int
+	tools          []*llm.Tool
+	responseFormat *llm.ResponseFormat
+	memory         memory.Memory
+	tracer         trace.Tracer
+	handoffs       map[string]*Agent
 }
 
 // Result represents the final output of an agent after processing user input and executing any tool calls.
@@ -171,6 +172,24 @@ func (a *Agent) SetMaxIterations(maxIterations int) {
 // If not set, all events are discarded (trace.Noop is the default).
 func (a *Agent) SetTracer(t trace.Tracer) {
 	a.tracer = t
+}
+
+// SetResponseFormat constrains the agent's final answer to a JSON schema
+// (structured output); its text is then a JSON document matching the format.
+// Tool calls are unaffected: the model still calls tools freely, and the format
+// applies to the answer it gives once it stops. Pass nil to restore free text.
+func (a *Agent) SetResponseFormat(format *llm.ResponseFormat) {
+	a.responseFormat = format
+}
+
+// callOptions returns the per-call LLM options every iteration of the loop sends.
+func (a *Agent) callOptions() []llm.CallOption {
+	opts := []llm.CallOption{llm.WithTools(a.tools...)}
+	if a.responseFormat != nil {
+		opts = append(opts, llm.WithResponseFormat(a.responseFormat))
+	}
+
+	return opts
 }
 
 // Run executes the agent loop for the given user input parts.
@@ -351,7 +370,7 @@ func (a *Agent) handleAgentIteration(
 	if emit == nil {
 		tracedLLM := trace.NewLLM(a.llm, a.tracer)
 		start := time.Now()
-		msg, err = tracedLLM.Execute(ctx, session, a.tools)
+		msg, err = tracedLLM.Execute(ctx, session, a.callOptions()...)
 
 		duration := time.Since(start)
 		if err != nil {

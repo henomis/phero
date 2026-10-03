@@ -34,7 +34,7 @@ type limiterLLM struct {
 // Execute acquires a rate-limit token and a concurrency slot before forwarding
 // the call to the inner LLM. Both acquisitions respect ctx cancellation and
 // middleware shutdown.
-func (l *limiterLLM) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
+func (l *limiterLLM) Execute(ctx context.Context, messages []llm.Message, opts ...llm.CallOption) (*llm.Result, error) {
 	select {
 	case <-l.tokens:
 	case <-ctx.Done():
@@ -53,7 +53,7 @@ func (l *limiterLLM) Execute(ctx context.Context, messages []llm.Message, tools 
 
 	defer func() { <-l.semaphore }()
 
-	return l.inner.Execute(ctx, messages, tools)
+	return l.inner.Execute(ctx, messages, opts...)
 }
 
 // runLimiterTokenProducer adds one token to the bucket on each ticker

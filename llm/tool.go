@@ -122,43 +122,9 @@ func NewTool[T, R any](name, description string, handler func(ctx context.Contex
 		return nil, ErrToolNameRequired
 	}
 
-	reflector := &jsonschema.Reflector{
-		ExpandedStruct:             true,
-		RequiredFromJSONSchemaTags: false,
-		AllowAdditionalProperties:  false,
-	}
-
-	var zero T
-
-	t := reflect.TypeOf(zero)
-	if t == nil {
+	schema, ok := reflectSchema[T]()
+	if !ok {
 		return nil, &ToolNilInputTypeError{ToolName: name}
-	}
-
-	schemaType := t
-	schemaTarget := any(&zero)
-
-	if t.Kind() == reflect.Pointer && t.Elem().Kind() == reflect.Struct {
-		// If the handler takes a pointer-to-struct input (e.g. *Input), we still want
-		// to generate a strict object schema based on the underlying struct (Input),
-		// not a nullable pointer schema.
-		schemaType = t.Elem()
-		schemaTarget = reflect.New(schemaType).Interface()
-	}
-
-	var schema *jsonschema.Schema
-	if schemaType.Kind() == reflect.Struct && schemaType.Name() == "" && schemaType.NumField() == 0 {
-		// Avoid panic in jsonschema when reflecting an anonymous empty struct
-		schema = &jsonschema.Schema{
-			Version:    jsonschema.Version,
-			Type:       schemaTypeObject,
-			Properties: jsonschema.NewProperties(),
-		}
-		if !reflector.AllowAdditionalProperties {
-			schema.AdditionalProperties = jsonschema.FalseSchema
-		}
-	} else {
-		schema = reflector.Reflect(schemaTarget)
 	}
 
 	schemaMap, err := mapFromJSON(schema)
@@ -189,6 +155,55 @@ func NewTool[T, R any](name, description string, handler func(ctx context.Contex
 			return handler(ctx, args)
 		},
 	}, nil
+}
+
+// reflectSchema builds the JSON schema of T. A pointer-to-struct is reflected
+// as its struct, so the schema is a strict object rather than a nullable
+// pointer. It reports false when T has a nil zero value (an interface type).
+func reflectSchema[T any]() (*jsonschema.Schema, bool) {
+	reflector := &jsonschema.Reflector{
+		ExpandedStruct:             true,
+		RequiredFromJSONSchemaTags: false,
+		AllowAdditionalProperties:  false,
+	}
+
+	var zero T
+
+	t := reflect.TypeOf(zero)
+	if t == nil {
+		return nil, false
+	}
+
+	schemaType := t
+	schemaTarget := any(&zero)
+
+	if t.Kind() == reflect.Pointer && t.Elem().Kind() == reflect.Struct {
+		schemaType = t.Elem()
+		schemaTarget = reflect.New(schemaType).Interface()
+	}
+
+	if schemaType.Kind() == reflect.Struct && schemaType.Name() == "" && schemaType.NumField() == 0 {
+		// Avoid panic in jsonschema when reflecting an anonymous empty struct
+		schema := &jsonschema.Schema{
+			Version:    jsonschema.Version,
+			Type:       schemaTypeObject,
+			Properties: jsonschema.NewProperties(),
+		}
+		if !reflector.AllowAdditionalProperties {
+			schema.AdditionalProperties = jsonschema.FalseSchema
+		}
+
+		return schema, true
+	}
+
+	// ExpandedStruct inlines the root by looking its name up in the reflected
+	// definitions, and jsonschema panics when there is no such entry — as for an
+	// anonymous struct or a non-struct type. Those are inlined anyway.
+	if schemaType.Kind() != reflect.Struct || schemaType.Name() == "" {
+		reflector.ExpandedStruct = false
+	}
+
+	return reflector.Reflect(schemaTarget), true
 }
 
 // NewRawTool creates a new Tool from an externally supplied JSON Schema and a raw handler.

@@ -16,6 +16,7 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/sashabaranov/go-openai"
@@ -71,16 +72,10 @@ func New(apiKey string, opts ...Option) *Client {
 
 // Execute calls the Chat Completions API with the given messages and returns the
 // model's next message.
-func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
-	request := openai.ChatCompletionRequest{
-		Model:           c.model,
-		Messages:        messagesToOpenAI(messages),
-		Temperature:     c.temperature,
-		ReasoningEffort: c.reasoningEffort,
-	}
-
-	if len(tools) > 0 {
-		request.Tools = c.openaiTools(tools)
+func (c *Client) Execute(ctx context.Context, messages []llm.Message, opts ...llm.CallOption) (*llm.Result, error) {
+	request, err := c.buildRequest(messages, opts)
+	if err != nil {
+		return nil, err
 	}
 
 	response, err := c.client.CreateChatCompletion(ctx, request)
@@ -107,6 +102,65 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*l
 			OutputTokens: response.Usage.CompletionTokens,
 		},
 	}, nil
+}
+
+// buildRequest resolves the call options and converts messages and options
+// into a Chat Completions request. It is shared by Execute and ExecuteStream.
+func (c *Client) buildRequest(messages []llm.Message, opts []llm.CallOption) (openai.ChatCompletionRequest, error) {
+	cfg := llm.NewCallConfig(opts...)
+	if err := cfg.Validate(); err != nil {
+		return openai.ChatCompletionRequest{}, err
+	}
+
+	request := openai.ChatCompletionRequest{
+		Model:           c.model,
+		Messages:        messagesToOpenAI(messages),
+		Temperature:     c.temperature,
+		ReasoningEffort: c.reasoningEffort,
+	}
+
+	if len(cfg.Tools) > 0 {
+		request.Tools = c.openaiTools(cfg.Tools)
+	}
+
+	if cfg.ToolChoice != nil {
+		request.ToolChoice = toolChoiceToOpenAI(cfg.ToolChoice)
+	}
+
+	if f := cfg.ResponseFormat; f != nil {
+		request.ResponseFormat = &openai.ChatCompletionResponseFormat{
+			Type: openai.ChatCompletionResponseFormatTypeJSONSchema,
+			JSONSchema: &openai.ChatCompletionResponseFormatJSONSchema{
+				Name:        f.Name(),
+				Description: f.Description(),
+				Schema:      jsonSchema(f.Schema()),
+				Strict:      true,
+			},
+		}
+	}
+
+	return request, nil
+}
+
+// toolChoiceToOpenAI maps a tool choice to the tool_choice field: a bare mode
+// string, or a function object naming the forced tool.
+func toolChoiceToOpenAI(tc *llm.ToolChoice) any {
+	if tc.Mode == llm.ToolChoiceTool {
+		return openai.ToolChoice{
+			Type:     openai.ToolTypeFunction,
+			Function: openai.ToolFunction{Name: tc.Name},
+		}
+	}
+
+	return string(tc.Mode)
+}
+
+// jsonSchema adapts a schema map to the json.Marshaler go-openai expects.
+type jsonSchema map[string]any
+
+// MarshalJSON encodes the schema as a plain JSON object.
+func (s jsonSchema) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any(s))
 }
 
 // messagesToOpenAI converts Phero messages to go-openai wire types.

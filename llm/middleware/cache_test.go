@@ -56,10 +56,16 @@ func (s *memStore) Upsert(_ context.Context, points []vectorstore.Point) error {
 	return nil
 }
 
-func (s *memStore) Query(_ context.Context, query vectorstore.Vector, limit uint64, _ ...vectorstore.QueryOption) ([]vectorstore.ScoredPoint, error) {
+func (s *memStore) Query(_ context.Context, query vectorstore.Vector, limit uint64, opts ...vectorstore.QueryOption) ([]vectorstore.ScoredPoint, error) {
 	var best *vectorstore.ScoredPoint
 
+	filter := vectorstore.ApplyQueryOptions(opts).Filter
+
 	for i := range s.points {
+		if !vectorstore.MatchPayload(filter, s.points[i].Payload) {
+			continue
+		}
+
 		score := cosine(query, s.points[i].Vector)
 		if best == nil || score > best.Score {
 			best = &vectorstore.ScoredPoint{ID: s.points[i].ID, Score: score, Payload: s.points[i].Payload}
@@ -98,7 +104,7 @@ type countingLLM struct {
 	text  string
 }
 
-func (c *countingLLM) Execute(context.Context, []llm.Message, []*llm.Tool) (*llm.Result, error) {
+func (c *countingLLM) Execute(context.Context, []llm.Message, ...llm.CallOption) (*llm.Result, error) {
 	c.calls++
 	msg := llm.AssistantMessage([]llm.ContentPart{llm.Text(c.text)})
 
@@ -130,7 +136,7 @@ func TestSemanticCache_HitAvoidsSecondCall(t *testing.T) {
 
 	msgs := []llm.Message{llm.UserMessage(llm.Text("hello"))}
 
-	first, err := client.Execute(context.Background(), msgs, nil)
+	first, err := client.Execute(context.Background(), msgs)
 	if err != nil {
 		t.Fatalf("first Execute: %v", err)
 	}
@@ -143,7 +149,7 @@ func TestSemanticCache_HitAvoidsSecondCall(t *testing.T) {
 		t.Fatalf("expected original usage on miss, got %+v", first.Usage)
 	}
 
-	second, err := client.Execute(context.Background(), msgs, nil)
+	second, err := client.Execute(context.Background(), msgs)
 	if err != nil {
 		t.Fatalf("second Execute: %v", err)
 	}
@@ -187,8 +193,8 @@ func TestSemanticCache_BelowThresholdMisses(t *testing.T) {
 
 	client := llm.Use(inner, mw)
 
-	_, _ = client.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("a"))}, nil)
-	_, _ = client.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("b"))}, nil)
+	_, _ = client.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("a"))})
+	_, _ = client.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("b"))})
 
 	if inner.calls != 2 {
 		t.Fatalf("expected 2 inner calls (both misses), got %d", inner.calls)
@@ -215,8 +221,8 @@ func TestSemanticCache_SkipsWhenToolsPresent(t *testing.T) {
 	}
 
 	msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
-	_, _ = client.Execute(context.Background(), msgs, []*llm.Tool{tool})
-	_, _ = client.Execute(context.Background(), msgs, []*llm.Tool{tool})
+	_, _ = client.Execute(context.Background(), msgs, llm.WithTools(tool))
+	_, _ = client.Execute(context.Background(), msgs, llm.WithTools(tool))
 
 	if inner.calls != 2 {
 		t.Fatalf("expected tools to bypass cache (2 calls), got %d", inner.calls)
@@ -241,5 +247,54 @@ func TestNewSemanticCache_Validation(t *testing.T) {
 
 	if _, err := middleware.NewSemanticCache(emb, store, middleware.WithSimilarityThreshold(1.5)); !errors.Is(err, middleware.ErrInvalidThreshold) {
 		t.Fatalf("expected ErrInvalidThreshold, got %v", err)
+	}
+}
+
+// TestSemanticCache_ResponseFormatIsPartOfTheContract verifies that an answer
+// cached for a free-text call is never served to a call that demands a schema
+// (or a different one), even when the conversations embed identically.
+func TestSemanticCache_ResponseFormatIsPartOfTheContract(t *testing.T) {
+	emb := mapEmbedder{fn: func(string) embedding.Vector { return embedding.Vector{1, 0, 0} }}
+	store := &memStore{}
+	inner := &countingLLM{text: "answer"}
+
+	mw, err := middleware.NewSemanticCache(emb, store)
+	if err != nil {
+		t.Fatalf("NewSemanticCache: %v", err)
+	}
+
+	client := llm.Use(inner, mw)
+	msgs := []llm.Message{llm.UserMessage(llm.Text("hello"))}
+
+	newFormat := func(name string) *llm.ResponseFormat {
+		f, fErr := llm.NewResponseFormat[struct {
+			Answer string `json:"answer"`
+		}](name, "")
+		if fErr != nil {
+			t.Fatalf("NewResponseFormat: %v", fErr)
+		}
+
+		return f
+	}
+
+	calls := []struct {
+		name      string
+		opts      []llm.CallOption
+		wantCalls int
+	}{
+		{name: "free text, miss", opts: nil, wantCalls: 1},
+		{name: "schema a, miss", opts: []llm.CallOption{llm.WithResponseFormat(newFormat("a"))}, wantCalls: 2},
+		{name: "schema a again, hit", opts: []llm.CallOption{llm.WithResponseFormat(newFormat("a"))}, wantCalls: 2},
+		{name: "schema b, miss", opts: []llm.CallOption{llm.WithResponseFormat(newFormat("b"))}, wantCalls: 3},
+	}
+
+	for _, c := range calls {
+		if _, execErr := client.Execute(context.Background(), msgs, c.opts...); execErr != nil {
+			t.Fatalf("%s: Execute: %v", c.name, execErr)
+		}
+
+		if inner.calls != c.wantCalls {
+			t.Fatalf("%s: inner calls = %d, want %d", c.name, inner.calls, c.wantCalls)
+		}
 	}
 }

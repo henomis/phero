@@ -117,14 +117,16 @@ type guardrailsLLM struct {
 }
 
 // Execute validates input messages, delegates to inner, and validates the result.
-func (g *guardrailsLLM) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
+func (g *guardrailsLLM) Execute(
+	ctx context.Context, messages []llm.Message, opts ...llm.CallOption,
+) (*llm.Result, error) {
 	for _, guard := range g.cfg.messageGuards {
 		if err := guard.guard(ctx, messages); err != nil {
 			return nil, &GuardrailError{Stage: stageInput, Name: guard.name, Err: err}
 		}
 	}
 
-	result, err := g.inner.Execute(ctx, messages, tools)
+	result, err := g.inner.Execute(ctx, messages, opts...)
 	if err != nil {
 		return nil, err
 	}

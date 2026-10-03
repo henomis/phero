@@ -37,20 +37,17 @@ var _ llm.StreamingLLM = (*Client)(nil)
 //
 //nolint:gocognit,funlen
 func (c *Client) ExecuteStream(
-	ctx context.Context, messages []llm.Message, tools []*llm.Tool,
+	ctx context.Context, messages []llm.Message, opts ...llm.CallOption,
 ) iter.Seq2[llm.StreamChunk, error] {
 	return func(yield func(llm.StreamChunk, error) bool) {
-		request := openai.ChatCompletionRequest{
-			Model:           c.model,
-			Messages:        messagesToOpenAI(messages),
-			Temperature:     c.temperature,
-			ReasoningEffort: c.reasoningEffort,
-			Stream:          true,
-			StreamOptions:   &openai.StreamOptions{IncludeUsage: true},
+		request, err := c.buildRequest(messages, opts)
+		if err != nil {
+			yield(llm.StreamChunk{}, err)
+			return
 		}
-		if len(tools) > 0 {
-			request.Tools = c.openaiTools(tools)
-		}
+
+		request.Stream = true
+		request.StreamOptions = &openai.StreamOptions{IncludeUsage: true}
 
 		stream, err := c.client.CreateChatCompletionStream(ctx, request)
 		if err != nil {

@@ -25,7 +25,7 @@ type mockSummaryLLM struct {
 	called int
 }
 
-func (m *mockSummaryLLM) Execute(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+func (m *mockSummaryLLM) Execute(_ context.Context, _ []llm.Message, _ ...llm.CallOption) (*llm.Result, error) {
 	m.called++
 	return &llm.Result{Message: &llm.Message{Role: llm.RoleSystem, Parts: []llm.ContentPart{llm.Text("summary")}}}, nil
 }

@@ -61,6 +61,71 @@
     </section>
 
     <section>
+      <h2>Call options: tools, tool choice and structured output</h2>
+      <p>
+        <code>Execute(ctx, messages, opts...)</code> takes the conversation plus any number of
+        <code>llm.CallOption</code>s. Everything that belongs to a single call travels this way, so several agents can
+        share one client with different tools and output contracts:
+      </p>
+
+      <ul>
+        <li><code>llm.WithTools(tools...)</code>: offer tools to the model. It can be passed more than once.</li>
+        <li><code>llm.WithToolChoice(mode)</code>: <code>llm.ToolChoiceAuto</code> (the default),
+          <code>llm.ToolChoiceNone</code> or <code>llm.ToolChoiceRequired</code>.</li>
+        <li><code>llm.WithForcedTool(name)</code>: force a call to one specific tool, which must also be offered.</li>
+        <li><code>llm.WithResponseFormat(format)</code>: constrain the answer to a JSON schema (structured output).</li>
+      </ul>
+
+      <pre><code class="language-go">res, err := client.Execute(ctx, msgs,
+    llm.WithTools(search, fetch),
+    llm.WithToolChoice(llm.ToolChoiceRequired),
+)</code></pre>
+
+      <p>
+        Build a response format from a Go type with <code>llm.NewResponseFormat[T]</code>. The schema is generated the same
+        way as tool schemas and normalized to the strict form OpenAI and Anthropic both require. Use
+        <code>llm.NewRawResponseFormat</code> when you already have the schema as a map. The answer's text is a JSON
+        document you decode into <code>T</code>:
+      </p>
+
+      <pre><code class="language-go">type CV struct {
+    Name   string   `json:"name"`
+    Skills []string `json:"skills"`
+}
+
+cvFormat, err := llm.NewResponseFormat[CV]("cv", "a parsed curriculum vitae")
+if err != nil {
+    panic(err)
+}
+
+res, err := extractor.Execute(ctx, msgs, llm.WithResponseFormat(cvFormat))
+if err != nil {
+    panic(err)
+}
+
+var cv CV
+if err := json.Unmarshal([]byte(res.Message.TextContent()), &cv); err != nil {
+    panic(err)
+}</code></pre>
+
+      <p>
+        Backends check the options before sending anything. An inconsistent combination, such as
+        <code>ToolChoiceRequired</code> with no tools or a forced tool that is not offered, fails locally with
+        <code>llm.ErrInvalidToolChoice</code> instead of an opaque provider error. Code that implements or wraps
+        <code>llm.LLM</code> reads the options with <code>llm.NewCallConfig(opts...)</code>.
+      </p>
+
+      <h3>Upgrading from v1</h3>
+      <p>
+        In v1 tools were a positional argument: <code>Execute(ctx, msgs, tools)</code>. Callers now write
+        <code>Execute(ctx, msgs, llm.WithTools(tools...))</code>, or simply <code>Execute(ctx, msgs)</code> instead of
+        passing <code>nil</code>. A custom backend still written against the v1 signature can be wrapped with
+        <code>llm.FromLegacy(old)</code>. It receives the tools, and a call that also sets a tool choice or a response
+        format fails with <code>llm.ErrUnsupportedCallOption</code> rather than silently dropping it.
+      </p>
+    </section>
+
+    <section>
       <h2>Anthropic backend</h2>
       <p>
         <code>llm/anthropic</code> implements <code>llm.LLM</code> using Anthropic's Messages API.
@@ -115,7 +180,7 @@ llmClient := anthropic.New(
     anthropic.WithThinking(2048),
 )
 
-result, _ := llmClient.Execute(ctx, messages, tools)
+result, _ := llmClient.Execute(ctx, messages, llm.WithTools(tools...))
 fmt.Println("reasoning:", result.Message.ReasoningContent())
 fmt.Println("answer:", result.Message.TextContent())</code></pre>
 
@@ -256,9 +321,9 @@ fmt.Println(result.TextContent())</code></pre>
 
       <pre><code class="language-go">// A simple logging middleware
 func loggingMiddleware(next llm.LLM) llm.LLM {
-    return llm.LLMFunc(func(ctx context.Context, msgs []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
+    return llm.Func(func(ctx context.Context, msgs []llm.Message, opts ...llm.CallOption) (*llm.Result, error) {
         fmt.Printf("calling LLM with %d messages\n", len(msgs))
-        result, err := next.Execute(ctx, msgs, tools)
+        result, err := next.Execute(ctx, msgs, opts...)
         fmt.Printf("LLM responded; err=%v\n", err)
         return result, err
     })
@@ -270,6 +335,8 @@ wrapped := llm.Use(base, loggingMiddleware)</code></pre>
 
       <p>
         Middlewares are applied in declaration order: <code>llm.Use(base, m1, m2)</code> means <code>m1</code> is outermost and runs first.
+        A middleware should pass <code>opts...</code> through unchanged; one that needs to look at the tools or the
+        response format reads them with <code>llm.NewCallConfig(opts...)</code>.
         See <a href="https://github.com/henomis/phero/tree/main/examples/llm-middleware">examples/llm-middleware</a> for a full example.
       </p>
 
@@ -305,6 +372,13 @@ client := llm.Use(base, cacheMW)</code></pre>
         By default a cache hit reports zero token usage (no model call was made), keeping cost accounting truthful, and
         requests that carry tools bypass the cache so cached tool calls are never silently replayed. Both behaviors are
         configurable via <code>WithReportCachedUsage</code> and <code>WithSkipToolCalls</code>.
+      </p>
+
+      <p>
+        Similarity only decides whether two conversations are the same. The <em>shape</em> of the answer must match
+        exactly: each entry records the call's response format and tool choice, and a lookup only considers entries
+        stored under the same ones. A free-text answer is never served to a call that asked for a schema, however
+        close the conversations are.
       </p>
     </section>
 
@@ -408,7 +482,7 @@ timeTool.Use(func(tool *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
 
 traced := trace.NewLLM(llmClient, text.New(os.Stderr))
 
-result, err := traced.Execute(ctx, messages, tools)</code></pre>
+result, err := traced.Execute(ctx, messages, llm.WithTools(tools...))</code></pre>
 
       <p>
         When called inside an agent, request and response events are automatically annotated with the agent name and iteration number.
@@ -444,7 +518,7 @@ fmt.Printf("this call cost $%.4f\n", cost)</code></pre>
         the complete <code>Message</code>, <code>Usage</code>, and <code>Model</code>.
       </p>
 
-      <pre><code class="language-go">for chunk, err := range llm.StreamOrBuffer(ctx, llmClient, messages, tools) {
+      <pre><code class="language-go">for chunk, err := range llm.StreamOrBuffer(ctx, llmClient, messages, llm.WithTools(tools...)) {
     if err != nil {
         panic(err)
     }
