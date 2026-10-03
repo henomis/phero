@@ -18,6 +18,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +27,7 @@ import (
 	sdka2a "github.com/a2aproject/a2a-go/v2/a2a"
 
 	pheroA2A "github.com/henomis/phero/a2a"
+	"github.com/henomis/phero/llm"
 )
 
 func TestSanitizeToolName(t *testing.T) {
@@ -94,6 +97,66 @@ func TestAsTool_Success(t *testing.T) {
 
 	if !strings.Contains(string(b), "pong") {
 		t.Errorf("serialized result = %s, want to contain %q", b, "pong")
+	}
+}
+
+// TestAsTool_HandoffWithoutText verifies that a served agent ending in a
+// handoff without text answers with a note naming the target and its context,
+// not with an empty message.
+func TestAsTool_HandoffWithoutText(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	stub := &stubLLM{
+		responses: []*llm.Result{{Message: &llm.Message{
+			Role: llm.RoleAssistant,
+			ToolCalls: []llm.ToolCall{{
+				ID:       "h-1",
+				Type:     llm.ToolTypeFunction,
+				Function: llm.FunctionCall{Name: "handoff_to_billing", Arguments: `{"context":"double charge"}`},
+			}},
+		}}},
+		errs: []error{nil},
+	}
+
+	ag := mustAgent(t, stub, "triage", "Routes requests.")
+	if err := ag.AddHandoff(mustAgent(t, textLLM("ok"), "billing", "Handles billing.")); err != nil {
+		t.Fatalf("AddHandoff: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	srv, err := pheroA2A.New(ag, ts.URL)
+	if err != nil {
+		t.Fatalf("a2a.New: %v", err)
+	}
+
+	srv.Mount(mux)
+
+	client, err := pheroA2A.NewClient(ctx, ts.URL)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	tool, err := client.AsTool()
+	if err != nil {
+		t.Fatalf("AsTool: %v", err)
+	}
+
+	result, err := tool.Handle(ctx, `{"input":"I was charged twice"}`)
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	b, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("json.Marshal result: %v", err)
+	}
+
+	if want := "handed off to billing: double charge"; !strings.Contains(string(b), want) {
+		t.Errorf("serialized result = %s, want to contain %q", b, want)
 	}
 }
 

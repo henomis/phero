@@ -121,6 +121,8 @@ type stubMemory struct {
 	saved       []llm.Message
 	saveErr     error
 	saveDur     time.Duration
+	// saveCtxErr is the ctx.Err() seen by the last Save.
+	saveCtxErr error
 }
 
 func (m *stubMemory) Retrieve(_ context.Context, _ string) ([]llm.Message, error) {
@@ -133,7 +135,9 @@ func (m *stubMemory) Retrieve(_ context.Context, _ string) ([]llm.Message, error
 
 func (m *stubMemory) Clear(_ context.Context) error { return nil }
 
-func (m *stubMemory) Save(_ context.Context, msgs []llm.Message) error {
+func (m *stubMemory) Save(ctx context.Context, msgs []llm.Message) error {
+	m.saveCtxErr = ctx.Err()
+
 	if m.saveDur > 0 {
 		time.Sleep(m.saveDur)
 	}
@@ -286,8 +290,8 @@ func TestRun_Simple(t *testing.T) {
 		t.Fatalf("expected %q, got %q", "Hello, world!", result.TextContent())
 	}
 
-	if len(result.HandoffAgents) != 0 {
-		t.Fatalf("expected no handoff agents, got %v", result.HandoffAgents)
+	if len(result.Handoffs) != 0 {
+		t.Fatalf("expected no handoffs, got %v", result.Handoffs)
 	}
 }
 
@@ -449,7 +453,7 @@ func TestRun_Memory_SaveError_ResultStillReturned(t *testing.T) {
 func TestRun_Handoff(t *testing.T) {
 	worker := mustNew(t, makeStub(textResult("worker done"), nil), "worker", "does work")
 
-	// First call returns a handoff tool call; the agent should set HandoffAgent.
+	// First call returns a handoff tool call; the agent should set Handoffs.
 	orchestrator := mustNew(t,
 		makeStub(
 			toolCallResult("handoff_to_worker", "h-1", `{"context":"go work"}`),
@@ -467,12 +471,83 @@ func TestRun_Handoff(t *testing.T) {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
 
-	if len(result.HandoffAgents) == 0 {
-		t.Fatal("expected HandoffAgents to be set")
+	if len(result.Handoffs) != 1 {
+		t.Fatalf("Handoffs = %v, want one", result.Handoffs)
 	}
 
-	if result.HandoffAgents[0].Name() != "worker" {
-		t.Fatalf("expected handoff to %q, got %q", "worker", result.HandoffAgents[0].Name())
+	if h := result.Handoffs[0]; h.Agent.Name() != "worker" || h.Context != "go work" {
+		t.Fatalf("handoff = {%q, %q}, want {%q, %q}", h.Agent.Name(), h.Context, "worker", "go work")
+	}
+
+	// The model wrote no text, so Parts is empty: the handoff tool's
+	// acknowledgement is not something the model said.
+	if len(result.Parts) != 0 {
+		t.Fatalf("Parts = %v, want empty", result.Parts)
+	}
+
+	if got, want := result.ReplyText(), "handed off to worker: go work"; got != want {
+		t.Fatalf("ReplyText() = %q, want %q", got, want)
+	}
+}
+
+// TestRun_HandoffKeepsModelText returns the text the model wrote alongside the
+// handoff call, without its reasoning.
+func TestRun_HandoffKeepsModelText(t *testing.T) {
+	worker := mustNew(t, makeStub(textResult("worker done"), nil), "worker", "does work")
+
+	handoff := toolCallResult("handoff_to_worker", "h-1", `{"context":"go work"}`)
+	handoff.Message.Parts = []llm.ContentPart{
+		{Type: llm.ContentTypeReasoning, Text: "the worker should do this"},
+		llm.Text("Routing you to the worker."),
+	}
+
+	orchestrator := mustNew(t, makeStub(handoff, nil), "orchestrator", "orchestrates")
+	if err := orchestrator.AddHandoff(worker); err != nil {
+		t.Fatalf("AddHandoff: %v", err)
+	}
+
+	result, err := orchestrator.Run(context.Background(), llm.Text("delegate"))
+	if err != nil {
+		t.Fatalf("Run: unexpected error: %v", err)
+	}
+
+	if len(result.Parts) != 1 || result.TextContent() != "Routing you to the worker." {
+		t.Fatalf("Parts = %v, want only the model's text", result.Parts)
+	}
+
+	if got := result.ReplyText(); got != "Routing you to the worker." {
+		t.Fatalf("ReplyText() = %q, want the model's text", got)
+	}
+}
+
+func TestResult_ReplyText(t *testing.T) {
+	billing := mustNew(t, makeStub(textResult("ok"), nil), "billing", "billing")
+	refunds := mustNew(t, makeStub(textResult("ok"), nil), "refunds", "refunds")
+
+	tests := []struct {
+		name   string
+		result *agent.Result
+		want   string
+	}{
+		{name: "nil", result: nil, want: ""},
+		{name: "text", result: &agent.Result{Parts: []llm.ContentPart{llm.Text("answer")}}, want: "answer"},
+		{name: "no text, no handoff", result: &agent.Result{}, want: ""},
+		{
+			name: "fan-out",
+			result: &agent.Result{Handoffs: []agent.Handoff{
+				{Agent: billing, Context: "double charge"},
+				{Agent: refunds},
+			}},
+			want: "handed off to billing: double charge\nhanded off to refunds",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.result.ReplyText(); got != tt.want {
+				t.Fatalf("ReplyText() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -763,12 +838,12 @@ func TestRun_HandoffWithPrecedingToolCall(t *testing.T) {
 		t.Error("regular_tool was not invoked; expected it to run even when a handoff is in the same batch")
 	}
 
-	if len(result.HandoffAgents) == 0 {
-		t.Fatal("expected HandoffAgents to be set")
+	if len(result.Handoffs) == 0 {
+		t.Fatal("expected Handoffs to be set")
 	}
 
-	if result.HandoffAgents[0].Name() != "worker" {
-		t.Errorf("HandoffAgents[0] = %q, want %q", result.HandoffAgents[0].Name(), "worker")
+	if h := result.Handoffs[0]; h.Agent.Name() != "worker" || h.Context != "go" {
+		t.Errorf("Handoffs[0] = {%q, %q}, want {%q, %q}", h.Agent.Name(), h.Context, "worker", "go")
 	}
 }
 
@@ -880,31 +955,39 @@ func TestRun_HandoffFanOut_DocumentedLoop(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Targets come back in the order the model called them.
-	names := make([]string, 0, len(result.HandoffAgents))
-	for _, target := range result.HandoffAgents {
-		names = append(names, target.Name())
+	// Targets come back in the order the model called them, each with its context.
+	names := make([]string, 0, len(result.Handoffs))
+	contexts := make([]string, 0, len(result.Handoffs))
+
+	for _, h := range result.Handoffs {
+		names = append(names, h.Agent.Name())
+		contexts = append(contexts, h.Context)
 	}
 
 	if want := []string{"researcher", "writer"}; !reflect.DeepEqual(names, want) {
-		t.Fatalf("HandoffAgents = %v, want %v", names, want)
+		t.Fatalf("Handoffs = %v, want %v", names, want)
+	}
+
+	if want := []string{"find facts", "write it up"}; !reflect.DeepEqual(contexts, want) {
+		t.Fatalf("contexts = %v, want %v", contexts, want)
 	}
 
 	if result.Summary == nil || !reflect.DeepEqual(result.Summary.HandoffAgents, names) {
 		t.Fatalf("Summary.HandoffAgents = %v, want %v", result.Summary, names)
 	}
 
-	// The handing-off result's text is the handoff tool's acknowledgement, not
-	// content for the target. That is why the documented loop forwards the
-	// original input rather than result.TextContent().
-	if got, want := result.TextContent(), "handoff_to_researcher: success"; got != want {
-		t.Fatalf("TextContent() = %q, want %q", got, want)
+	// The model wrote no text alongside the handoffs, so there is none: the
+	// handoff tools' acknowledgements are not returned as content.
+	if got := result.TextContent(); got != "" {
+		t.Fatalf("TextContent() = %q, want empty", got)
 	}
 
 	// The documented loop: run every target with the original input.
-	answers := make([]string, 0, len(result.HandoffAgents))
+	answers := make([]string, 0, len(result.Handoffs))
 
-	for _, target := range result.HandoffAgents {
+	for _, h := range result.Handoffs {
+		target := h.Agent
+
 		res, runErr := target.Run(ctx, input)
 		if runErr != nil {
 			t.Fatalf("%s.Run: %v", target.Name(), runErr)

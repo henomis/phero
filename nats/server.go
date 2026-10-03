@@ -406,24 +406,25 @@ func (s *Server) processPrompt(ctx context.Context, req natsio.Request) {
 	}
 
 	s.warnDroppedHandoffs(ctx, result)
-	s.sendResponse(req, result.TextContent())
+	s.sendResponse(req, result.ReplyText())
 }
 
 // warnDroppedHandoffs logs the handoffs in result, which the response cannot
 // carry: the protocol has no field for them, and the caller — another process,
 // perhaps another SDK — could not run a phero agent anyway. Without the
 // warning, an agent that hands off locally would silently stop doing so once
-// served over NATS. Only the text is sent; Summary is dropped too, on every
+// served over NATS. Only the text is sent (agent.Result.ReplyText, which names
+// the targets when the model wrote no text); Summary is dropped too, on every
 // call, so it is documented rather than logged.
 func (s *Server) warnDroppedHandoffs(ctx context.Context, result *agent.Result) {
-	if result == nil || len(result.HandoffAgents) == 0 {
+	if result == nil || len(result.Handoffs) == 0 {
 		return
 	}
 
-	names := make([]string, 0, len(result.HandoffAgents))
-	for _, a := range result.HandoffAgents {
-		if a != nil {
-			names = append(names, a.Name())
+	names := make([]string, 0, len(result.Handoffs))
+	for _, h := range result.Handoffs {
+		if h.Agent != nil {
+			names = append(names, h.Agent.Name())
 		}
 	}
 

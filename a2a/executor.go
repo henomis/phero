@@ -85,8 +85,9 @@ func (e *agentExecutor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorCon
 
 		a2aParts := translateResultToA2A(result)
 		if len(a2aParts) == 0 {
-			// Fallback: use text content from result if part translation produced nothing.
-			a2aParts = []*sdka2a.Part{sdka2a.NewTextPart(result.TextContent())}
+			// Fallback: use the reply text if part translation produced nothing; after a
+			// handoff without text it names the targets the caller cannot run.
+			a2aParts = []*sdka2a.Part{sdka2a.NewTextPart(result.ReplyText())}
 		}
 
 		responseMsg := sdka2a.NewMessageForTask(sdka2a.MessageRoleAgent, execCtx, a2aParts...)

@@ -26,7 +26,7 @@ On the next turn, the cycle restarts from the triage agent.
 ## What you'll learn
 
 - How to call `agent.AddHandoff` to register a target agent as a routing tool
-- How to drive the handoff loop in application code (`result.HandoffAgents`)
+- How to drive the handoff loop in application code (`result.Handoffs`, each with the target agent and the context the model passed it)
 - Why shared memory is required for the specialist to have context
 - How to build a multi-turn chatbot on top of the handoff pattern
 
@@ -69,14 +69,14 @@ Every message is triaged and routed to the right specialist.
 ───────────────────────────────────────
 
 > I was charged twice for my subscription last month.
-[handoff] Triage Agent → Billing Agent
+[handoff] Triage Agent → Billing Agent (user reports a duplicate subscription charge last month)
 
 Billing Agent: I'm sorry to hear you were charged twice! I can see a duplicate charge
 on your last billing cycle. I'll process a full refund within 3–5 business days.
 Is there anything else I can help with?
 
 > The /upload endpoint keeps returning 503 errors.
-[handoff] Triage Agent → Technical Support Agent
+[handoff] Triage Agent → Technical Support Agent (/upload endpoint returns 503 errors)
 
 Technical Support Agent: A 503 on /upload usually means the service is temporarily
 overloaded. Here are a few things to check: ...

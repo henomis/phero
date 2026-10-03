@@ -30,6 +30,9 @@ import (
 
 const maxToolNameLength = 64
 
+// DefaultMaxIterations is the iteration limit of an agent created by New.
+const DefaultMaxIterations = 25
+
 // Agent runs a chat loop using an llm.LLM, optionally with tools and memory.
 type Agent struct {
 	llm         llm.LLM
@@ -47,10 +50,23 @@ type Agent struct {
 // Result represents the final output of an agent after processing user input and executing any tool calls.
 type Result struct {
 	// Parts holds the multimodal content of the final assistant message.
+	//
+	// When the run ends in a handoff, Parts holds the text the model wrote in the
+	// message that made the handoff call, and is empty when it wrote none. A
+	// payload meant for the next agent belongs in Handoff.Context instead.
 	Parts []llm.ContentPart
-	// HandoffAgents lists the agents that were handed work; more than one means fan-out.
-	HandoffAgents []*Agent
-	Summary       *trace.RunSummary
+	// Handoffs lists the handoffs the model made, in call order; more than one
+	// means fan-out. It is empty when the run did not end in a handoff.
+	Handoffs []Handoff
+	Summary  *trace.RunSummary
+}
+
+// Handoff is one handoff made by the model at the end of a run.
+type Handoff struct {
+	// Agent is the agent the work was handed to.
+	Agent *Agent
+	// Context is what the model passed to Agent in HandoffInput.Context.
+	Context string
 }
 
 // TextContent returns the concatenation of all text parts in the result.
@@ -60,6 +76,40 @@ func (r *Result) TextContent() string {
 	}
 
 	return llm.TextContent(r.Parts...)
+}
+
+// ReplyText returns TextContent, or, when that is blank and the run ended in a
+// handoff, a note naming each target and the context the model gave it.
+//
+// Use it where the result is returned to a caller that cannot run the handoff
+// targets (a remote client, a parent agent), so a handoff without text does not
+// read as an empty answer.
+func (r *Result) ReplyText() string {
+	if r == nil {
+		return ""
+	}
+
+	text := r.TextContent()
+	if strings.TrimSpace(text) != "" || len(r.Handoffs) == 0 {
+		return text
+	}
+
+	notes := make([]string, 0, len(r.Handoffs))
+	for _, h := range r.Handoffs {
+		name := ""
+		if h.Agent != nil {
+			name = h.Agent.Name()
+		}
+
+		note := "handed off to " + name
+		if c := strings.TrimSpace(h.Context); c != "" {
+			note += ": " + c
+		}
+
+		notes = append(notes, note)
+	}
+
+	return strings.Join(notes, "\n")
 }
 
 // New creates a new Agent.
@@ -79,12 +129,13 @@ func New(client llm.LLM, name, description string) (*Agent, error) {
 	}
 
 	return &Agent{
-		llm:         client,
-		name:        name,
-		description: description,
-		tools:       make([]*llm.Tool, 0),
-		tracer:      trace.Noop,
-		handoffs:    make(map[string]*Agent),
+		llm:           client,
+		name:          name,
+		description:   description,
+		maxIterations: DefaultMaxIterations,
+		tools:         make([]*llm.Tool, 0),
+		tracer:        trace.Noop,
+		handoffs:      make(map[string]*Agent),
 	}, nil
 }
 
@@ -161,8 +212,9 @@ func (a *Agent) SetMemory(mem memory.Memory) {
 // SetMaxIterations sets a maximum number of iterations for the agent loop.
 //
 // If the limit is reached, Run() returns ErrMaxIterationsReached together with
-// any partial text the model produced so far (the result may be non-nil even
-// when the error is set). By default, there is no limit.
+// a non-nil result holding any partial text the model produced so far and the
+// run's Summary. The default is DefaultMaxIterations; zero or a negative value
+// removes the limit.
 func (a *Agent) SetMaxIterations(maxIterations int) {
 	a.maxIterations = maxIterations
 }
@@ -201,11 +253,17 @@ func (a *Agent) callOptions() []llm.CallOption {
 // the model returns a message without tool calls.
 //
 // If the maximum iterations limit is reached, the function returns
-// ErrMaxIterationsReached together with any partial text the model produced
-// (result may be non-nil even when err is set — use errors.Is to distinguish).
+// ErrMaxIterationsReached together with a non-nil result holding any partial
+// text the model produced and the run's Summary (use errors.Is to distinguish).
 //
-// If the run succeeds but saving the session to memory fails, the result is
-// still returned together with the save error joined via errors.Join.
+// ctx is checked before every iteration, so cancelling it (for example from
+// inside a tool) stops the run even when the LLM ignores ctx. A cancelled run
+// returns a non-nil partial result, like ErrMaxIterationsReached, and an error
+// matching ctx.Err() and, when set, the cause given to context.WithCancelCause.
+//
+// The session is saved to memory even when ctx is cancelled. If saving fails,
+// the result is still returned together with the save error joined via
+// errors.Join.
 func (a *Agent) Run(ctx context.Context, parts ...llm.ContentPart) (*Result, error) {
 	return a.run(ctx, nil, parts...)
 }
@@ -237,38 +295,17 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 	iteration := 0
 
 	defer func() {
-		if saveErr := a.saveSession(ctx, session, sessionIndex, stats); saveErr != nil {
-			err = errors.Join(err, fmt.Errorf("%w: %w", ErrSessionSaveFailed, saveErr))
-		}
-
-		output := ""
-		if result != nil {
-			output = result.TextContent()
-		}
-
-		a.tracer.Trace(trace.AgentEndEvent{
-			AgentName:  a.name,
-			Output:     output,
-			Err:        err,
-			Iterations: iteration,
-			Timestamp:  time.Now(),
-		})
-
-		summary := stats.summary(iteration, handoffAgentNames, err)
-		if result != nil {
-			result.Summary = summary
-		}
-
-		a.tracer.Trace(trace.AgentRunSummaryEvent{
-			Summary:   *summary,
-			Timestamp: time.Now(),
-		})
+		err = a.finishRun(ctx, session, sessionIndex, stats, iteration, handoffAgentNames, result, err)
 	}()
 
 	for {
+		if ctx.Err() != nil {
+			return partialResultFromSession(session[sessionIndex:]), cancellationError(ctx)
+		}
+
 		iteration++
 		if a.maxIterations > 0 && iteration > a.maxIterations {
-			return partialResultFromSession(session), ErrMaxIterationsReached
+			return partialResultFromSession(session[sessionIndex:]), ErrMaxIterationsReached
 		}
 
 		a.tracer.Trace(trace.AgentIterationEvent{
@@ -281,26 +318,70 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 
 		iterationResult, iterErr := a.handleAgentIteration(iterCtx, session, iteration, stats, emit)
 		if iterErr != nil {
+			// An LLM that honours ctx fails on cancellation: report it as a
+			// cancelled run, with its partial result and Summary.
+			if ctx.Err() != nil {
+				return partialResultFromSession(session[sessionIndex:]), cancellationError(ctx)
+			}
+
 			return nil, iterErr
 		}
 
 		session = iterationResult.session
-		if len(iterationResult.handoffAgents) > 0 {
-			for _, ha := range iterationResult.handoffAgents {
-				handoffAgentNames = append(handoffAgentNames, ha.Name())
-			}
-		}
 
-		// If finalMessage is nil, it means the agent executed tool calls and needs to call the LLM again.
-		if iterationResult.lastMessage != nil {
-			return &Result{Parts: iterationResult.lastMessage.Parts, HandoffAgents: iterationResult.handoffAgents}, nil
+		// If result is nil, the agent executed tool calls and needs to call the LLM again.
+		if iterationResult.result != nil {
+			for _, h := range iterationResult.result.Handoffs {
+				handoffAgentNames = append(handoffAgentNames, h.Agent.Name())
+			}
+
+			return iterationResult.result, nil
 		}
 	}
 }
 
-// partialResultFromSession scans the session backwards and returns a Result
-// built from the last assistant message that contains at least one text part.
-// Returns nil if no such message exists.
+// finishRun ends a run: it saves the session to memory, traces the end of the
+// run and attaches its Summary to result. It returns err joined with any save
+// error.
+func (a *Agent) finishRun(
+	ctx context.Context, session []llm.Message, sessionIndex int, stats *runStats,
+	iteration int, handoffAgentNames []string, result *Result, err error,
+) error {
+	// A cancelled run still records its turn: saving must not inherit the cancellation.
+	if saveErr := a.saveSession(context.WithoutCancel(ctx), session, sessionIndex, stats); saveErr != nil {
+		err = errors.Join(err, fmt.Errorf("%w: %w", ErrSessionSaveFailed, saveErr))
+	}
+
+	output := ""
+	if result != nil {
+		output = result.TextContent()
+	}
+
+	a.tracer.Trace(trace.AgentEndEvent{
+		AgentName:  a.name,
+		Output:     output,
+		Err:        err,
+		Iterations: iteration,
+		Timestamp:  time.Now(),
+	})
+
+	summary := stats.summary(iteration, handoffAgentNames, err)
+	if result != nil {
+		result.Summary = summary
+	}
+
+	a.tracer.Trace(trace.AgentRunSummaryEvent{
+		Summary:   *summary,
+		Timestamp: time.Now(),
+	})
+
+	return err
+}
+
+// partialResultFromSession scans the messages of the current run backwards and
+// returns a Result built from the last assistant message that contains at least
+// one text part. The Result is never nil, so the caller still gets the run's
+// Summary; its Parts are empty when the model wrote no text.
 func partialResultFromSession(session []llm.Message) *Result {
 	for i := len(session) - 1; i >= 0; i-- {
 		msg := session[i]
@@ -308,19 +389,36 @@ func partialResultFromSession(session []llm.Message) *Result {
 			continue
 		}
 
-		textParts := make([]llm.ContentPart, 0, len(msg.Parts))
-		for _, p := range msg.Parts {
-			if p.Type == llm.ContentTypeText {
-				textParts = append(textParts, p)
-			}
-		}
-
-		if len(textParts) > 0 {
+		if textParts := textOnly(msg.Parts); len(textParts) > 0 {
 			return &Result{Parts: textParts}
 		}
 	}
 
-	return nil
+	return &Result{}
+}
+
+// cancellationError returns ctx.Err(), wrapped together with the cancellation
+// cause when one was set with context.WithCancelCause, so errors.Is matches both.
+func cancellationError(ctx context.Context) error {
+	err := ctx.Err()
+	if cause := context.Cause(ctx); cause != nil && !errors.Is(cause, err) {
+		return fmt.Errorf("%w: %w", err, cause)
+	}
+
+	return err
+}
+
+// textOnly returns the text parts of parts, dropping reasoning and media.
+func textOnly(parts []llm.ContentPart) []llm.ContentPart {
+	out := make([]llm.ContentPart, 0, len(parts))
+
+	for _, p := range parts {
+		if p.Type == llm.ContentTypeText {
+			out = append(out, p)
+		}
+	}
+
+	return out
 }
 
 // saveSession saves the conversation messages to memory, if memory is configured.
@@ -350,9 +448,9 @@ func (a *Agent) saveSession(ctx context.Context, messages []llm.Message, session
 
 // agentIteration represents the result of one iteration of the agent loop.
 type agentIteration struct {
-	session       []llm.Message
-	lastMessage   *llm.Message
-	handoffAgents []*Agent
+	session []llm.Message
+	// result is the run's final result; nil means the loop must call the LLM again.
+	result *Result
 }
 
 // handleAgentIteration executes one iteration of the agent loop: it calls the LLM with the current messages,
@@ -401,7 +499,7 @@ func (a *Agent) processToolCalls(
 ) (agentIteration, error) {
 	toolCalls := message.ToolCalls
 	if len(toolCalls) == 0 {
-		return agentIteration{session: session, lastMessage: message}, nil
+		return agentIteration{session: session, result: &Result{Parts: message.Parts}}, nil
 	}
 
 	if emit != nil {
@@ -446,29 +544,38 @@ func (a *Agent) processToolCalls(
 	}
 
 	// Append results in order; collect all handoffs (fan-out when more than one).
-	var (
-		handoffAgents []*Agent
-		handoffMsg    *llm.Message
-	)
+	var handoffs []Handoff
 
 	for i, result := range results {
 		session = append(session, *result)
 		if hAgent, ok := a.handoffs[toolCalls[i].Function.Name]; ok {
-			handoffAgents = append(handoffAgents, hAgent)
-
-			if handoffMsg == nil {
-				handoffMsg = result
-			}
+			handoffs = append(handoffs, Handoff{Agent: hAgent, Context: handoffContext(toolCalls[i])})
 		}
 	}
 
-	if len(handoffAgents) > 0 {
-		// All tool results are preserved in session. Return the first handoff tool's
-		// result as lastMessage so callers receive it in Result.Parts.
-		return agentIteration{session: session, lastMessage: handoffMsg, handoffAgents: handoffAgents}, nil
+	if len(handoffs) > 0 {
+		// All tool results are preserved in session. The result carries the text the
+		// model wrote alongside the handoff calls, not the handoff tools' replies.
+		return agentIteration{
+			session: session,
+			result:  &Result{Parts: nonBlankParts(textOnly(message.Parts)), Handoffs: handoffs},
+		}, nil
 	}
 
 	return agentIteration{session: session}, nil
+}
+
+// handoffContext returns the context argument of a handoff tool call.
+//
+// Malformed arguments yield an empty context: the handoff tool itself already
+// failed on them, and that error is recorded in the session as its tool result.
+func handoffContext(tc llm.ToolCall) string {
+	var input HandoffInput
+	if err := json.Unmarshal([]byte(tc.Function.Arguments), &input); err != nil {
+		return ""
+	}
+
+	return input.Context
 }
 
 // handleToolCall executes a tool call and returns the result as a message to be added to the conversation.
@@ -638,7 +745,7 @@ func (a *Agent) AsTool(toolName, toolDescription string) (*llm.Tool, error) {
 			return nil, err
 		}
 
-		return &ToolOutput{Output: response.TextContent()}, nil
+		return &ToolOutput{Output: response.ReplyText()}, nil
 	}
 
 	return llm.NewTool(

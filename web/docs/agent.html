@@ -139,9 +139,10 @@ func main() {
       <h2>Agent handoffs</h2>
       <p>
         An agent can hand work to other agents at runtime. When the model decides a handoff is needed,
-        Run returns with <code>Result.HandoffAgents</code> listing the target agents, in the order the model called
-        them. The caller then runs them. One entry is a plain handoff; more than one means the model fanned the work
-        out to several agents in the same turn.
+        Run returns with <code>Result.Handoffs</code> listing the handoffs, in the order the model called them. Each
+        <code>Handoff</code> holds the target <code>Agent</code> and the <code>Context</code> the model passed it. The
+        caller then runs the targets. One entry is a plain handoff; more than one means the model fanned the work out
+        to several agents in the same turn.
       </p>
       <p>
         Register handoff targets with <code>AddHandoff</code>. Phero automatically creates a synthetic tool
@@ -162,31 +163,38 @@ if err != nil {
     panic(err)
 }
 
-if len(result.HandoffAgents) == 0 {
+if len(result.Handoffs) == 0 {
     // No handoff: the orchestrator answered itself.
     fmt.Println(result.TextContent())
     return
 }
 
 // The orchestrator handed off; run every target it chose.
-for _, target := range result.HandoffAgents {
-    answer, err := target.Run(ctx, llm.Text("Write a short bio of Marie Curie."))
+for _, h := range result.Handoffs {
+    fmt.Printf("handing off to %s: %s\n", h.Agent.Name(), h.Context)
+
+    answer, err := h.Agent.Run(ctx, llm.Text("Write a short bio of Marie Curie."))
     if err != nil {
         panic(err)
     }
-    fmt.Printf("%s: %s\n", target.Name(), answer.TextContent())
+    fmt.Printf("%s: %s\n", h.Agent.Name(), answer.TextContent())
 }</code></pre>
 
       <p>
-        Pass the targets the original input, or give them shared <a href="memory.html">memory</a> so they see the whole
-        conversation. Don't forward <code>result.TextContent()</code>: when a run ends in a handoff, that text is only
-        the handoff tool's acknowledgement (for example <code>handoff_to_writer: success</code>), not content for the
-        target. The names of the targets are also recorded in <code>result.Summary.HandoffAgents</code>.
+        Pass the targets the original input, <code>h.Context</code>, or give them shared
+        <a href="memory.html">memory</a> so they see the whole conversation. When a run ends in a handoff,
+        <code>result.Parts</code> holds only the text the model wrote alongside the handoff call, and is empty when it
+        wrote none, which is common. If the next agent needs a payload, ask the model (in the system prompt) to put it
+        in the handoff's <code>context</code> argument: that is what <code>Handoff.Context</code> carries. The names of
+        the targets are also recorded in <code>result.Summary.HandoffAgents</code>.
       </p>
 
       <p>
-        Handoffs only work where <code>Run</code> is called. An agent served over
-        <a href="nats.html">NATS</a> cannot pass them to its caller: see "What doesn't cross the wire" there.
+        Handoffs only work where <code>Run</code> is called. An agent served over <a href="nats.html">NATS</a> or
+        <a href="a2a.html">A2A</a>, or used as a sub-agent through <code>AsTool</code>, cannot pass them to its
+        caller. Those paths answer with <code>result.ReplyText()</code>: the model's text, or, when it wrote none, a
+        note such as <code>handed off to writer: &lt;context&gt;</code>, so the caller never gets an empty answer.
+        See "What doesn't cross the wire" in the NATS docs.
       </p>
 
       <p>
@@ -201,7 +209,7 @@ for _, target := range result.HandoffAgents {
       </p>
       <ul>
         <li><code>Parts []llm.ContentPart</code>: the model's final response; call <code>result.TextContent()</code> to get the plain text</li>
-        <li><code>HandoffAgents []*Agent</code>: the agents the model handed work to; empty when there was no handoff, and more than one means fan-out</li>
+        <li><code>Handoffs []Handoff</code>: the handoffs the model made, each with its target <code>Agent</code> and the <code>Context</code> passed to it; empty when there was no handoff, and more than one means fan-out</li>
         <li><code>Summary *trace.RunSummary</code>: aggregated observability data for the run (token usage, latency, tool call counts, etc.)</li>
       </ul>
 
@@ -309,8 +317,48 @@ conversationMemory := memory.New(20)
 
 a.SetMemory(conversationMemory)
 
-// Guardrail against tool-call loops
+// Guardrail against tool-call loops (the default is 25)
 a.SetMaxIterations(10)</code></pre>
+
+      <p>
+        The conversation is saved even when the run is cancelled: the save does not inherit the cancellation of the
+        run's context, so a turn stopped from inside a tool is still recorded.
+      </p>
+    </section>
+
+    <section>
+      <h2>Stopping a run</h2>
+      <p>
+        Every agent has an iteration limit of <code>agent.DefaultMaxIterations</code> (25 LLM calls per run). When it
+        is reached, <code>Run</code> returns <code>ErrMaxIterationsReached</code> together with a non-nil result
+        holding any text the model produced so far and the run's <code>Summary</code>. Change the limit with
+        <code>SetMaxIterations(n)</code>; <code>SetMaxIterations(0)</code> removes it.
+      </p>
+      <p>
+        <code>Run</code> also checks its context before every iteration, so cancelling it stops the run even with an
+        LLM that ignores the context (a stub, a cache, a local function). A tool can stop the run this way, for
+        example to wait for a human answer. Cancelled runs also return a non-nil partial result with its
+        <code>Summary</code>, and an error that matches both <code>context.Canceled</code> and the cause given to
+        <code>context.WithCancelCause</code>. <code>RunStream</code> yields the same error.
+      </p>
+
+      <pre><code class="language-go">var errAskedHuman = errors.New("asked human")
+
+ctx, cancel := context.WithCancelCause(ctx)
+defer cancel(nil)
+
+askHuman, _ := llm.NewTool("ask_human", "Ask the user a question.",
+    func(_ context.Context, in *struct{ Question string }) (string, error) {
+        sendToUser(in.Question)
+        cancel(errAskedHuman) // stop the run after this tool call
+        return "question sent", nil
+    })
+_ = a.AddTool(askHuman)
+
+result, err := a.Run(ctx, llm.Text(input))
+if errors.Is(err, errAskedHuman) {
+    // Paused: the turn is in memory, and result.Summary has the usage so far.
+}</code></pre>
     </section>
 
     <section>
@@ -337,7 +385,8 @@ a.SetMaxIterations(10)</code></pre>
         <li><code>ErrDescriptionRequired</code>: empty system prompt / description</li>
         <li><code>ToolAlreadyExistsError</code>: tool name collision on <code>AddTool</code> or <code>AddHandoff</code></li>
         <li><code>ToolUnknownError</code>: model requested a tool that is not registered</li>
-        <li><code>ErrMaxIterationsReached</code>: iteration cap hit (often due to repeated tool calls); <code>Run</code> still returns any partial text result alongside this error</li>
+        <li><code>ErrMaxIterationsReached</code>: iteration cap hit (25 by default, often due to repeated tool calls); <code>Run</code> still returns a non-nil result with any partial text and the <code>Summary</code> alongside this error</li>
+        <li><code>context.Canceled</code> / <code>context.DeadlineExceeded</code>: the run's context ended; <code>Run</code> returns a non-nil partial result as above, and the error also wraps the cancellation cause when there is one</li>
         <li><code>ErrSessionSaveFailed</code>: the run completed successfully but saving the conversation to memory failed</li>
       </ul>
     </section>

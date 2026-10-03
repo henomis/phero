@@ -422,10 +422,11 @@ if err != nil &amp;&amp; !natsagent.Permanent(err) {
       <ul>
         <li>
           <strong>Handoffs.</strong> Locally, whoever calls <code>Run</code> runs the agents listed in
-          <code>Result.HandoffAgents</code>. Over NATS the caller is another process, possibly another SDK, and
-          never sees them, so the handoff does nothing. Worse, the text it receives is only the handoff tool's
-          acknowledgement (for example <code>handoff_to_writer: success</code>). The server logs a warning naming
-          the dropped targets (see <code>WithLogger</code>). To route across NATS, have the agent return its
+          <code>Result.Handoffs</code>. Over NATS the caller is another process, possibly another SDK, and
+          never sees them, so the handoff does nothing. The caller receives the text the model wrote alongside the
+          handoff, or, when it wrote none, a note naming each target and its context (for example
+          <code>handed off to writer: draft the bio</code>; see <code>Result.ReplyText</code>). The server logs a
+          warning naming the dropped targets (see <code>WithLogger</code>). To route across NATS, have the agent return its
           decision in its answer instead, for example with structured output
           (<code>SetResponseFormat</code>) and a <code>next_agent</code> field the caller reads.
         </li>

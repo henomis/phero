@@ -245,17 +245,19 @@ func TestAgent_Handoff(t *testing.T) {
 		t.Fatalf("orchestrator.Run: %v", err)
 	}
 
-	if len(result.HandoffAgents) == 0 {
+	if len(result.Handoffs) == 0 {
 		t.Fatalf("orchestrator answered itself (%q); want a handoff to math-specialist", result.TextContent())
 	}
 
-	if result.Summary == nil || len(result.Summary.HandoffAgents) != len(result.HandoffAgents) {
+	if result.Summary == nil || len(result.Summary.HandoffAgents) != len(result.Handoffs) {
 		t.Fatalf("Summary.HandoffAgents = %v, want one name per handoff target", result.Summary)
 	}
 
 	// Drive the handoff the way web/docs/agent.html does: run every target with
 	// the original input.
-	for _, target := range result.HandoffAgents {
+	for _, h := range result.Handoffs {
+		target := h.Agent
+
 		if target.Name() != "math-specialist" {
 			t.Fatalf("handoff target = %q, want math-specialist", target.Name())
 		}

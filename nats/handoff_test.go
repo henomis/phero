@@ -85,8 +85,11 @@ func serveResult(t *testing.T, result *agent.Result) ([]map[string]any, string) 
 // sends the text.
 func TestProcessPrompt_WarnsOnDroppedHandoffs(t *testing.T) {
 	result := &agent.Result{
-		Parts:         []llm.ContentPart{llm.Text("routing you")},
-		HandoffAgents: []*agent.Agent{newNamedAgent(t, "billing"), newNamedAgent(t, "refunds")},
+		Parts: []llm.ContentPart{llm.Text("routing you")},
+		Handoffs: []agent.Handoff{
+			{Agent: newNamedAgent(t, "billing")},
+			{Agent: newNamedAgent(t, "refunds")},
+		},
 	}
 
 	logs, text := serveResult(t, result)
@@ -106,6 +109,18 @@ func TestProcessPrompt_WarnsOnDroppedHandoffs(t *testing.T) {
 
 	if logs[0]["owner"] != "acme" || logs[0]["name"] != "worker" {
 		t.Fatalf("log = %v, want the agent's owner and name", logs[0])
+	}
+}
+
+// TestProcessPrompt_HandoffWithoutText sends a note naming the target and its
+// context instead of an empty answer, which would read like an error.
+func TestProcessPrompt_HandoffWithoutText(t *testing.T) {
+	_, text := serveResult(t, &agent.Result{
+		Handoffs: []agent.Handoff{{Agent: newNamedAgent(t, "billing"), Context: "invoice 42 is wrong"}},
+	})
+
+	if want := "handed off to billing: invoice 42 is wrong"; text != want {
+		t.Fatalf("caller read %q, want %q", text, want)
 	}
 }
 
@@ -129,8 +144,8 @@ func TestProcessPrompt_DefaultLogger(t *testing.T) {
 
 	s, ctx := newTestServer(t, time.Second)
 	s.handler = resultHandler{result: &agent.Result{
-		Parts:         []llm.ContentPart{llm.Text("ok")},
-		HandoffAgents: []*agent.Agent{newNamedAgent(t, "billing")},
+		Parts:    []llm.ContentPart{llm.Text("ok")},
+		Handoffs: []agent.Handoff{{Agent: newNamedAgent(t, "billing")}},
 	}}
 
 	s.processPrompt(ctx, &fakeRequest{data: []byte("hi")})
