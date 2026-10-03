@@ -21,6 +21,9 @@ import "time"
 // connection turns out to allow less.
 const defaultMaxPayload = "1MB"
 
+// defaultAgentID is the metadata.agent value when none is set.
+const defaultAgentID = "phero"
+
 const (
 	defaultHeartbeatInterval = 30 * time.Second
 	defaultKeepaliveInterval = 30 * time.Second
@@ -61,7 +64,7 @@ type serverConfig struct {
 
 func defaultServerConfig() *serverConfig {
 	return &serverConfig{
-		agentID:           "phero",
+		agentID:           defaultAgentID,
 		version:           "0.1.0",
 		maxPayload:        defaultMaxPayload,
 		attachmentsOk:     false,

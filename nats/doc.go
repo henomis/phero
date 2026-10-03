@@ -25,7 +25,7 @@
 //     any local Phero agent can call.
 //
 // Wire format is defined by the NATS Agent Protocol spec
-// (https://github.com/synadia-ai/nats-agent-sdk-docs/blob/main/core-protocol.md).
+// (https://github.com/synadia-ai/synadia-agent-sdk-docs/blob/main/core-protocol.md).
 // This implementation is wire-compatible with the TypeScript and Python SDKs
 // in the synadia-agents repository.
 //

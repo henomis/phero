@@ -29,9 +29,12 @@ import (
 
 const protocolVersion = "0.3"
 
-// drainingMessage is the 503 description returned to a prompt that arrives after
+// drainingMessage is the description returned to a prompt that arrives after
 // the server has stopped accepting work.
 const drainingMessage = "server is draining"
+
+// errCodeServerDraining is the §9.1 machine-readable code of a drain refusal.
+const errCodeServerDraining = "server_draining"
 
 // Handler is implemented by anything that can process a prompt — *agent.Agent
 // and workflow executors both satisfy it.
@@ -221,14 +224,29 @@ func (s *Server) Start(ctx context.Context) error {
 	return s.Drain(context.WithoutCancel(ctx))
 }
 
+// promptSubject is the subject the prompt endpoint serves on (§2).
+func (s *Server) promptSubject() string {
+	return fmt.Sprintf("agents.prompt.%s.%s.%s", s.cfg.agentID, s.owner, s.name)
+}
+
+// promptMetadata is the prompt endpoint's metadata (§2.1). Registration and the
+// heartbeat's endpoints declaration (§8.3) both use it, since the declaration
+// must copy the registration verbatim.
+func (s *Server) promptMetadata() map[string]string {
+	attachmentsOk := "false"
+	if s.cfg.attachmentsOk {
+		attachmentsOk = attachmentsOkTrue
+	}
+
+	return map[string]string{
+		"max_payload":    s.cfg.maxPayload,
+		"attachments_ok": attachmentsOk,
+	}
+}
+
 // register adds the micro service and its endpoints and starts the heartbeat
 // publisher. Callers hold s.mu. On error nothing is left registered.
 func (s *Server) register(serveCtx, promptCtx context.Context) (natsio.Service, error) {
-	attachmentsOkStr := "false"
-	if s.cfg.attachmentsOk {
-		attachmentsOkStr = attachmentsOkTrue
-	}
-
 	metadata := map[string]string{
 		metaAgent:           s.cfg.agentID,
 		metaOwner:           s.owner,
@@ -248,7 +266,6 @@ func (s *Server) register(serveCtx, promptCtx context.Context) (natsio.Service, 
 		return nil, fmt.Errorf("nats: register micro service: %w", err)
 	}
 
-	promptSubject := fmt.Sprintf("agents.prompt.%s.%s.%s", s.cfg.agentID, s.owner, s.name)
 	statusSubject := fmt.Sprintf("agents.status.%s.%s.%s", s.cfg.agentID, s.owner, s.name)
 	hbSubject := fmt.Sprintf("agents.hb.%s.%s.%s", s.cfg.agentID, s.owner, s.name)
 
@@ -257,14 +274,11 @@ func (s *Server) register(serveCtx, promptCtx context.Context) (natsio.Service, 
 	// server that is perfectly healthy.
 	s.gate.unlock()
 
-	if addErr := svc.AddEndpoint("prompt",
+	if addErr := svc.AddEndpoint(endpointPrompt,
 		natsio.ContextHandler(promptCtx, s.handlePrompt),
-		natsio.WithEndpointSubject(promptSubject),
+		natsio.WithEndpointSubject(s.promptSubject()),
 		natsio.WithEndpointQueueGroup(svcNameAgents),
-		natsio.WithEndpointMetadata(map[string]string{
-			"max_payload":    s.cfg.maxPayload,
-			"attachments_ok": attachmentsOkStr,
-		}),
+		natsio.WithEndpointMetadata(s.promptMetadata()),
 	); addErr != nil {
 		_ = svc.Stop()
 		return nil, fmt.Errorf("nats: register prompt endpoint: %w", addErr)
@@ -293,11 +307,15 @@ func (s *Server) register(serveCtx, promptCtx context.Context) (natsio.Service, 
 // A request that arrives once a drain has begun is refused rather than served.
 // Unsubscribing the endpoint is asynchronous — the micro service drains its
 // subscriptions — so a request buffered before that can still land here, and
-// serving it would mean admitting work into a shutdown nobody is waiting on. A
-// 503 lets the caller retry against a replica that is not going away.
+// serving it would mean admitting work into a shutdown nobody is waiting on.
+//
+// The refusal is a 500 carrying error code "server_draining". §9.2 says agents
+// MUST use codes from its table, which has no 503; 500 is the one that keeps the
+// meaning callers need, a server-side fault worth retrying against a replica
+// that is not going away, and the body code says why.
 func (s *Server) handlePrompt(ctx context.Context, req natsio.Request) {
 	if !s.gate.enter() {
-		_ = req.Error("503", drainingMessage, encodeErrorBody("server_draining", drainingMessage))
+		_ = req.Error("500", drainingMessage, encodeErrorBody(errCodeServerDraining, drainingMessage))
 		_ = req.Respond(nil) // terminator (§9.3)
 
 		return
@@ -386,13 +404,5 @@ func (s *Server) handleStatus(_ context.Context, req natsio.Request) {
 		instanceID = svc.Info().ID
 	}
 
-	p := heartbeatPayload{
-		Agent:      s.cfg.agentID,
-		Owner:      s.owner,
-		Session:    s.cfg.session,
-		InstanceID: instanceID,
-		TS:         time.Now().UTC().Format(time.RFC3339),
-		IntervalS:  heartbeatIntervalSeconds(s.cfg.heartbeatInterval),
-	}
-	_ = req.Respond(encodeHeartbeat(p))
+	_ = req.Respond(encodeHeartbeat(s.heartbeat(instanceID)))
 }

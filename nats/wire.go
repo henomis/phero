@@ -27,6 +27,7 @@ import (
 const (
 	chunkTypeResponse = "response"
 	chunkTypeStatus   = "status"
+	endpointPrompt    = "prompt"
 	svcNameAgents     = "agents"
 	attachmentsOkTrue = "true"
 )
@@ -74,6 +75,18 @@ type heartbeatPayload struct {
 	InstanceID string `json:"instance_id"`
 	TS         string `json:"ts"`
 	IntervalS  int    `json:"interval_s"`
+	// ProtocolVersion and Endpoints are optional declarations (§8.3): they let
+	// a heartbeat listener know where and how to prompt the instance. They are
+	// not authoritative; the discovery record is (§3).
+	ProtocolVersion string                       `json:"protocol_version,omitempty"`
+	Endpoints       map[string]heartbeatEndpoint `json:"endpoints,omitempty"`
+}
+
+// heartbeatEndpoint declares one endpoint in a heartbeat (§8.3): its registered
+// subject and its endpoint metadata, copied verbatim from the registration.
+type heartbeatEndpoint struct {
+	Subject  string            `json:"subject"`
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 // serviceInfoResponse is a partial parse of the $SRV.INFO JSON response (§4).
@@ -159,8 +172,53 @@ func encodeStatusChunk(status string) []byte {
 
 // encodeHeartbeat serialises a heartbeat payload to JSON (§8.3).
 func encodeHeartbeat(p heartbeatPayload) []byte {
-	b, _ := json.Marshal(p) //nolint:errchkjson // heartbeatPayload contains only string and int fields
+	b, _ := json.Marshal(p) //nolint:errchkjson // only strings, ints and maps of them
 	return b
+}
+
+// decodeHeartbeat parses a heartbeat or status reply (§8.3, §8.7).
+//
+// The optional declarations are decoded on their own: §8.3 says a receiver that
+// finds protocol_version or endpoints malformed ignores that field and keeps the
+// heartbeat. Decoding them as part of the payload would let one bad declaration
+// drop the beat, and with it the instance's liveness.
+func decodeHeartbeat(data []byte) (heartbeatPayload, error) {
+	var raw struct {
+		Agent           string          `json:"agent"`
+		Owner           string          `json:"owner"`
+		Session         string          `json:"session"`
+		InstanceID      string          `json:"instance_id"`
+		TS              string          `json:"ts"`
+		IntervalS       int             `json:"interval_s"`
+		ProtocolVersion json.RawMessage `json:"protocol_version"`
+		Endpoints       json.RawMessage `json:"endpoints"`
+	}
+
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return heartbeatPayload{}, err
+	}
+
+	p := heartbeatPayload{
+		Agent:      raw.Agent,
+		Owner:      raw.Owner,
+		Session:    raw.Session,
+		InstanceID: raw.InstanceID,
+		TS:         raw.TS,
+		IntervalS:  raw.IntervalS,
+	}
+
+	if len(raw.ProtocolVersion) > 0 {
+		_ = json.Unmarshal(raw.ProtocolVersion, &p.ProtocolVersion) // malformed: ignore the field
+	}
+
+	if len(raw.Endpoints) > 0 {
+		var endpoints map[string]heartbeatEndpoint
+		if json.Unmarshal(raw.Endpoints, &endpoints) == nil {
+			p.Endpoints = endpoints
+		}
+	}
+
+	return p, nil
 }
 
 // isTerminator returns true if msg is the zero-byte, headerless end-of-stream

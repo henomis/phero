@@ -68,7 +68,7 @@ func TestGateAdmitsThenRefuses(t *testing.T) {
 	g.close()
 
 	if g.enter() {
-		t.Fatal("a closed gate must refuse, so a buffered request is 503'd rather than served")
+		t.Fatal("a closed gate must refuse, so a buffered request is refused rather than served")
 	}
 
 	// The handler admitted before the close is still counted, and must be.

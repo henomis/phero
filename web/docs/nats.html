@@ -39,7 +39,7 @@
       <h2>What it is</h2>
       <p>
         The <code>nats</code> package implements the
-        <a href="https://github.com/synadia-ai/nats-agent-sdk-docs/blob/main/core-protocol.md">NATS Agent Protocol v0.3</a>
+        <a href="https://github.com/synadia-ai/synadia-agent-sdk-docs/blob/main/core-protocol.md">NATS Agent Protocol v0.3</a>
         for Phero agents. It provides two top-level types:
       </p>
       <ul>
@@ -126,7 +126,9 @@ func main() {
       <ol>
         <li>The prompt endpoint is unsubscribed, so NATS sends new prompts to another replica in the
           <code>agents</code> queue group. A prompt already buffered on this instance gets a
-          <code>503 server is draining</code> reply instead of being served.</li>
+          <code>500</code> reply with error code <code>server_draining</code> instead of being served. It is a 500
+          rather than a 503 because the protocol only allows the status codes listed in its §9.2 table. Callers
+          retry 5xx errors, so the prompt goes to another replica.</li>
         <li>Heartbeats stop, so this instance no longer shows as live.</li>
         <li>Handlers that are already running keep their own context and finish their LLM call.</li>
         <li>If they are still running when most of the drain budget is used up, their context is cancelled. The
@@ -477,6 +479,24 @@ go run ./examples/nats-agent/client</code></pre>
         <a href="https://github.com/synadia-ai/synadia-agents">synadia-agents</a>.
         Any client speaking the NATS Agent Protocol can discover and prompt a Phero agent.
       </p>
+      <ul>
+        <li><strong>Protocol version.</strong> Phero agents advertise <code>protocol_version: "0.3"</code>.
+          <code>Discover</code> only returns agents whose version starts with <code>0.3</code>; qualifiers such as
+          <code>0.3.1</code> are accepted. While the protocol is at 0.x, a new MINOR version can change the wire
+          format (0.2 used different subjects), so agents on any other version are skipped like any other
+          non-compliant reply.</li>
+        <li><strong>Heartbeats and status replies</strong> include the optional <code>protocol_version</code> and an
+          <code>endpoints.prompt</code> declaration: the prompt subject and its <code>max_payload</code> /
+          <code>attachments_ok</code> metadata, copied from the registration. <code>HeartbeatTracker</code> ignores a
+          malformed declaration and still counts the heartbeat, so liveness never depends on the optional
+          fields.</li>
+        <li><strong>Error codes</strong> come only from the protocol's status-code table. A prompt refused during a
+          drain gets <code>500</code> with error code <code>server_draining</code>.</li>
+        <li><strong>Not implemented:</strong> the optional sender-identity extension (§13: signed
+          <code>Agent-Sender</code> headers, <code>min_sender_trust</code>). Phero agents behave like endpoints with
+          <code>min_sender_trust: any</code>. They accept every request and ignore any <code>Agent-Sender</code>
+          header, as the protocol requires of agents that don't implement §13.</li>
+      </ul>
       <pre><code class="language-bash"># Discover the running Phero agent with the Python SDK
 uv run python examples/01-discover.py --url nats://127.0.0.1:4222
 

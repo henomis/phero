@@ -16,7 +16,6 @@ package nats
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"sync"
 	"time"
@@ -77,8 +76,8 @@ func NewHeartbeatTracker(nc *natsclient.Conn) (*HeartbeatTracker, error) {
 	}
 
 	sub, err := nc.Subscribe("agents.hb.*.*.*", func(msg *natsclient.Msg) {
-		var p heartbeatPayload
-		if err := json.Unmarshal(msg.Data, &p); err != nil || p.InstanceID == "" {
+		p, err := decodeHeartbeat(msg.Data)
+		if err != nil || p.InstanceID == "" {
 			return
 		}
 
@@ -134,6 +133,23 @@ func (t *HeartbeatTracker) Stop() error {
 	return t.sub.Unsubscribe()
 }
 
+// heartbeat builds the §8.3 payload this server publishes and returns from
+// its status endpoint (§8.7), which share one schema.
+func (s *Server) heartbeat(instanceID string) heartbeatPayload {
+	return heartbeatPayload{
+		Agent:           s.cfg.agentID,
+		Owner:           s.owner,
+		Session:         s.cfg.session,
+		InstanceID:      instanceID,
+		TS:              time.Now().UTC().Format(time.RFC3339),
+		IntervalS:       heartbeatIntervalSeconds(s.cfg.heartbeatInterval),
+		ProtocolVersion: protocolVersion,
+		Endpoints: map[string]heartbeatEndpoint{
+			endpointPrompt: {Subject: s.promptSubject(), Metadata: s.promptMetadata()},
+		},
+	}
+}
+
 // heartbeatIntervalSeconds renders a cadence for the wire, where §8.1 makes
 // interval_s an integer number of seconds.
 //
@@ -173,15 +189,7 @@ func agentFromHeartbeatSubject(subject string) (owner, name string, ok bool) {
 // this returns.
 func (s *Server) startHeartbeats(ctx context.Context, subject, instanceID string) {
 	publish := func() {
-		p := heartbeatPayload{
-			Agent:      s.cfg.agentID,
-			Owner:      s.owner,
-			Session:    s.cfg.session,
-			InstanceID: instanceID,
-			TS:         time.Now().UTC().Format(time.RFC3339),
-			IntervalS:  heartbeatIntervalSeconds(s.cfg.heartbeatInterval),
-		}
-		_ = s.nc.Publish(subject, encodeHeartbeat(p))
+		_ = s.nc.Publish(subject, encodeHeartbeat(s.heartbeat(instanceID)))
 	}
 
 	publish()

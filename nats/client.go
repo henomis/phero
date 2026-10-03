@@ -98,7 +98,9 @@ func NewClient(nc *natsclient.Conn, opts ...ClientOption) *Client {
 }
 
 // Discover sends a $SRV.INFO.agents fan-out request and collects all
-// responding compliant agent instances.
+// responding compliant agent instances. An instance whose protocol_version this
+// package cannot speak (see §11: within 0.x the MAJOR.MINOR must match exactly)
+// is skipped like any other non-compliant reply.
 //
 // It uses a stall strategy: collection ends after 750 ms of silence from the
 // last response, capped by a 2 s absolute deadline (both configurable via
@@ -339,7 +341,7 @@ func parseAgentInfo(data []byte) *AgentInfo {
 		return nil
 	}
 
-	if svc.Metadata[metaProtocolVersion] == "" {
+	if !compatibleProtocol(svc.Metadata[metaProtocolVersion]) {
 		return nil
 	}
 
@@ -353,7 +355,7 @@ func parseAgentInfo(data []byte) *AgentInfo {
 
 	for _, ep := range svc.Endpoints {
 		switch ep.Name {
-		case "prompt":
+		case endpointPrompt:
 			info.PromptSubject = ep.Subject
 			if v := ep.Metadata["max_payload"]; v != "" {
 				if n, err := parseMaxPayload(v); err == nil {
@@ -376,6 +378,62 @@ func parseAgentInfo(data []byte) *AgentInfo {
 	}
 
 	return info
+}
+
+// compatibleProtocol reports whether an agent advertising protocol version v
+// can be prompted by this package, which implements [protocolVersion] (§11).
+//
+// Only the MAJOR.MINOR prefix carries meaning; patch and pre-release qualifiers
+// ("0.3.1", "0.3-rc1") are ignored (§11.1). Different MAJOR versions have no
+// interoperability guarantee. Within 0.x a MINOR bump may break the wire — 0.2
+// used a different subject hierarchy — so callers pin the exact MAJOR.MINOR
+// until 1.0 (§11.2). From 1.0, a different MINOR of the same MAJOR is compatible.
+func compatibleProtocol(v string) bool {
+	major, minor, ok := majorMinor(v)
+	if !ok {
+		return false
+	}
+
+	ourMajor, ourMinor, _ := majorMinor(protocolVersion)
+
+	if major != ourMajor {
+		return false
+	}
+
+	return major != "0" || minor == ourMinor
+}
+
+// majorMinor extracts the MAJOR and MINOR numbers of a version string.
+func majorMinor(v string) (major, minor string, ok bool) {
+	major, rest, found := strings.Cut(v, ".")
+	if !found || !isDigits(major) {
+		return "", "", false
+	}
+
+	end := 0
+	for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
+		end++
+	}
+
+	if end == 0 {
+		return "", "", false
+	}
+
+	return major, rest[:end], true
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+
+	return true
 }
 
 // instanceNameFromSubject extracts the 5th token from a verb-first subject
