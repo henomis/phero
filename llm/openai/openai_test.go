@@ -371,6 +371,70 @@ func TestExecute_NoReasoningEffort_OmitsField(t *testing.T) {
 	}
 }
 
+func TestExecute_MaxTokens(t *testing.T) {
+	tests := []struct {
+		name        string
+		opts        []openai.Option
+		wantField   string
+		wantAbsent  string
+		wantValue   float64
+		wantNoField bool
+	}{
+		{name: "unset", wantNoField: true},
+		{name: "non-positive ignored", opts: []openai.Option{openai.WithMaxTokens(0), openai.WithLegacyMaxTokens(-1)}, wantNoField: true},
+		{
+			name:      "max_completion_tokens",
+			opts:      []openai.Option{openai.WithMaxTokens(256)},
+			wantField: "max_completion_tokens", wantAbsent: "max_tokens", wantValue: 256,
+		},
+		{
+			name:      "legacy max_tokens",
+			opts:      []openai.Option{openai.WithLegacyMaxTokens(128)},
+			wantField: "max_tokens", wantAbsent: "max_completion_tokens", wantValue: 128,
+		},
+		{
+			name:      "last option wins",
+			opts:      []openai.Option{openai.WithLegacyMaxTokens(128), openai.WithMaxTokens(64)},
+			wantField: "max_completion_tokens", wantAbsent: "max_tokens", wantValue: 64,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var payload map[string]any
+
+			srv := payloadCapturingServer(t, &payload)
+			defer srv.Close()
+
+			opts := append([]openai.Option{openai.WithBaseURL(srv.URL + "/v1")}, tt.opts...)
+			c := openai.New("key", opts...)
+			msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
+
+			if _, err := c.Execute(context.Background(), msgs); err != nil {
+				t.Fatalf("Execute: unexpected error: %v", err)
+			}
+
+			if tt.wantNoField {
+				for _, f := range []string{"max_tokens", "max_completion_tokens"} {
+					if _, present := payload[f]; present {
+						t.Fatalf("%s = %v, want omitted", f, payload[f])
+					}
+				}
+
+				return
+			}
+
+			if got, ok := payload[tt.wantField].(float64); !ok || got != tt.wantValue {
+				t.Fatalf("%s = %v, want %v", tt.wantField, payload[tt.wantField], tt.wantValue)
+			}
+
+			if _, present := payload[tt.wantAbsent]; present {
+				t.Fatalf("%s = %v, want omitted", tt.wantAbsent, payload[tt.wantAbsent])
+			}
+		})
+	}
+}
+
 func TestExecute_ToolChoiceAndResponseFormat(t *testing.T) {
 	tool, err := llm.NewTool("lookup", "look something up", func(_ context.Context, _ struct{}) (string, error) {
 		return "", nil

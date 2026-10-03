@@ -225,6 +225,11 @@ llmClient := openai.New(
           <code>"medium"</code> or <code>"high"</code> &mdash; the accepted set is defined by the provider and the
           model). When unset the field is omitted, which keeps OpenAI-compatible endpoints that do not implement it
           working.</li>
+        <li><code>WithMaxTokens(n)</code>: cap generated tokens via the <code>max_completion_tokens</code> field
+          (includes reasoning tokens). Non-positive values are ignored; when unset the field is omitted.</li>
+        <li><code>WithLegacyMaxTokens(n)</code>: same cap sent as the deprecated <code>max_tokens</code> field, for
+          OpenAI-compatible endpoints that do not implement <code>max_completion_tokens</code>. If both options are
+          given, the last one wins.</li>
         <li><code>WithBaseURL(url)</code>: override the API base URL (e.g. point at a local proxy)</li>
         <li><code>WithOllamaBaseURL()</code>: shortcut to point at a local Ollama server</li>
       </ul>

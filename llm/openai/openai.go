@@ -42,6 +42,8 @@ type Client struct {
 	apiKey          string
 	temperature     float32
 	reasoningEffort string
+	maxTokens       int64
+	legacyMaxTokens bool
 	config          openai.ClientConfig
 }
 
@@ -117,6 +119,14 @@ func (c *Client) buildRequest(messages []llm.Message, opts []llm.CallOption) (op
 		Messages:        messagesToOpenAI(messages),
 		Temperature:     c.temperature,
 		ReasoningEffort: c.reasoningEffort,
+	}
+
+	if c.maxTokens > 0 {
+		if c.legacyMaxTokens {
+			request.MaxTokens = int(c.maxTokens)
+		} else {
+			request.MaxCompletionTokens = int(c.maxTokens)
+		}
 	}
 
 	if len(cfg.Tools) > 0 {
@@ -349,5 +359,37 @@ func WithTemperature(temp float32) Option {
 func WithReasoningEffort(effort string) Option {
 	return func(c *Client) {
 		c.reasoningEffort = effort
+	}
+}
+
+// WithMaxTokens caps the number of tokens the model may generate, sent as the
+// max_completion_tokens request field. The cap includes reasoning tokens on
+// reasoning models.
+//
+// Non-positive values are ignored. When unset, the field is omitted and the
+// provider default applies. WithMaxTokens and WithLegacyMaxTokens set the same
+// cap; whichever is applied last wins.
+func WithMaxTokens(maxTokens int64) Option {
+	return func(c *Client) {
+		if maxTokens > 0 {
+			c.maxTokens = maxTokens
+			c.legacyMaxTokens = false
+		}
+	}
+}
+
+// WithLegacyMaxTokens caps the number of tokens the model may generate, sent as
+// the deprecated max_tokens request field.
+//
+// Use it for OpenAI-compatible endpoints that do not implement
+// max_completion_tokens; OpenAI itself rejects max_tokens on reasoning models.
+// Non-positive values are ignored. WithMaxTokens and WithLegacyMaxTokens set the
+// same cap; whichever is applied last wins.
+func WithLegacyMaxTokens(maxTokens int64) Option {
+	return func(c *Client) {
+		if maxTokens > 0 {
+			c.maxTokens = maxTokens
+			c.legacyMaxTokens = true
+		}
 	}
 }
