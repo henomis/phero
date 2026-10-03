@@ -185,6 +185,11 @@ for _, target := range result.HandoffAgents {
       </p>
 
       <p>
+        Handoffs only work where <code>Run</code> is called. An agent served over
+        <a href="nats.html">NATS</a> cannot pass them to its caller: see "What doesn't cross the wire" there.
+      </p>
+
+      <p>
         See <a href="https://github.com/henomis/phero/tree/main/examples/handoff">examples/handoff</a> for a full working example.
       </p>
     </section>

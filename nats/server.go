@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -404,7 +405,42 @@ func (s *Server) processPrompt(ctx context.Context, req natsio.Request) {
 		return
 	}
 
+	s.warnDroppedHandoffs(ctx, result)
 	s.sendResponse(req, result.TextContent())
+}
+
+// warnDroppedHandoffs logs the handoffs in result, which the response cannot
+// carry: the protocol has no field for them, and the caller — another process,
+// perhaps another SDK — could not run a phero agent anyway. Without the
+// warning, an agent that hands off locally would silently stop doing so once
+// served over NATS. Only the text is sent; Summary is dropped too, on every
+// call, so it is documented rather than logged.
+func (s *Server) warnDroppedHandoffs(ctx context.Context, result *agent.Result) {
+	if result == nil || len(result.HandoffAgents) == 0 {
+		return
+	}
+
+	names := make([]string, 0, len(result.HandoffAgents))
+	for _, a := range result.HandoffAgents {
+		if a != nil {
+			names = append(names, a.Name())
+		}
+	}
+
+	s.logger().WarnContext(ctx, "nats: handoffs dropped: the protocol cannot carry them",
+		slog.String("owner", s.owner),
+		slog.String("name", s.name),
+		slog.Any("handoffs", names),
+	)
+}
+
+// logger returns the configured logger, or slog.Default().
+func (s *Server) logger() *slog.Logger {
+	if s.cfg.logger != nil {
+		return s.cfg.logger
+	}
+
+	return slog.Default()
 }
 
 // sendResponse sends text as one or more response chunks (§6.3), each small

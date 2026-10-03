@@ -64,6 +64,11 @@
 // [Client.Send] sends a [Request] with attachments and extra headers; on the
 // server, the handler (and an agent's tools) read it with [RequestFrom].
 //
+// Only the text of an agent's Result crosses the wire. Handoffs are dropped —
+// the caller could not run them, and receives only the handoff tool's
+// acknowledgement — and the server logs a warning (see [WithLogger]). Token
+// usage (Result.Summary) is dropped too; collect it on the server's side.
+//
 // Quick start — client:
 //
 //	nc, _ := nats.Connect(nats.DefaultURL)

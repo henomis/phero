@@ -14,7 +14,10 @@
 
 package nats
 
-import "time"
+import (
+	"log/slog"
+	"time"
+)
 
 // defaultMaxPayload is the advertised prompt-endpoint cap when none is set. It
 // matches NATS's own default max_payload, and [New] tightens it when the
@@ -63,6 +66,9 @@ type serverConfig struct {
 	// errorMapper, when set, chooses the error sent for a failed run before
 	// the defaults do.
 	errorMapper func(error) *CodedError
+	// logger receives what the server cannot tell the caller; nil means
+	// slog.Default().
+	logger *slog.Logger
 }
 
 func defaultServerConfig() *serverConfig {
@@ -142,6 +148,13 @@ func WithKeepaliveInterval(d time.Duration) ServerOption {
 // means a restart abandons every call in flight.
 func WithDrainTimeout(d time.Duration) ServerOption {
 	return func(c *serverConfig) { c.drainTimeout = d }
+}
+
+// WithLogger sets the structured logger for what the server cannot tell the
+// caller, such as handoffs the protocol has no way to carry. Default
+// slog.Default().
+func WithLogger(logger *slog.Logger) ServerOption {
+	return func(c *serverConfig) { c.logger = logger }
 }
 
 // WithErrorMapper sets fn to choose the error a caller receives when the
