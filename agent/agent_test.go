@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -834,5 +835,130 @@ func TestAgent_SendsToolsAndResponseFormat(t *testing.T) {
 
 	if last := rec.configs[len(rec.configs)-1]; last.ResponseFormat != nil {
 		t.Fatalf("response format = %v after SetResponseFormat(nil), want nil", last.ResponseFormat)
+	}
+}
+
+// TestRun_HandoffFanOut_DocumentedLoop runs the routing loop shown in the
+// "Agent handoffs" section of web/docs/agent.html, so the documented pattern
+// keeps compiling and keeps meaning what the docs say.
+func TestRun_HandoffFanOut_DocumentedLoop(t *testing.T) {
+	// echoTarget answers with its own name and records the input it received.
+	echoTarget := func(name string, got *string) *agent.Agent {
+		client := llm.Func(func(_ context.Context, msgs []llm.Message, _ ...llm.CallOption) (*llm.Result, error) {
+			*got = msgs[len(msgs)-1].TextContent()
+			return textResult(name + " done"), nil
+		})
+
+		return mustNew(t, client, name, name+" specialist")
+	}
+
+	var researcherInput, writerInput string
+
+	researcher := echoTarget("researcher", &researcherInput)
+	writer := echoTarget("writer", &writerInput)
+
+	// The model hands off to both agents in one turn: a fan-out.
+	orchestrator := mustNew(t,
+		makeStub(multiToolCallResult(
+			toolCall("handoff_to_researcher", "h-1", `{"context":"find facts"}`),
+			toolCall("handoff_to_writer", "h-2", `{"context":"write it up"}`),
+		), nil),
+		"orchestrator", "Decide whether to research or write.",
+	)
+
+	for _, target := range []*agent.Agent{researcher, writer} {
+		if err := orchestrator.AddHandoff(target); err != nil {
+			t.Fatalf("AddHandoff: %v", err)
+		}
+	}
+
+	ctx := context.Background()
+	input := llm.Text("Write a short bio of Marie Curie.")
+
+	result, err := orchestrator.Run(ctx, input)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Targets come back in the order the model called them.
+	names := make([]string, 0, len(result.HandoffAgents))
+	for _, target := range result.HandoffAgents {
+		names = append(names, target.Name())
+	}
+
+	if want := []string{"researcher", "writer"}; !reflect.DeepEqual(names, want) {
+		t.Fatalf("HandoffAgents = %v, want %v", names, want)
+	}
+
+	if result.Summary == nil || !reflect.DeepEqual(result.Summary.HandoffAgents, names) {
+		t.Fatalf("Summary.HandoffAgents = %v, want %v", result.Summary, names)
+	}
+
+	// The handing-off result's text is the handoff tool's acknowledgement, not
+	// content for the target. That is why the documented loop forwards the
+	// original input rather than result.TextContent().
+	if got, want := result.TextContent(), "handoff_to_researcher: success"; got != want {
+		t.Fatalf("TextContent() = %q, want %q", got, want)
+	}
+
+	// The documented loop: run every target with the original input.
+	answers := make([]string, 0, len(result.HandoffAgents))
+
+	for _, target := range result.HandoffAgents {
+		res, runErr := target.Run(ctx, input)
+		if runErr != nil {
+			t.Fatalf("%s.Run: %v", target.Name(), runErr)
+		}
+
+		answers = append(answers, res.TextContent())
+	}
+
+	if want := []string{"researcher done", "writer done"}; !reflect.DeepEqual(answers, want) {
+		t.Fatalf("answers = %v, want %v", answers, want)
+	}
+
+	if researcherInput != input.Text || writerInput != input.Text {
+		t.Fatalf("targets received %q and %q, want the original input %q", researcherInput, writerInput, input.Text)
+	}
+}
+
+// TestRun_BlankInputContinuesFromMemory verifies that a run with blank input
+// sends no empty user turn: providers reject one, and a handoff target run this
+// way is meant to continue the conversation held in shared memory.
+func TestRun_BlankInputContinuesFromMemory(t *testing.T) {
+	history := []llm.Message{
+		llm.UserMessage(llm.Text("I was charged twice")),
+		llm.AssistantMessage([]llm.ContentPart{llm.Text("Routing you to billing.")}),
+	}
+
+	for name, parts := range map[string][]llm.ContentPart{
+		"no parts":    nil,
+		"empty text":  {llm.Text("")},
+		"blank texts": {llm.Text("  "), llm.Text("\n")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var sent []llm.Message
+
+			client := llm.Func(func(_ context.Context, msgs []llm.Message, _ ...llm.CallOption) (*llm.Result, error) {
+				sent = msgs
+				return textResult("refund issued"), nil
+			})
+
+			a := mustNew(t, client, "billing", "billing specialist")
+			a.SetMemory(&stubMemory{retrieved: history})
+
+			if _, err := a.Run(context.Background(), parts...); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			// system prompt + history, and nothing after it.
+			if len(sent) != 1+len(history) {
+				t.Fatalf("sent %d messages, want %d: %+v", len(sent), 1+len(history), sent)
+			}
+
+			if last := sent[len(sent)-1]; last.Role != llm.RoleAssistant {
+				t.Fatalf("last message role = %q, want the history's assistant turn", last.Role)
+			}
+		})
 	}
 }

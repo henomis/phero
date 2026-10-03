@@ -25,7 +25,7 @@ Phero is a modern Go framework for building multi-agent AI systems. Like ants in
 ### Core Capabilities
 
 - **🤝 Agent orchestration** Multi-agent workflows with role specialization, coordination, and runtime handoffs
-- **🔀 Agent handoffs** Transfer control between agents at runtime; `Result.HandoffAgent` tells you where to route next
+- **🔀 Agent handoffs** Transfer control between agents at runtime; `Result.HandoffAgents` tells you where to route next (more than one means fan-out)
 - **🌐 A2A protocol** Expose any agent as an HTTP A2A server, or call remote A2A agents as local tools
 - **🔀 NATS Agent Protocol** Register agents as NATS micro services and discover/call them over pub/sub; wire-compatible with TypeScript and Python SDKs
 - **🧩 LLM abstraction** Work with OpenAI-compatible endpoints (OpenAI, Ollama, etc.) and Anthropic

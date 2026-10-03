@@ -138,9 +138,10 @@ func main() {
     <section>
       <h2>Agent handoffs</h2>
       <p>
-        An agent can hand work to another agent at runtime. When the model decides a handoff is needed,
-        Run returns with <code>Result.HandoffAgent</code> set to the target agent — the caller can then
-        invoke it with the same or a derived input.
+        An agent can hand work to other agents at runtime. When the model decides a handoff is needed,
+        Run returns with <code>Result.HandoffAgents</code> listing the target agents, in the order the model called
+        them. The caller then runs them. One entry is a plain handoff; more than one means the model fanned the work
+        out to several agents in the same turn.
       </p>
       <p>
         Register handoff targets with <code>AddHandoff</code>. Phero automatically creates a synthetic tool
@@ -161,14 +162,27 @@ if err != nil {
     panic(err)
 }
 
-if result.HandoffAgent != nil {
-    // The orchestrator decided to hand off; continue with the target agent
-    result, err = result.HandoffAgent.Run(ctx, llm.Text(result.TextContent()))
+if len(result.HandoffAgents) == 0 {
+    // No handoff: the orchestrator answered itself.
+    fmt.Println(result.TextContent())
+    return
+}
+
+// The orchestrator handed off; run every target it chose.
+for _, target := range result.HandoffAgents {
+    answer, err := target.Run(ctx, llm.Text("Write a short bio of Marie Curie."))
     if err != nil {
         panic(err)
     }
-}
-fmt.Println(result.TextContent())</code></pre>
+    fmt.Printf("%s: %s\n", target.Name(), answer.TextContent())
+}</code></pre>
+
+      <p>
+        Pass the targets the original input, or give them shared <a href="memory.html">memory</a> so they see the whole
+        conversation. Don't forward <code>result.TextContent()</code>: when a run ends in a handoff, that text is only
+        the handoff tool's acknowledgement (for example <code>handoff_to_writer: success</code>), not content for the
+        target. The names of the targets are also recorded in <code>result.Summary.HandoffAgents</code>.
+      </p>
 
       <p>
         See <a href="https://github.com/henomis/phero/tree/main/examples/handoff">examples/handoff</a> for a full working example.
@@ -182,7 +196,7 @@ fmt.Println(result.TextContent())</code></pre>
       </p>
       <ul>
         <li><code>Parts []llm.ContentPart</code>: the model's final response; call <code>result.TextContent()</code> to get the plain text</li>
-        <li><code>HandoffAgent *Agent</code>: set when the model triggered a handoff to another agent; nil otherwise</li>
+        <li><code>HandoffAgents []*Agent</code>: the agents the model handed work to; empty when there was no handoff, and more than one means fan-out</li>
         <li><code>Summary *trace.RunSummary</code>: aggregated observability data for the run (token usage, latency, tool call counts, etc.)</li>
       </ul>
 

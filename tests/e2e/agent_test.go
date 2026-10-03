@@ -238,12 +238,37 @@ func TestAgent_Handoff(t *testing.T) {
 		t.Fatalf("AddHandoff: %v", err)
 	}
 
-	result, err := orchestrator.Run(ctx, llm.Text("What is 3 * 7?"))
+	input := llm.Text("What is 3 * 7?")
+
+	result, err := orchestrator.Run(ctx, input)
 	if err != nil {
 		t.Fatalf("orchestrator.Run: %v", err)
 	}
 
-	t.Logf("Final response: %q (handoff=%v)", result.TextContent(), len(result.HandoffAgents) > 0)
+	if len(result.HandoffAgents) == 0 {
+		t.Fatalf("orchestrator answered itself (%q); want a handoff to math-specialist", result.TextContent())
+	}
+
+	if result.Summary == nil || len(result.Summary.HandoffAgents) != len(result.HandoffAgents) {
+		t.Fatalf("Summary.HandoffAgents = %v, want one name per handoff target", result.Summary)
+	}
+
+	// Drive the handoff the way web/docs/agent.html does: run every target with
+	// the original input.
+	for _, target := range result.HandoffAgents {
+		if target.Name() != "math-specialist" {
+			t.Fatalf("handoff target = %q, want math-specialist", target.Name())
+		}
+
+		answer, runErr := target.Run(ctx, input)
+		if runErr != nil {
+			t.Fatalf("%s.Run: %v", target.Name(), runErr)
+		}
+
+		if !strings.Contains(answer.TextContent(), "21") {
+			t.Fatalf("%s answered %q, want it to contain 21", target.Name(), answer.TextContent())
+		}
+	}
 }
 
 // TestAgent_MaxIterationsReached verifies that the agent respects the max

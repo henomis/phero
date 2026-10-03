@@ -548,11 +548,30 @@ func (a *Agent) prepareSession(
 
 	sessionIndex := len(messages)
 
-	if len(parts) > 0 {
-		messages = append(messages, llm.UserMessage(parts...))
+	// A run with no input continues the conversation already in memory, as when a
+	// handoff target picks up where the source agent left off. Blank text counts
+	// as no input: an empty user turn is rejected by providers ("invalid message
+	// content type") rather than ignored.
+	if content := nonBlankParts(parts); len(content) > 0 {
+		messages = append(messages, llm.UserMessage(content...))
 	}
 
 	return messages, sessionIndex, nil
+}
+
+// nonBlankParts returns parts without its whitespace-only text parts.
+func nonBlankParts(parts []llm.ContentPart) []llm.ContentPart {
+	out := make([]llm.ContentPart, 0, len(parts))
+
+	for _, p := range parts {
+		if p.Type == llm.ContentTypeText && strings.TrimSpace(p.Text) == "" {
+			continue
+		}
+
+		out = append(out, p)
+	}
+
+	return out
 }
 
 // executeToolCall executes a tool call and returns the result as content parts.

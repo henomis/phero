@@ -26,7 +26,7 @@ On the next turn, the cycle restarts from the triage agent.
 ## What you'll learn
 
 - How to call `agent.AddHandoff` to register a target agent as a routing tool
-- How to drive the handoff loop in application code (`result.HandoffAgent`)
+- How to drive the handoff loop in application code (`result.HandoffAgents`)
 - Why shared memory is required for the specialist to have context
 - How to build a multi-turn chatbot on top of the handoff pattern
 
