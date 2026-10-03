@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/nats-io/nats.go"
@@ -52,6 +53,11 @@ type fakeKV struct {
 	// slip in another writer between Save's read and its write.
 	beforeWrite func(kv *fakeKV)
 	writes      int
+
+	// maxValue, when set, makes a larger write fail with tooLargeErr, the way
+	// nats.go or the server refuses a value over its limit.
+	maxValue    int
+	tooLargeErr error
 }
 
 func (kv *fakeKV) Get(string) (nats.KeyValueEntry, error) {
@@ -65,6 +71,10 @@ func (kv *fakeKV) Get(string) (nats.KeyValueEntry, error) {
 func (kv *fakeKV) Create(_ string, value []byte) (uint64, error) {
 	kv.hook()
 
+	if kv.maxValue > 0 && len(value) > kv.maxValue {
+		return 0, kv.tooLargeErr
+	}
+
 	if kv.present {
 		return 0, nats.ErrKeyExists
 	}
@@ -74,6 +84,10 @@ func (kv *fakeKV) Create(_ string, value []byte) (uint64, error) {
 
 func (kv *fakeKV) Update(_ string, value []byte, last uint64) (uint64, error) {
 	kv.hook()
+
+	if kv.maxValue > 0 && len(value) > kv.maxValue {
+		return 0, kv.tooLargeErr
+	}
 
 	if !kv.present || kv.revision != last {
 		return 0, nats.ErrKeyExists
@@ -315,4 +329,41 @@ func mustRetrieve(t *testing.T, m *Memory) []llm.Message {
 	}
 
 	return got
+}
+
+// TestSave_TooLarge is issue #8: a session over NATS's size limit fails with a
+// clear error naming it, from either place NATS enforces the limit, without
+// retrying.
+func TestSave_TooLarge(t *testing.T) {
+	cases := map[string]error{
+		"connection max_payload": nats.ErrMaxPayload,
+		"bucket MaxValueSize":    &nats.APIError{Code: 400, ErrorCode: jsErrMessageTooLarge, Description: "message size exceeds maximum allowed"},
+	}
+
+	for name, natsErr := range cases {
+		t.Run(name, func(t *testing.T) {
+			kv := &fakeKV{maxValue: 100, tooLargeErr: natsErr}
+			m := newTestMemory(t, kv)
+
+			big := llm.UserMessage(llm.Text(strings.Repeat("x", 200)))
+
+			err := m.Save(context.Background(), []llm.Message{big})
+			if !errors.Is(err, ErrSessionTooLarge) {
+				t.Fatalf("Save = %v, want ErrSessionTooLarge", err)
+			}
+
+			tle, ok := errors.AsType[*SessionTooLargeError](err)
+			if !ok || tle.Session != "session-1" || tle.Size <= 100 {
+				t.Fatalf("SessionTooLargeError = %+v", tle)
+			}
+
+			if !errors.Is(err, natsErr) {
+				t.Fatalf("Save = %v, want the NATS error still reachable", err)
+			}
+
+			if kv.writes != 1 {
+				t.Fatalf("write attempts = %d, want 1: a too-large session is not retried", kv.writes)
+			}
+		})
+	}
 }

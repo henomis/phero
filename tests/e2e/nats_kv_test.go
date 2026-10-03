@@ -20,11 +20,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	natsio "github.com/nats-io/nats.go"
 
 	"github.com/henomis/phero/llm"
 	natsmemory "github.com/henomis/phero/memory/nats"
@@ -229,5 +231,59 @@ func TestNATSMemoryConcurrentSavesKeepEveryMessage(t *testing.T) {
 		}
 
 		seen[m.TextContent()] = true
+	}
+}
+
+// TestNATSMemorySessionTooLarge is issue #8: a session that no longer fits in
+// one NATS message fails with ErrSessionTooLarge, whichever limit it hits — the
+// bucket's MaxValueSize (refused by the server) or the connection's
+// max_payload (refused by nats.go before sending).
+func TestNATSMemorySessionTooLarge(t *testing.T) {
+	nc := requireNATS(t)
+	ctx := context.Background()
+
+	const bucket = "phero-e2e-memsize"
+
+	js, err := nc.JetStream()
+	if err != nil {
+		t.Fatalf("JetStream: %v", err)
+	}
+
+	t.Cleanup(func() { _ = js.DeleteKeyValue(bucket) })
+
+	kvStore, err := js.CreateKeyValue(&natsio.KeyValueConfig{Bucket: bucket, MaxValueSize: 4096})
+	if err != nil {
+		t.Fatalf("CreateKeyValue: %v", err)
+	}
+
+	cases := map[string]int{
+		"bucket MaxValueSize":    8 * 1024,
+		"connection max_payload": int(nc.MaxPayload()) + 1024,
+	}
+
+	for name, size := range cases {
+		t.Run(name, func(t *testing.T) {
+			mem, err := natsmemory.New(kvStore, "big-"+uuid.NewString())
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			if err = mem.Save(ctx, []llm.Message{llm.UserMessage(llm.Text("small"))}); err != nil {
+				t.Fatalf("Save small: %v", err)
+			}
+
+			big := llm.UserMessage(llm.Text(strings.Repeat("x", size)))
+
+			err = mem.Save(ctx, []llm.Message{big})
+			if !errors.Is(err, natsmemory.ErrSessionTooLarge) {
+				t.Fatalf("Save big = %v, want ErrSessionTooLarge", err)
+			}
+
+			// The history before the failed Save is intact.
+			got, err := mem.Retrieve(ctx, "")
+			if err != nil || len(got) != 1 {
+				t.Fatalf("Retrieve = %d messages, %v; want the 1 saved before", len(got), err)
+			}
+		})
 	}
 }

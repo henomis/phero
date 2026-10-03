@@ -14,7 +14,10 @@
 
 package natsmemory
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 var (
 	// ErrNilKeyValue is returned when the NATS key-value store is nil.
@@ -24,4 +27,32 @@ var (
 	// ErrConcurrentUpdate is returned by Save when other writers kept updating
 	// the session between its read and its write, on every attempt.
 	ErrConcurrentUpdate = errors.New("session updated concurrently")
+	// ErrSessionTooLarge is returned by Save when the session no longer fits in
+	// one NATS message; see [SessionTooLargeError].
+	ErrSessionTooLarge = errors.New("session too large to store")
 )
+
+// SessionTooLargeError is returned by Save when the encoded session is larger
+// than NATS will store as one value: the connection's max_payload, or the
+// bucket's MaxValueSize when that is smaller. The session is stored as a whole,
+// so every later Save to it fails the same way until it shrinks — see the
+// package documentation for what to do. It matches [ErrSessionTooLarge] with
+// errors.Is, and wraps the NATS error.
+type SessionTooLargeError struct {
+	// Session is the session ID.
+	Session string
+	// Size is the encoded size, in bytes, that did not fit.
+	Size int
+	// Err is the error NATS returned.
+	Err error
+}
+
+func (e *SessionTooLargeError) Error() string {
+	return fmt.Sprintf("%s: session %q is %d bytes: %v", ErrSessionTooLarge, e.Session, e.Size, e.Err)
+}
+
+// Is reports ErrSessionTooLarge, so errors.Is matches it.
+func (e *SessionTooLargeError) Is(target error) bool { return target == ErrSessionTooLarge }
+
+// Unwrap returns the NATS error.
+func (e *SessionTooLargeError) Unwrap() error { return e.Err }

@@ -140,7 +140,8 @@ func (m *Memory) load() ([]llm.Message, uint64, error) {
 // store JSON-encodes the message list and writes it back to the KV store, only
 // if the key is still at revision: Create when there was no value, Update
 // otherwise. A write that lost a race fails with an error matching
-// nats.ErrKeyExists. The caller must hold m.mu.
+// nats.ErrKeyExists; one too large to store, with a *SessionTooLargeError.
+// The caller must hold m.mu.
 func (m *Memory) store(msgs []llm.Message, revision uint64) error {
 	data, err := json.Marshal(msgs)
 	if err != nil {
@@ -153,7 +154,33 @@ func (m *Memory) store(msgs []llm.Message, revision uint64) error {
 		_, err = m.kv.Update(m.sessionID, data, revision)
 	}
 
+	if tooLarge(err) {
+		return &SessionTooLargeError{Session: m.sessionID, Size: len(data), Err: err}
+	}
+
 	return err
+}
+
+// jsErrMessageTooLarge is the JetStream API error code for a message larger
+// than the stream's maximum message size — for a KV bucket, its MaxValueSize.
+// nats.go names no error for it.
+const jsErrMessageTooLarge nats.ErrorCode = 10054
+
+// tooLarge reports whether a write failed because the value is too big to
+// store: over the connection's max_payload, refused by nats.go before sending,
+// or over the bucket's MaxValueSize, refused by the server.
+func tooLarge(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if errors.Is(err, nats.ErrMaxPayload) {
+		return true
+	}
+
+	apiErr, ok := errors.AsType[*nats.APIError](err)
+
+	return ok && apiErr.ErrorCode == jsErrMessageTooLarge
 }
 
 // Save appends messages to the session history.
