@@ -21,4 +21,7 @@ var (
 	ErrNilKeyValue = errors.New("nil key-value store")
 	// ErrEmptySessionID is returned when the session ID is empty.
 	ErrEmptySessionID = errors.New("empty session id")
+	// ErrConcurrentUpdate is returned by Save when other writers kept updating
+	// the session between its read and its write, on every attempt.
+	ErrConcurrentUpdate = errors.New("session updated concurrently")
 )

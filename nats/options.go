@@ -60,6 +60,9 @@ type serverConfig struct {
 	// drainTimeout bounds how long a shutdown waits for in-flight prompt
 	// handlers before cancelling them.
 	drainTimeout time.Duration
+	// errorMapper, when set, chooses the error sent for a failed run before
+	// the defaults do.
+	errorMapper func(error) *CodedError
 }
 
 func defaultServerConfig() *serverConfig {
@@ -139,6 +142,18 @@ func WithKeepaliveInterval(d time.Duration) ServerOption {
 // means a restart abandons every call in flight.
 func WithDrainTimeout(d time.Duration) ServerOption {
 	return func(c *serverConfig) { c.drainTimeout = d }
+}
+
+// WithErrorMapper sets fn to choose the error a caller receives when the
+// handler fails (§9). It sees the error first: return a [CodedError] to send
+// it, or nil to fall back to the defaults — a CodedError in the error's chain,
+// then the mapping of LLM provider errors, then 500 "internal_error".
+//
+// It is also the place to keep internal detail away from callers: by default
+// the error's text is sent as the message, and an LLM provider's error text
+// can carry account, quota or endpoint details.
+func WithErrorMapper(fn func(error) *CodedError) ServerOption {
+	return func(c *serverConfig) { c.errorMapper = fn }
 }
 
 // — Client options ——————————————————————————————————————————————————————————

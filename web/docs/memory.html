@@ -149,6 +149,13 @@ a.SetMemory(conversationMemory)</code></pre>
         Multiple sessions can coexist in the same bucket by using different session IDs — useful for running
         independent conversations side-by-side without separate databases.
       </p>
+      <p>
+        Several processes can also share <em>one</em> session, for example replicas of the same agent.
+        <code>Save</code> writes only if the key has not changed since it was read; if another process wrote
+        first, it reloads the history and tries again, so no messages are overwritten. If the session keeps
+        changing on every attempt, <code>Save</code> gives up with <code>ErrConcurrentUpdate</code> and stores
+        nothing.
+      </p>
 
       <pre><code class="language-go">import (
     "os"

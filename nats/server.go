@@ -16,6 +16,7 @@ package nats
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -35,6 +36,16 @@ const drainingMessage = "server is draining"
 
 // errCodeServerDraining is the §9.1 machine-readable code of a drain refusal.
 const errCodeServerDraining = "server_draining"
+
+// §9.1 machine-readable codes of a response that could not be sent.
+const (
+	errCodeResponseTooLarge = "response_too_large"
+	errCodeResponseFailed   = "response_failed"
+)
+
+// natsDefaultMaxPayload is NATS's default max_payload (1MB), assumed when the
+// connection does not report its own.
+const natsDefaultMaxPayload = 1 << 20
 
 // Handler is implemented by anything that can process a prompt — *agent.Agent
 // and workflow executors both satisfy it.
@@ -315,8 +326,7 @@ func (s *Server) register(serveCtx, promptCtx context.Context) (natsio.Service, 
 // that is not going away, and the body code says why.
 func (s *Server) handlePrompt(ctx context.Context, req natsio.Request) {
 	if !s.gate.enter() {
-		_ = req.Error("500", drainingMessage, encodeErrorBody(errCodeServerDraining, drainingMessage))
-		_ = req.Respond(nil) // terminator (§9.3)
+		sendError(req, "500", errCodeServerDraining, drainingMessage)
 
 		return
 	}
@@ -331,10 +341,7 @@ func (s *Server) handlePrompt(ctx context.Context, req natsio.Request) {
 // processPrompt decodes the envelope, invokes the agent, streams the result,
 // and always terminates the response stream with the zero-byte terminator (§6.5).
 func (s *Server) processPrompt(ctx context.Context, req natsio.Request) {
-	sendErr := func(code, errCode, message string) {
-		_ = req.Error(code, message, encodeErrorBody(errCode, message))
-		_ = req.Respond(nil) // terminator (§9.3)
-	}
+	sendErr := func(code, errCode, message string) { sendError(req, code, errCode, message) }
 
 	env, err := decodeEnvelope(req.Data())
 	if err != nil {
@@ -383,12 +390,66 @@ func (s *Server) processPrompt(ctx context.Context, req natsio.Request) {
 	kaWg.Wait()
 
 	if runErr != nil {
-		sendErr("500", "internal_error", runErr.Error())
+		sendCodedError(req, s.errorFor(ctx, runErr))
 		return
 	}
 
-	_ = req.Respond(encodeResponseChunk(result.TextContent()))
+	s.sendResponse(req, result.TextContent())
+}
+
+// sendResponse sends text as one or more response chunks (§6.3), each small
+// enough to publish on this connection, then the terminator (§6.5).
+//
+// A failed publish is reported, not ignored: ignoring it would still send the
+// terminator, and the caller would read a lost answer as an empty one. The
+// error follows whatever content already went out, which §9.3 allows, and the
+// caller discards that partial text when it sees the error.
+func (s *Server) sendResponse(req natsio.Request, text string) {
+	chunks, ok := encodeResponseChunks(text, s.maxPublishBytes())
+	if !ok {
+		sendError(req, "500", errCodeResponseTooLarge, "response does not fit in this connection's max_payload")
+		return
+	}
+
+	for _, chunk := range chunks {
+		if err := req.Respond(chunk); err != nil {
+			errCode := errCodeResponseFailed
+			if errors.Is(err, natsclient.ErrMaxPayload) {
+				errCode = errCodeResponseTooLarge
+			}
+
+			sendError(req, "500", errCode, "send response: "+err.Error())
+
+			return
+		}
+	}
+
 	_ = req.Respond(nil) // terminator (§6.5)
+}
+
+// maxPublishBytes is the largest message this server can publish: the
+// connection's max_payload, or NATS's default when the connection does not
+// report one (it is not connected, or there is none, as in tests).
+func (s *Server) maxPublishBytes() int {
+	if s.nc != nil {
+		if n := s.nc.MaxPayload(); n > 0 {
+			return int(n)
+		}
+	}
+
+	return natsDefaultMaxPayload
+}
+
+// sendError sends a service error (§9.1) followed by the terminator (§9.3).
+func sendError(req natsio.Request, code, errCode, message string) {
+	sendErrorBody(req, code, headerSafe(message), encodeErrorBody(errCode, message, 0))
+}
+
+// sendErrorBody sends a service error with a prepared body (§9.1), followed by
+// the terminator (§9.3).
+func sendErrorBody(req natsio.Request, code, description string, body []byte) {
+	_ = req.Error(code, description, body)
+	_ = req.Respond(nil) // terminator (§9.3)
 }
 
 // handleStatus replies with a heartbeat-shaped JSON payload (§8.7).

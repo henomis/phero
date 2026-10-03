@@ -18,6 +18,11 @@
 // per-session key inside a JetStream KV bucket. Because NATS JetStream
 // persists bucket data to disk, memory survives process restarts.
 //
+// Several processes can share one session. Save writes with a compare-and-swap
+// on the key's revision: a writer that lost the race reloads the history and
+// tries again, so no messages are overwritten. A Save that keeps losing gives
+// up with [ErrConcurrentUpdate] and stores nothing.
+//
 // Requirements:
 //   - A NATS server with JetStream enabled (start with: nats -js).
 //   - A pre-created nats.KeyValue bucket, injected at construction time.

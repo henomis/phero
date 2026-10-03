@@ -51,7 +51,7 @@ func (c *Client) ExecuteStream(
 
 		stream, err := c.client.CreateChatCompletionStream(ctx, request)
 		if err != nil {
-			yield(llm.StreamChunk{}, err)
+			yield(llm.StreamChunk{}, wrapAPIError(err))
 			return
 		}
 		defer func() { _ = stream.Close() }()
@@ -71,7 +71,7 @@ func (c *Client) ExecuteStream(
 			}
 
 			if recvErr != nil {
-				yield(llm.StreamChunk{}, recvErr)
+				yield(llm.StreamChunk{}, wrapAPIError(recvErr))
 				return
 			}
 

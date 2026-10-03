@@ -15,10 +15,15 @@
 package natsmemory
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"math/rand/v2"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/nats-io/nats.go"
 
@@ -102,73 +107,175 @@ func (m *Memory) needSummarization(msgCount int) bool {
 	return m.llm != nil && m.summaryThreshold > 0 && msgCount >= int(m.summaryThreshold)
 }
 
-// load retrieves and JSON-decodes the current message list from the KV store.
-// Returns an empty slice when the key does not exist yet.
+// Save retries a write that lost a race this many times in all before giving up
+// with ErrConcurrentUpdate.
+const saveAttempts = 5
+
+// saveBackoff is the base of the random pause before a retried write. It
+// doubles with each attempt, so writers that collided spread out.
+const saveBackoff = 10 * time.Millisecond
+
+// load retrieves and JSON-decodes the current message list from the KV store,
+// with the key's revision for a later compare-and-swap write. It returns an
+// empty slice and revision 0 when the key does not exist yet (or was cleared).
 // The caller must hold m.mu.
-func (m *Memory) load() ([]llm.Message, error) {
+func (m *Memory) load() ([]llm.Message, uint64, error) {
 	entry, err := m.kv.Get(m.sessionID)
 	if err != nil {
-		if err == nats.ErrKeyNotFound {
-			return []llm.Message{}, nil
+		if errors.Is(err, nats.ErrKeyNotFound) {
+			return []llm.Message{}, 0, nil
 		}
 
-		return nil, err
+		return nil, 0, err
 	}
 
 	var msgs []llm.Message
 	if unmarshalErr := json.Unmarshal(entry.Value(), &msgs); unmarshalErr != nil {
-		return nil, unmarshalErr
+		return nil, 0, unmarshalErr
 	}
 
-	return msgs, nil
+	return msgs, entry.Revision(), nil
 }
 
-// store JSON-encodes and writes the message list back to the KV store.
-// The caller must hold m.mu.
-func (m *Memory) store(msgs []llm.Message) error {
+// store JSON-encodes the message list and writes it back to the KV store, only
+// if the key is still at revision: Create when there was no value, Update
+// otherwise. A write that lost a race fails with an error matching
+// nats.ErrKeyExists. The caller must hold m.mu.
+func (m *Memory) store(msgs []llm.Message, revision uint64) error {
 	data, err := json.Marshal(msgs)
 	if err != nil {
 		return err
 	}
 
-	_, err = m.kv.Put(m.sessionID, data)
+	if revision == 0 {
+		_, err = m.kv.Create(m.sessionID, data)
+	} else {
+		_, err = m.kv.Update(m.sessionID, data, revision)
+	}
 
 	return err
 }
 
 // Save appends messages to the session history.
+//
+// Several processes can save to the same session: the write is a
+// compare-and-swap on the key's revision, so the read-modify-write cannot
+// overwrite another writer's messages. A write that loses the race reloads the
+// history and tries again, up to saveAttempts times, and then fails with
+// ErrConcurrentUpdate.
 func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 	if len(messages) == 0 {
 		return nil
 	}
 
+	// The mutex is not what makes Save safe — the revision check is — but it
+	// keeps goroutines of this process from colliding with each other.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	existing, err := m.load()
-	if err != nil {
-		return err
+	var (
+		summary summaryCache
+		lastErr error
+	)
+
+	for attempt := range saveAttempts {
+		if attempt > 0 {
+			if err := sleepBackoff(ctx, attempt); err != nil {
+				return err
+			}
+		}
+
+		existing, revision, err := m.load()
+		if err != nil {
+			return err
+		}
+
+		merged, err := m.merge(ctx, existing, messages, &summary)
+		if err != nil {
+			return err
+		}
+
+		err = m.store(merged, revision)
+		if err == nil {
+			return nil
+		}
+
+		if !errors.Is(err, nats.ErrKeyExists) {
+			return err
+		}
+
+		lastErr = err
 	}
 
+	return fmt.Errorf("%w: %w", ErrConcurrentUpdate, lastErr)
+}
+
+// merge appends messages to existing and, when the result is over the
+// threshold, replaces its oldest messages with a summary.
+//
+// The summary is an LLM call, so a retried Save does not pay for it again when
+// the messages it covers are the same as last time: another writer that won
+// the race normally appended at the end, leaving the oldest messages alone.
+// It is recomputed only when they differ (another writer summarized first).
+func (m *Memory) merge(
+	ctx context.Context,
+	existing, messages []llm.Message,
+	summary *summaryCache,
+) ([]llm.Message, error) {
 	merged := append(existing, messages...)
 
-	if m.needSummarization(len(merged)) {
-		toSummarize := merged[:m.summarySize]
-		toAppend := merged[m.summarySize:]
+	if !m.needSummarization(len(merged)) {
+		return merged, nil
+	}
 
+	toSummarize := merged[:m.summarySize]
+	toAppend := merged[m.summarySize:]
+
+	key, err := json.Marshal(toSummarize)
+	if err != nil {
+		return nil, err
+	}
+
+	if summary.message == nil || !bytes.Equal(summary.key, key) {
 		history := memory.FormatSummaryPrompt(toSummarize)
 
 		summaryMsg, llmErr := m.llm.Execute(ctx, []llm.Message{history})
 		if llmErr != nil {
-			return llmErr
+			return nil, llmErr
 		}
 
-		merged = make([]llm.Message, 0, 1+len(toAppend))
-		merged = append(merged, llm.SystemMessage(memory.SummarySystemMessagePrefix+summaryMsg.Message.TextContent()))
-		merged = append(merged, toAppend...)
+		msg := llm.SystemMessage(memory.SummarySystemMessagePrefix + summaryMsg.Message.TextContent())
+		summary.key, summary.message = key, &msg
 	}
 
-	return m.store(merged)
+	result := make([]llm.Message, 0, 1+len(toAppend))
+	result = append(result, *summary.message)
+	result = append(result, toAppend...)
+
+	return result, nil
+}
+
+// summaryCache remembers the last summary Save computed and the messages it
+// covers, so a retry can reuse it.
+type summaryCache struct {
+	key     []byte
+	message *llm.Message
+}
+
+// sleepBackoff waits a random time up to saveBackoff doubled per attempt, or
+// until ctx ends.
+func sleepBackoff(ctx context.Context, attempt int) error {
+	d := time.Duration(rand.Int64N(int64(saveBackoff << attempt))) //nolint:gosec // jitter, not security
+
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Retrieve returns all messages currently in memory, ordered from oldest to newest.
@@ -178,7 +285,9 @@ func (m *Memory) Retrieve(_ context.Context, _ string) ([]llm.Message, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.load()
+	msgs, _, err := m.load()
+
+	return msgs, err
 }
 
 // Clear removes all messages for this session.
@@ -186,7 +295,7 @@ func (m *Memory) Clear(_ context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if err := m.kv.Purge(m.sessionID); err != nil && err != nats.ErrKeyNotFound {
+	if err := m.kv.Purge(m.sessionID); err != nil && !errors.Is(err, nats.ErrKeyNotFound) {
 		return err
 	}
 

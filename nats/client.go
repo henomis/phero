@@ -268,18 +268,32 @@ func (c *Client) AsTool(info *AgentInfo, toolName, toolDesc string) (*llm.Tool, 
 type Stream struct {
 	sub               *natsclient.Subscription
 	inactivityTimeout time.Duration
+
+	// next, when set, replaces nextMsg: tests use it to script a stream
+	// without a broker.
+	next func(ctx context.Context) (*natsclient.Msg, error)
 }
 
 // Text reads all response chunks from the stream and returns the concatenated
 // text.  It returns [ErrStreamTimeout] when no message arrives within the
 // inactivity timeout (§6.6).  The stream is automatically drained on return.
+//
+// If the agent asks a question mid-stream (§7), Text returns a *[QueryError]
+// carrying it: this client cannot answer, and waiting would only end in a
+// timeout. Text discards any text received before the error, as it does for
+// a service error.
 func (s *Stream) Text(ctx context.Context) (string, error) {
 	defer s.sub.Unsubscribe() //nolint:errcheck
+
+	next := s.nextMsg
+	if s.next != nil {
+		next = s.next
+	}
 
 	var sb strings.Builder
 
 	for {
-		msg, err := s.nextMsg(ctx)
+		msg, err := next(ctx)
 		if err != nil {
 			if errors.Is(err, natsclient.ErrTimeout) {
 				return "", ErrStreamTimeout
@@ -301,8 +315,11 @@ func (s *Stream) Text(ctx context.Context) (string, error) {
 			continue // §6.6: silently ignore unknown or unparseable chunks
 		}
 
-		if chunk.Type == chunkTypeResponse {
+		switch chunk.Type {
+		case chunkTypeResponse:
 			sb.WriteString(decodeResponseText(chunk.Data))
+		case chunkTypeQuery:
+			return "", parseQuery(chunk.Data)
 		}
 		// "status" ack chunks and unknown types are silently ignored (§6.4, §6.6).
 	}

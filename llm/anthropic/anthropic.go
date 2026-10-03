@@ -143,7 +143,7 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, opts ...ll
 
 	res, err := c.client.Messages.New(ctx, params)
 	if err != nil {
-		return nil, err
+		return nil, wrapAPIError(err)
 	}
 
 	msg, err := messageFromAnthropic(res)

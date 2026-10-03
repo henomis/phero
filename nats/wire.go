@@ -18,8 +18,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	natsclient "github.com/nats-io/nats.go"
 )
@@ -27,6 +30,7 @@ import (
 const (
 	chunkTypeResponse = "response"
 	chunkTypeStatus   = "status"
+	chunkTypeQuery    = "query"
 	endpointPrompt    = "prompt"
 	svcNameAgents     = "agents"
 	attachmentsOkTrue = "true"
@@ -158,6 +162,72 @@ func encodeResponseChunk(text string) []byte {
 	return b
 }
 
+// encodeResponseChunks splits text into response chunks (§6.3) whose encoded
+// size is at most limit bytes, so that each one can be published on its own.
+// Callers concatenate the chunks' text in order, so the split is invisible to
+// them. Text that fits is sent as a single chunk, as before.
+//
+// The limit applies to the encoded chunk, not to the text: JSON escaping can
+// make a piece of text several times larger (json.Marshal writes "<" as the six
+// bytes <). Cuts fall on rune boundaries, so no chunk carries half a UTF-8
+// character. It reports false when not even one rune fits under limit.
+func encodeResponseChunks(text string, limit int) ([][]byte, bool) {
+	if b := encodeResponseChunk(text); len(b) <= limit {
+		return [][]byte{b}, true
+	}
+
+	overhead := len(encodeResponseChunk(""))
+
+	var chunks [][]byte
+
+	for text != "" {
+		// Encoding never shrinks text, so no more than limit bytes of it can fit.
+		n := min(len(text), limit)
+
+		for {
+			n = runeBoundary(text, n)
+			if n == 0 {
+				return nil, false
+			}
+
+			b := encodeResponseChunk(text[:n])
+			if len(b) <= limit {
+				chunks = append(chunks, b)
+				text = text[n:]
+
+				break
+			}
+
+			// Too big: shrink in proportion to how much the escaping grew this
+			// piece, always making progress.
+			next := 0
+			if limit > overhead {
+				next = n * (limit - overhead) / (len(b) - overhead)
+			}
+
+			n = min(next, n-1)
+		}
+	}
+
+	return chunks, true
+}
+
+// runeBoundary moves n back to the start of the rune it falls in, so text[:n]
+// does not end in the middle of a UTF-8 character. It backs off at most
+// utf8.UTFMax-1 bytes: a longer run of continuation bytes is not valid UTF-8,
+// and is cut where it stands.
+func runeBoundary(text string, n int) int {
+	if n <= 0 || n >= len(text) {
+		return max(n, 0)
+	}
+
+	for back := 0; back < utf8.UTFMax-1 && n > 0 && !utf8.RuneStart(text[n]); back++ {
+		n--
+	}
+
+	return n
+}
+
 // encodeStatusChunk encodes a status chunk (§6.4).
 func encodeStatusChunk(status string) []byte {
 	type chunk struct {
@@ -235,14 +305,57 @@ func isServiceError(msg *natsclient.Msg) bool {
 
 // parseServiceError extracts error information from a service-error message
 // (§9.1) into a typed *ServiceError. A non-numeric or absent code yields Code 0,
-// which ServiceError.ClientError treats as a transient (non-4xx) fault.
+// which [Permanent] treats as a transient fault.
+//
+// The JSON body is optional and read leniently: callers MUST tolerate an empty
+// or non-JSON body and unknown fields (§9.1), so a field of the wrong type is
+// skipped rather than costing the caller the code and description.
 func parseServiceError(msg *natsclient.Msg) error {
 	code, _ := strconv.Atoi(msg.Header.Get(errorCodeHeader))
 
-	return &ServiceError{
+	se := &ServiceError{
 		Code:        code,
 		Description: msg.Header.Get(errorHeader),
 	}
+
+	var body map[string]json.RawMessage
+	if json.Unmarshal(msg.Data, &body) == nil {
+		_ = json.Unmarshal(body["error"], &se.ErrCode)
+		_ = json.Unmarshal(body["message"], &se.Message)
+
+		var retryAfter float64
+		if json.Unmarshal(body["retry_after_s"], &retryAfter) == nil &&
+			retryAfter > 0 && retryAfter < maxRetryAfterSeconds {
+			se.RetryAfter = time.Duration(retryAfter * float64(time.Second))
+		}
+	}
+
+	if se.Message == "" {
+		se.Message = se.Description
+	}
+
+	return se
+}
+
+// maxRetryAfterSeconds bounds retry_after_s to what a time.Duration can hold;
+// a larger value is ignored rather than overflowing.
+const maxRetryAfterSeconds = float64(math.MaxInt64 / int64(time.Second))
+
+// queryData is the data field of a query chunk (§7.1).
+type queryData struct {
+	ID     string `json:"id"`
+	Prompt string `json:"prompt"`
+}
+
+// parseQuery builds the error for a query chunk (§7.1). A malformed one is still
+// a query — the agent is waiting all the same — so it yields a QueryError with
+// whatever could be read.
+func parseQuery(data json.RawMessage) error {
+	var q queryData
+
+	_ = json.Unmarshal(data, &q)
+
+	return &QueryError{ID: q.ID, Prompt: q.Prompt}
 }
 
 // decodeResponseText extracts the text value from a response chunk data field.
@@ -304,14 +417,20 @@ func parseMaxPayload(s string) (int64, error) {
 	return 0, fmt.Errorf("nats: unrecognized unit in max_payload %q", s)
 }
 
-// encodeErrorBody builds a §9.1 JSON error body.
-func encodeErrorBody(errCode, message string) []byte {
+// encodeErrorBody builds the optional JSON body of a service error (§9.1),
+// with retry_after_s only when retryAfter is positive.
+func encodeErrorBody(errCode, message string, retryAfter time.Duration) []byte {
 	type body struct {
-		Error   string `json:"error"`
-		Message string `json:"message"`
+		Error       string `json:"error"`
+		Message     string `json:"message"`
+		RetryAfterS int64  `json:"retry_after_s,omitempty"`
 	}
 
-	b, _ := json.Marshal(body{Error: errCode, Message: message}) //nolint:errchkjson // struct contains only string fields
+	b, _ := json.Marshal(body{ //nolint:errchkjson // strings and an int
+		Error:       errCode,
+		Message:     message,
+		RetryAfterS: retryAfterSeconds(retryAfter),
+	})
 
 	return b
 }

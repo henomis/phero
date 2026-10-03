@@ -80,7 +80,7 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, opts ...ll
 
 	response, err := c.client.CreateChatCompletion(ctx, request)
 	if err != nil {
-		return nil, err
+		return nil, wrapAPIError(err)
 	}
 
 	if len(response.Choices) == 0 {

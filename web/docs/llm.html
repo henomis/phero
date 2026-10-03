@@ -347,6 +347,27 @@ wrapped := llm.Use(base, loggingMiddleware)</code></pre>
     </section>
 
     <section>
+      <h2>Provider errors</h2>
+      <p>
+        When a provider's API answers with an HTTP error status, the OpenAI and Anthropic backends return an
+        <code>*llm.ProviderError</code>. It carries the <code>Provider</code>, the <code>StatusCode</code> and,
+        when the provider says how long to wait, <code>RetryAfter</code> (Anthropic only: the OpenAI SDK does not
+        expose response headers). The SDK's own error stays reachable underneath, and the error text is
+        unchanged. Code that may not import a provider SDK, such as a retry policy or the NATS server choosing
+        an error code, can still tell a rate limit from a bad API key:
+      </p>
+
+      <pre><code class="language-go">if pe, ok := errors.AsType[*llm.ProviderError](err); ok &amp;&amp; pe.StatusCode == 429 {
+    time.Sleep(pe.RetryAfter)
+}</code></pre>
+
+      <p>
+        Errors that never reached the API, such as a network failure or an invalid request built locally, are
+        returned as they are.
+      </p>
+    </section>
+
+    <section>
       <h2>Semantic response caching</h2>
       <p>
         <code>middleware.NewSemanticCache</code> wraps any backend with a cache keyed by the <em>semantic similarity</em>

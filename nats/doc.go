@@ -45,6 +45,22 @@
 // [Server.Drain] and [WithDrainTimeout] for the budget. Drain is also how you
 // trigger the same shutdown from elsewhere, on a context of your own.
 //
+// A prompt must fit in one NATS message, so it is limited by the agent's
+// advertised max_payload. An answer is not: one larger than the server
+// connection's max_payload is sent as several response chunks, which
+// [Stream.Text] joins back together. An answer that still cannot be published
+// is reported as a 500 service error ("response_too_large" or
+// "response_failed"), never as an empty answer.
+//
+// Errors from a call can be sorted with [Permanent]: a rate limit (429) is
+// worth retrying, and a [ServiceError] says how long to wait in RetryAfter.
+// The client cannot answer an agent that asks a question mid-stream:
+// [Stream.Text] then returns a [QueryError] carrying the question.
+//
+// A handler chooses the error its caller receives by returning a
+// [CodedError]; errors from the LLM are mapped from [llm.ProviderError], and
+// [WithErrorMapper] overrides both.
+//
 // Quick start — client:
 //
 //	nc, _ := nats.Connect(nats.DefaultURL)

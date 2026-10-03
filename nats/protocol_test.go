@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	natsclient "github.com/nats-io/nats.go"
 	natsio "github.com/nats-io/nats.go/micro"
 )
 
@@ -28,10 +29,17 @@ import (
 type fakeRequest struct {
 	natsio.Request
 
+	data []byte
+	// maxPayload, when set, makes Respond reject a larger message the way a
+	// broker with that max_payload would.
+	maxPayload int
+
 	errCode, errDesc string
 	errBody          []byte
 	responses        [][]byte
 }
+
+func (r *fakeRequest) Data() []byte { return r.data }
 
 func (r *fakeRequest) Error(code, description string, data []byte, _ ...natsio.RespondOpt) error {
 	r.errCode, r.errDesc, r.errBody = code, description, data
@@ -39,7 +47,12 @@ func (r *fakeRequest) Error(code, description string, data []byte, _ ...natsio.R
 }
 
 func (r *fakeRequest) Respond(data []byte, _ ...natsio.RespondOpt) error {
+	if r.maxPayload > 0 && len(data) > r.maxPayload {
+		return natsclient.ErrMaxPayload
+	}
+
 	r.responses = append(r.responses, data)
+
 	return nil
 }
 

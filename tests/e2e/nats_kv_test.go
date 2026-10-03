@@ -18,10 +18,15 @@ package e2e_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/henomis/phero/llm"
 	natsmemory "github.com/henomis/phero/memory/nats"
 	"github.com/henomis/phero/tool/kv"
 )
@@ -138,5 +143,91 @@ func TestNATSMemoryOpenCreatesAndBinds(t *testing.T) {
 		if mem == nil {
 			t.Fatalf("Open (call %d) returned a nil memory", i)
 		}
+	}
+}
+
+// TestNATSMemoryConcurrentSavesKeepEveryMessage is issue #2: two processes
+// sharing a session save at the same time. Each Memory stands for a process,
+// with its own mutex, so only the revision check keeps their writes apart.
+func TestNATSMemoryConcurrentSavesKeepEveryMessage(t *testing.T) {
+	nc := requireNATS(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	const (
+		bucket    = "phero-e2e-memrace"
+		processes = 2
+		writers   = 4 // goroutines per process
+		saves     = 10
+	)
+
+	t.Cleanup(func() {
+		js, jsErr := nc.JetStream()
+		if jsErr == nil {
+			_ = js.DeleteKeyValue(bucket)
+		}
+	})
+
+	session := "race-" + uuid.NewString()
+
+	mems := make([]*natsmemory.Memory, processes)
+	for i := range mems {
+		mem, err := natsmemory.Open(nc, bucket, session)
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+
+		mems[i] = mem
+	}
+
+	var wg sync.WaitGroup
+
+	errs := make(chan error, processes*writers*saves)
+
+	for p, mem := range mems {
+		for w := range writers {
+			wg.Go(func() {
+				for n := range saves {
+					msg := llm.UserMessage(llm.Text(fmt.Sprintf("p%d-w%d-%d", p, w, n)))
+					if err := mem.Save(ctx, []llm.Message{msg}); err != nil {
+						errs <- err
+					}
+				}
+			})
+		}
+	}
+
+	wg.Wait()
+	close(errs)
+
+	failed := 0
+	for err := range errs {
+		failed++
+
+		if !errors.Is(err, natsmemory.ErrConcurrentUpdate) {
+			t.Fatalf("Save: %v", err)
+		}
+	}
+
+	t.Logf("%d of %d saves gave up with ErrConcurrentUpdate", failed, processes*writers*saves)
+
+	got, err := mems[0].Retrieve(ctx, "")
+	if err != nil {
+		t.Fatalf("Retrieve: %v", err)
+	}
+
+	// A Save that gave up stored nothing; every other one must be there.
+	if want := processes*writers*saves - failed; len(got) != want {
+		t.Fatalf("stored %d messages, want %d (%d saves gave up)", len(got), want, failed)
+	}
+
+	seen := make(map[string]bool, len(got))
+	for _, m := range got {
+		if seen[m.TextContent()] {
+			t.Fatalf("message %q stored twice", m.TextContent())
+		}
+
+		seen[m.TextContent()] = true
 	}
 }

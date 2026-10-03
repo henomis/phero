@@ -71,7 +71,7 @@ func (c *Client) ExecuteStream(
 		}
 
 		if streamErr := stream.Err(); streamErr != nil {
-			yield(llm.StreamChunk{}, streamErr)
+			yield(llm.StreamChunk{}, wrapAPIError(streamErr))
 			return
 		}
 

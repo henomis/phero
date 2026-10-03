@@ -17,6 +17,7 @@ package nats
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 var (
@@ -58,6 +59,11 @@ var (
 	// service error headers (§9).
 	ErrServiceError = errors.New("nats: agent returned a service error")
 
+	// ErrQueryNotSupported is returned by [Stream.Text] when the agent asks the
+	// caller a question mid-stream (§7). This client does not answer queries;
+	// the returned error is a *[QueryError] carrying the question.
+	ErrQueryNotSupported = errors.New("nats: agent asked a question this client cannot answer")
+
 	// ErrMalformedEnvelope is returned when the request payload cannot be
 	// decoded as a valid envelope (§5.3).
 	ErrMalformedEnvelope = errors.New("nats: malformed request envelope")
@@ -94,12 +100,15 @@ var (
 //
 // Permanent covers a request the agent will reject however often it arrives (an
 // empty or oversized prompt, a rejected attachment, a malformed envelope, a
-// 4xx-class service error) and the construction faults that mean the caller is
-// misconfigured (a nil dependency, an empty or invalid identifier).
+// 4xx-class service error other than 429, a question the client cannot answer)
+// and the construction faults that mean the caller is misconfigured (a nil
+// dependency, an empty or invalid identifier).
 //
 // Everything else is treated as worth another attempt, including
-// [ErrNoAgentsFound] and [ErrStreamTimeout]: nobody answering *now* and a
-// stream going quiet are both states a later attempt may not meet. Context
+// [ErrNoAgentsFound], [ErrStreamTimeout] and a 429 rate limit: nobody answering
+// *now*, a stream going quiet and an agent that is busy are all states a later
+// attempt may not meet. A 429 may say how long to wait in
+// [ServiceError.RetryAfter]. Context
 // errors are deliberately not permanent — the deadline belongs to the caller,
 // and a fresh one may well succeed.
 func Permanent(err error) bool {
@@ -112,6 +121,7 @@ func Permanent(err error) bool {
 		errors.Is(err, ErrPayloadTooLarge),
 		errors.Is(err, ErrAttachmentsNotAllowed),
 		errors.Is(err, ErrMalformedEnvelope),
+		errors.Is(err, ErrQueryNotSupported),
 		errors.Is(err, ErrInvalidSubjectToken),
 		errors.Is(err, ErrInvalidMaxPayload),
 		errors.Is(err, ErrNilConn),
@@ -123,29 +133,89 @@ func Permanent(err error) bool {
 		return true
 	}
 
-	// A 4xx service error means the agent rejected the request as malformed.
-	// Read from the typed error rather than the string.
+	// A 4xx service error means the agent rejected the request itself, except
+	// a 429: the agent is rate limited, and the same request may well succeed
+	// later. Read from the typed error rather than the string.
 	var svcErr *ServiceError
 	if errors.As(err, &svcErr) {
-		return svcErr.ClientError()
+		return svcErr.ClientError() && svcErr.Code != codeTooManyRequests
 	}
 
 	return false
 }
 
+// CodedError lets a [Handler] choose the error a caller receives (§9.1): a
+// status code from the §9.2 table, a machine-readable ErrCode, a Message, and
+// how long the caller should wait before retrying. Return it from Run, directly
+// or wrapped; the server finds it with errors.As.
+//
+// Code must be one of 400, 401, 403, 404, 409, 429 or 500 — the protocol
+// allows no others — and any other value is sent as 500. An empty ErrCode is
+// filled in from the code ("rate_limited" for 429), and an empty Message from
+// Err.
+//
+// A tool's error does not fail an agent's run (the agent sees it and carries
+// on), so a CodedError returned by a tool never reaches the caller. To shape
+// errors you did not create, such as those from the LLM, use [WithErrorMapper].
+//
+// CodedError is the server's side of the exchange; the caller receives a
+// *[ServiceError]. They are separate types so that a handler relaying another
+// agent's ServiceError does not pass that agent's verdict off as its own.
+type CodedError struct {
+	// Code is the §9.2 status code.
+	Code int
+	// ErrCode is the body's stable machine-readable code ("error").
+	ErrCode string
+	// Message is the human-readable detail, sent as the body's "message" and
+	// the Nats-Service-Error header.
+	Message string
+	// RetryAfter, when positive, is sent as "retry_after_s": how long the
+	// caller should wait before trying again, typically with a 429.
+	RetryAfter time.Duration
+	// Err is the underlying cause, for errors.Is/As and the server's own logs.
+	Err error
+}
+
+func (e *CodedError) Error() string {
+	switch {
+	case e.Message != "":
+		return fmt.Sprintf("nats: code=%d %s", e.Code, e.Message)
+	case e.Err != nil:
+		return fmt.Sprintf("nats: code=%d %v", e.Code, e.Err)
+	default:
+		return fmt.Sprintf("nats: code=%d", e.Code)
+	}
+}
+
+// Unwrap returns the underlying cause.
+func (e *CodedError) Unwrap() error { return e.Err }
+
+// codeTooManyRequests is the §9.2 rate-limit code, the one 4xx a retry can fix.
+const codeTooManyRequests = 429
+
 // ServiceError carries the structured detail of a NATS micro service error
-// response (§9.1): the numeric status Code and its Description. It wraps
-// ErrServiceError, so errors.Is(err, ErrServiceError) keeps matching; use
-// errors.As(err, &se) to read the fields. Callers can classify the fault
-// without parsing the error string — a 4xx Code (see ClientError) means the
-// agent rejected the request as malformed, so a retry cannot help, whereas a
-// 5xx Code is a transient server-side failure.
+// response (§9.1): the numeric status Code and its Description from the
+// headers, and the optional JSON body. It wraps ErrServiceError, so
+// errors.Is(err, ErrServiceError) keeps matching; use errors.As(err, &se) to
+// read the fields. Callers can classify the fault without parsing the error
+// string, or let [Permanent] do it: a 4xx Code means the agent rejected the
+// request itself, except a 429 (rate limited), and a 5xx is a server-side
+// failure worth retrying.
 type ServiceError struct {
 	// Code is the micro service error code (Nats-Service-Error-Code header),
 	// 0 when the agent sent a non-numeric or absent code.
 	Code int
 	// Description is the human-readable error text (Nats-Service-Error header).
 	Description string
+	// ErrCode is the body's stable machine-readable code ("error"), such as
+	// "rate_limited"; empty when the body is absent or not JSON.
+	ErrCode string
+	// Message is the body's human-readable detail ("message"), or Description
+	// when the body has none (§9.1).
+	Message string
+	// RetryAfter is how long the agent asks the caller to wait before trying
+	// again ("retry_after_s"), typically on a 429; 0 when it did not say.
+	RetryAfter time.Duration
 }
 
 // Error renders the same form the package has always produced
@@ -159,9 +229,32 @@ func (e *ServiceError) Error() string {
 // *ServiceError.
 func (e *ServiceError) Unwrap() error { return ErrServiceError }
 
-// ClientError reports whether the code is 4xx-class — the agent rejected the
-// request as malformed (a permanent fault), as opposed to a 5xx transient
-// server-side failure.
+// ClientError reports whether the code is 4xx-class: the agent blames the
+// request rather than itself. That is not the same as permanent — a 429 is a
+// 4xx the same request may get past later. Use [Permanent] to decide on a retry.
 func (e *ServiceError) ClientError() bool {
 	return e.Code >= 400 && e.Code < 500
 }
+
+// QueryError is returned by [Stream.Text] when the agent pauses to ask the
+// caller a question (§7). This client cannot answer, so the call ends here; it
+// wraps [ErrQueryNotSupported], which [Permanent] reports as permanent, since
+// sending the same prompt again gets the same question.
+//
+// The agent is not told: it waits for an answer until its own timeout, and then
+// either fails or goes on with a default of its own choosing (§7.3). To get
+// past the question, send a prompt that already answers it.
+type QueryError struct {
+	// ID is the query's correlation identifier.
+	ID string
+	// Prompt is the question the agent asked.
+	Prompt string
+}
+
+func (e *QueryError) Error() string {
+	return fmt.Sprintf("%s: %q", ErrQueryNotSupported.Error(), e.Prompt)
+}
+
+// Unwrap reports ErrQueryNotSupported so errors.Is(err, ErrQueryNotSupported)
+// matches a *QueryError.
+func (e *QueryError) Unwrap() error { return ErrQueryNotSupported }

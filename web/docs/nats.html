@@ -200,6 +200,14 @@ agents, _ := c.Discover(ctx,
         before publishing. Without that check, the failure would be the less clear
         <code>nats: maximum payload exceeded</code> error.
       </p>
+
+      <p>
+        The limit applies to each prompt, not to the answer. An answer larger than the server connection's
+        <code>max_payload</code> is sent as several <code>response</code> chunks, each small enough to publish,
+        and <code>stream.Text</code> joins them back together. If a chunk still cannot be published, the
+        caller gets a <code>500</code> service error with code <code>response_too_large</code> (or
+        <code>response_failed</code>) instead of an empty answer.
+      </p>
     </section>
 
     <section>
@@ -322,16 +330,97 @@ orchestrator.AddTool(tool)</code></pre>
       <p>
         <code>nats.Permanent(err)</code> reports whether retrying cannot fix an error. It returns true for
         requests the agent will always reject: an empty or oversized prompt, attachments the agent does not
-        accept, a malformed envelope, or a 4xx <code>ServiceError</code>. It also returns true for configuration
+        accept, a malformed envelope, a 4xx <code>ServiceError</code> other than 429, or a question the client
+        cannot answer (see below). It also returns true for configuration
         errors, such as a nil dependency or an empty or invalid identifier. It returns false for everything else,
-        including <code>ErrNoAgentsFound</code>, <code>ErrStreamTimeout</code> and context errors. Use it instead
-        of listing error kinds yourself, so new error kinds are classified correctly without changes on your side.
+        including <code>ErrNoAgentsFound</code>, <code>ErrStreamTimeout</code>, a 429 rate limit and context
+        errors. Use it instead of listing error kinds yourself, so new error kinds are classified correctly without
+        changes on your side.
+      </p>
+      <p>
+        A <code>*ServiceError</code> carries the status <code>Code</code> and <code>Description</code> from the
+        headers, plus the optional JSON body: <code>ErrCode</code> (e.g. <code>"rate_limited"</code>),
+        <code>Message</code> (falls back to <code>Description</code>) and <code>RetryAfter</code>, how long the
+        agent asks you to wait. The client does not retry on its own; <code>RetryAfter</code> is there for your
+        retry logic.
       </p>
 
       <pre><code class="language-go">text, err := stream.Text(ctx)
 if err != nil &amp;&amp; !natsagent.Permanent(err) {
+    var se *natsagent.ServiceError
+    if errors.As(err, &amp;se) &amp;&amp; se.RetryAfter &gt; 0 {
+        time.Sleep(se.RetryAfter) // the agent said when to come back
+    }
     // worth retrying, perhaps against another replica
 }</code></pre>
+    </section>
+
+    <section>
+      <h2>Agents that ask questions</h2>
+      <p>
+        The protocol lets an agent pause and ask the caller a question mid-stream, for example a confirmation
+        before deleting files. The Go client cannot answer. When a question arrives, <code>stream.Text</code>
+        stops at once and returns a <code>*QueryError</code> (matching <code>ErrQueryNotSupported</code>) with
+        the question in <code>Prompt</code>. Any text received before it is discarded, and
+        <code>Permanent</code> reports the error as permanent, because sending the same prompt gets the same
+        question. Through <code>AsTool</code>, the question reaches the calling LLM, which can try again with a
+        prompt that already answers it.
+      </p>
+      <p>
+        The remote agent is not told that nobody will answer. It waits until its own timeout and then either
+        fails or <strong>continues with a default of its own choosing</strong>, which may mean the action goes
+        ahead anyway. Check what the agents you call do in that case.
+      </p>
+    </section>
+
+    <section>
+      <h2>Choosing the error a caller receives</h2>
+      <p>
+        When the handler fails, the server sends the caller a service error with a code from the protocol's
+        table (400, 401, 403, 404, 409, 429, 500). To choose it, return a <code>*nats.CodedError</code> from
+        <code>Run</code>, directly or wrapped:
+      </p>
+
+      <pre><code class="language-go">return nil, &amp;natsagent.CodedError{
+    Code:       429,
+    ErrCode:    "quota_exceeded",
+    Message:    "daily quota used up",
+    RetryAfter: 30 * time.Second, // sent as retry_after_s
+}</code></pre>
+
+      <p>
+        Any other code is sent as 500, an empty <code>ErrCode</code> is filled in from the code
+        (<code>"rate_limited"</code> for 429), and an empty <code>Message</code> from the wrapped
+        <code>Err</code>. A tool's error does not fail an agent's run, so a <code>CodedError</code> returned by a
+        tool never reaches the caller.
+      </p>
+      <p>
+        Without a <code>CodedError</code>, errors from the LLM are mapped from the provider's
+        <code>llm.ProviderError</code>. Only a rate limit keeps its code: a rejected API key is the agent's
+        configuration, not the caller's credentials, and a rejected request may be the agent's own fault, so
+        both are reported as server errors.
+      </p>
+      <ul>
+        <li>Provider 429 → 429 <code>rate_limited</code>, with the provider's wait in <code>retry_after_s</code></li>
+        <li>Provider 401 or 403 → 500 <code>llm_auth_failed</code></li>
+        <li>Provider 400, 413 or 422 → 500 <code>llm_rejected</code></li>
+        <li>Any other provider status → 500 <code>llm_error</code></li>
+      </ul>
+      <p>
+        A run cut short by a shutdown is reported as 500 <code>server_draining</code>, and any other error as
+        500 <code>internal_error</code>. To decide yourself, pass <code>WithErrorMapper</code>: it sees every
+        error first, and returning <code>nil</code> falls back to the rules above. It is also the place to keep
+        internal detail away from callers, since by default the error's text is sent as the message:
+      </p>
+
+      <pre><code class="language-go">srv, _ := natsagent.New(nc, a, "alice", "my-agent",
+    natsagent.WithErrorMapper(func(err error) *natsagent.CodedError {
+        if errors.Is(err, ErrInvoiceNotFound) {
+            return &amp;natsagent.CodedError{Code: 404, Message: "no such invoice"}
+        }
+        return nil // use the defaults
+    }),
+)</code></pre>
     </section>
 
     <section>
@@ -380,6 +469,7 @@ OPENAI_API_KEY=&lt;key&gt; go run ./examples/nats-agent/multi-agent/orchestrator
         <li><code>WithHeartbeatInterval(d time.Duration)</code> — how often to publish a heartbeat (default: 30 s)</li>
         <li><code>WithKeepaliveInterval(d time.Duration)</code> — how often to send a keepalive chunk during a long response (default: 30 s)</li>
         <li><code>WithDrainTimeout(d time.Duration)</code> — total shutdown budget for in-flight prompts (default: 30 s)</li>
+        <li><code>WithErrorMapper(fn func(error) *CodedError)</code> — choose the error sent when the handler fails (default: <code>CodedError</code> in the chain, then the LLM provider mapping, then 500)</li>
       </ul>
 
       <h3>Client</h3>
@@ -454,7 +544,8 @@ OPENAI_API_KEY=&lt;key&gt; go run ./examples/nats-agent/multi-agent/orchestrator
         <li><code>ErrMalformedEnvelope</code> — the request payload is not a valid envelope</li>
         <li><code>ErrNoAgentsFound</code> — <code>Discover</code> found no matching agents</li>
         <li><code>ErrStreamTimeout</code> — no chunk arrived within the inactivity timeout</li>
-        <li><code>ErrServiceError</code> — the agent returned an error; use <code>errors.As</code> with <code>*ServiceError</code> to read <code>Code</code> and <code>Description</code></li>
+        <li><code>ErrServiceError</code> — the agent returned an error; use <code>errors.As</code> with <code>*ServiceError</code> to read <code>Code</code>, <code>Description</code>, <code>ErrCode</code>, <code>Message</code> and <code>RetryAfter</code></li>
+        <li><code>ErrQueryNotSupported</code> — the agent asked a question mid-stream; use <code>errors.As</code> with <code>*QueryError</code> to read it</li>
         <li><code>ErrDrainIncomplete</code> — handlers were still running when the drain budget ran out</li>
         <li><code>ErrServerStopped</code> — <code>Start</code> called on a server that has already drained</li>
       </ul>

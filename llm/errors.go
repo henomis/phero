@@ -17,6 +17,7 @@ package llm
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 // ErrSchemaAdditionalPropertiesSet is returned when an object schema explicitly
@@ -145,5 +146,33 @@ func (e *ResponseFormatSchemaError) Error() string {
 }
 
 func (e *ResponseFormatSchemaError) Unwrap() error {
+	return e.Err
+}
+
+// ProviderError is an error answered by an LLM provider's API with an HTTP
+// status, in a form that does not depend on the provider's SDK. Provider
+// packages (llm/openai, llm/anthropic) wrap such errors in it, so code that is
+// not allowed to import an SDK — a retry policy, a server choosing the error
+// code it sends — can still tell a rate limit from a bad API key with
+// errors.As.
+//
+// Error returns the wrapped error's text unchanged.
+type ProviderError struct {
+	// Provider names the provider package, such as "openai" or "anthropic".
+	Provider string
+	// StatusCode is the HTTP status the API answered with.
+	StatusCode int
+	// RetryAfter is how long the provider asked the caller to wait, typically
+	// with a 429; 0 when it did not say or the SDK does not expose it.
+	RetryAfter time.Duration
+	// Err is the SDK's own error.
+	Err error
+}
+
+func (e *ProviderError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *ProviderError) Unwrap() error {
 	return e.Err
 }
