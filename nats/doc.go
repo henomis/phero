@@ -61,6 +61,9 @@
 // [CodedError]; errors from the LLM are mapped from [llm.ProviderError], and
 // [WithErrorMapper] overrides both.
 //
+// [Client.Send] sends a [Request] with attachments and extra headers; on the
+// server, the handler (and an agent's tools) read it with [RequestFrom].
+//
 // Quick start — client:
 //
 //	nc, _ := nats.Connect(nats.DefaultURL)

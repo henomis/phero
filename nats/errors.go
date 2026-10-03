@@ -47,6 +47,10 @@ var (
 	// agent whose attachments_ok metadata is false (§5.4).
 	ErrAttachmentsNotAllowed = errors.New("nats: agent does not accept attachments")
 
+	// ErrInvalidAttachment is returned by [Client.Send] for an attachment
+	// without a filename (§5.2).
+	ErrInvalidAttachment = errors.New("nats: attachment must have a filename")
+
 	// ErrNoAgentsFound is returned by Discover when no compliant agents
 	// respond within the discovery timeout.
 	ErrNoAgentsFound = errors.New("nats: no compliant agents discovered")
@@ -120,6 +124,7 @@ func Permanent(err error) bool {
 	case errors.Is(err, ErrEmptyPrompt),
 		errors.Is(err, ErrPayloadTooLarge),
 		errors.Is(err, ErrAttachmentsNotAllowed),
+		errors.Is(err, ErrInvalidAttachment),
 		errors.Is(err, ErrMalformedEnvelope),
 		errors.Is(err, ErrQueryNotSupported),
 		errors.Is(err, ErrInvalidSubjectToken),

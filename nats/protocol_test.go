@@ -29,7 +29,8 @@ import (
 type fakeRequest struct {
 	natsio.Request
 
-	data []byte
+	data    []byte
+	headers natsio.Headers
 	// maxPayload, when set, makes Respond reject a larger message the way a
 	// broker with that max_payload would.
 	maxPayload int
@@ -40,6 +41,8 @@ type fakeRequest struct {
 }
 
 func (r *fakeRequest) Data() []byte { return r.data }
+
+func (r *fakeRequest) Headers() natsio.Headers { return r.headers }
 
 func (r *fakeRequest) Error(code, description string, data []byte, _ ...natsio.RespondOpt) error {
 	r.errCode, r.errDesc, r.errBody = code, description, data

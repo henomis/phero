@@ -341,24 +341,34 @@ func (s *Server) handlePrompt(ctx context.Context, req natsio.Request) {
 // processPrompt decodes the envelope, invokes the agent, streams the result,
 // and always terminates the response stream with the zero-byte terminator (§6.5).
 func (s *Server) processPrompt(ctx context.Context, req natsio.Request) {
-	sendErr := func(code, errCode, message string) { sendError(req, code, errCode, message) }
+	badRequest := func(errCode, message string) { sendError(req, "400", errCode, message) }
 
 	env, err := decodeEnvelope(req.Data())
 	if err != nil {
-		sendErr("400", "malformed_envelope", err.Error())
+		badRequest("malformed_envelope", err.Error())
 		return
 	}
 
 	if !s.cfg.attachmentsOk && len(env.Attachments) > 0 {
-		sendErr("400", "attachments_not_allowed", "this agent does not accept attachments")
+		badRequest("attachments_not_allowed", "this agent does not accept attachments")
 		return
 	}
 
 	parts, err := envelopeToContentParts(env)
 	if err != nil {
-		sendErr("400", "malformed_envelope", err.Error())
+		badRequest("malformed_envelope", err.Error())
 		return
 	}
+
+	request, err := requestFromEnvelope(env, natsclient.Header(req.Headers()))
+	if err != nil {
+		badRequest("malformed_envelope", err.Error())
+		return
+	}
+
+	// The handler — and, through an agent, its tools — can read the request it
+	// is serving with RequestFrom.
+	ctx = withRequest(ctx, request)
 
 	// Mandatory first message: ack before any latency-inducing work (§6.4).
 	_ = req.Respond(encodeStatusChunk("ack"))

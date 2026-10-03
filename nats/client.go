@@ -73,6 +73,11 @@ func (h *AgentHandle) Prompt(ctx context.Context, text string) (*Stream, error) 
 	return h.client.Prompt(ctx, &h.AgentInfo, text)
 }
 
+// Send sends req to this agent. It delegates to [Client.Send].
+func (h *AgentHandle) Send(ctx context.Context, req *Request) (*Stream, error) {
+	return h.client.Send(ctx, &h.AgentInfo, req)
+}
+
 // AsTool wraps this agent as an [llm.Tool]. It delegates to [Client.AsTool].
 func (h *AgentHandle) AsTool(toolName, toolDesc string) (*llm.Tool, error) {
 	return h.client.AsTool(&h.AgentInfo, toolName, toolDesc)
@@ -189,51 +194,40 @@ func (c *Client) Discover(ctx context.Context, opts ...DiscoverOption) ([]*Agent
 
 // Prompt sends a plain-text prompt to the agent described by info and returns
 // a [Stream] for consuming the streamed response.  The caller must call
-// [Stream.Close] when done.
+// [Stream.Close] when done. It is [Client.Send] with only a prompt.
+func (c *Client) Prompt(ctx context.Context, info *AgentInfo, text string) (*Stream, error) {
+	return c.Send(ctx, info, &Request{Prompt: text})
+}
+
+// Send sends req — a prompt, with optional attachments and headers — to the
+// agent described by info and returns a [Stream] for consuming the streamed
+// response.  The caller must call [Stream.Close] when done.
+//
+// The request is checked before anything is published (§5.4): an empty prompt,
+// attachments the agent does not accept, an attachment without a filename, and
+// a request larger than the agent's or the connection's max_payload all fail
+// here, with an error [Permanent] reports as permanent.
 //
 // An already-ended ctx returns its error without publishing: the send itself
 // does not block, but starting work on behalf of a call that is already over
 // means an agent runs — and bills — a prompt with nobody left to read it.
 // Reading the reply is bounded by the ctx passed to [Stream.Text].
-func (c *Client) Prompt(ctx context.Context, info *AgentInfo, text string) (*Stream, error) {
+func (c *Client) Send(ctx context.Context, info *AgentInfo, req *Request) (*Stream, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	if strings.TrimSpace(text) == "" {
-		return nil, ErrEmptyPrompt
-	}
-
-	env := envelope{Prompt: text}
-
-	body, err := json.Marshal(env)
+	msg, err := c.requestMsg(info, req)
 	if err != nil {
-		return nil, fmt.Errorf("nats: encode prompt: %w", err)
+		return nil, err
 	}
 
-	// Both caps, because they are different facts. The advertised one is the
-	// agent's policy; the connection's is what the transport will actually
-	// carry, and exceeding it fails at publish as `nats: maximum payload
-	// exceeded` — the opaque error ErrPayloadTooLarge exists to replace. The
-	// comparison is exact: nats.go rejects on len(data)+len(headers), and a
-	// prompt request carries no headers.
-	if info.MaxPayloadBytes > 0 && int64(len(body)) > info.MaxPayloadBytes {
-		return nil, ErrPayloadTooLarge
-	}
-
-	if connLimit := c.nc.MaxPayload(); connLimit > 0 && int64(len(body)) > connLimit {
-		return nil, fmt.Errorf("%w: %d bytes exceeds this connection's max_payload (%d bytes)",
-			ErrPayloadTooLarge, len(body), connLimit)
-	}
-
-	inbox := c.nc.NewInbox()
-
-	sub, err := c.nc.SubscribeSync(inbox)
+	sub, err := c.nc.SubscribeSync(msg.Reply)
 	if err != nil {
 		return nil, fmt.Errorf("nats: subscribe reply: %w", err)
 	}
 
-	if pubErr := c.nc.PublishRequest(info.PromptSubject, inbox, body); pubErr != nil {
+	if pubErr := c.nc.PublishMsg(msg); pubErr != nil {
 		_ = sub.Unsubscribe()
 		return nil, fmt.Errorf("nats: publish prompt: %w", pubErr)
 	}
@@ -242,6 +236,50 @@ func (c *Client) Prompt(ctx context.Context, info *AgentInfo, text string) (*Str
 		sub:               sub,
 		inactivityTimeout: c.cfg.inactivityTimeout,
 	}, nil
+}
+
+// requestMsg validates req against info and the connection (§5.4) and builds
+// the message that carries it, with a fresh inbox as its reply subject.
+func (c *Client) requestMsg(info *AgentInfo, req *Request) (*natsclient.Msg, error) {
+	if req == nil || strings.TrimSpace(req.Prompt) == "" {
+		return nil, ErrEmptyPrompt
+	}
+
+	if len(req.Attachments) > 0 && !info.AttachmentsOk {
+		return nil, ErrAttachmentsNotAllowed
+	}
+
+	for _, a := range req.Attachments {
+		if strings.TrimSpace(a.Filename) == "" {
+			return nil, ErrInvalidAttachment
+		}
+	}
+
+	body, err := json.Marshal(req.envelope())
+	if err != nil {
+		return nil, fmt.Errorf("nats: encode prompt: %w", err)
+	}
+
+	msg := &natsclient.Msg{Subject: info.PromptSubject, Reply: c.nc.NewInbox(), Header: req.Header, Data: body}
+
+	// Both caps, because they are different facts. The advertised one is the
+	// agent's policy; the connection's is what the transport will actually
+	// carry, and exceeding it fails at publish as `nats: maximum payload
+	// exceeded` — the opaque error ErrPayloadTooLarge exists to replace. The
+	// comparison is exact: nats.go rejects on len(data)+len(headers), and
+	// Msg.Size measures the headers as nats.go encodes them.
+	size := int64(msg.Size() - len(msg.Subject) - len(msg.Reply))
+
+	if info.MaxPayloadBytes > 0 && size > info.MaxPayloadBytes {
+		return nil, ErrPayloadTooLarge
+	}
+
+	if connLimit := c.nc.MaxPayload(); connLimit > 0 && size > connLimit {
+		return nil, fmt.Errorf("%w: %d bytes exceeds this connection's max_payload (%d bytes)",
+			ErrPayloadTooLarge, size, connLimit)
+	}
+
+	return msg, nil
 }
 
 // AsTool wraps a remote NATS agent as an [llm.Tool] that any local Phero

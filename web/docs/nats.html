@@ -252,6 +252,46 @@ fmt.Println(text)</code></pre>
     </section>
 
     <section>
+      <h2>Sending attachments and headers</h2>
+      <p>
+        <code>Prompt</code> sends text only. <code>Send</code> takes a <code>*nats.Request</code> with
+        attachments (raw bytes; the base64 encoding is done for you) and extra NATS headers:
+      </p>
+
+      <pre><code class="language-go">stream, err := c.Send(ctx, agents[0], &amp;natsagent.Request{
+    Prompt:      "Summarise this report",
+    Attachments: []natsagent.Attachment{{Filename: "report.pdf", Content: pdfBytes}},
+    Header:      nats.Header{"X-Tenant": []string{"acme"}},
+})</code></pre>
+
+      <p>
+        <code>Send</code> checks the request before publishing: an empty prompt, attachments sent to an agent that
+        does not advertise <code>attachments_ok</code>, an attachment without a filename, or a request larger than
+        the agent's or the connection's <code>max_payload</code>. Headers count toward that limit, as they do for
+        NATS itself. Header names starting with <code>Nats-</code> are reserved by NATS.
+      </p>
+      <p>
+        On the server, a handler reads the request it is serving with <code>nats.RequestFrom(ctx)</code>: the
+        prompt, the headers, and every attachment's bytes. That includes attachments that are not images, which
+        the LLM only sees as an <code>[attachment: report.pdf]</code> placeholder. The context reaches an agent's
+        tools too, so a tool can read, say, a tenant header. The headers are a copy.
+      </p>
+
+      <pre><code class="language-go">func (h *handler) Run(ctx context.Context, parts ...llm.ContentPart) (*agent.Result, error) {
+    if req, ok := natsagent.RequestFrom(ctx); ok {
+        tenant := req.Header.Get("X-Tenant")
+        // ...
+    }
+    // ...
+}</code></pre>
+
+      <p>
+        A header is whatever the caller chose to send. It identifies nobody, so do not use it for
+        authorization; restrict who may publish to the prompt subject with NATS permissions instead.
+      </p>
+    </section>
+
+    <section>
       <h2>Wrapping a remote agent as a tool</h2>
       <p>
         Any discovered agent can be turned into an <code>llm.Tool</code> that a local Phero agent can call.
@@ -477,6 +517,7 @@ OPENAI_API_KEY=&lt;key&gt; go run ./examples/nats-agent/multi-agent/orchestrator
         <li><code>nats.NewClient(nc, opts...) *Client</code> — create a client</li>
         <li><code>client.Discover(ctx, opts...) ([]*AgentHandle, error)</code> — discover agents on the bus</li>
         <li><code>client.Prompt(ctx, info, text) (*Stream, error)</code> — send a prompt and get a stream</li>
+        <li><code>client.Send(ctx, info, req *Request) (*Stream, error)</code> — send a prompt with attachments and headers</li>
         <li><code>client.AsTool(info, toolName, toolDesc) (*llm.Tool, error)</code> — wrap a remote agent as a tool</li>
       </ul>
 
@@ -497,6 +538,8 @@ OPENAI_API_KEY=&lt;key&gt; go run ./examples/nats-agent/multi-agent/orchestrator
       <h3>AgentHandle</h3>
       <ul>
         <li><code>handle.Prompt(ctx, text) (*Stream, error)</code> — shorthand for <code>Client.Prompt</code></li>
+        <li><code>handle.Send(ctx, req *Request) (*Stream, error)</code> — shorthand for <code>Client.Send</code></li>
+        <li><code>nats.RequestFrom(ctx) (*Request, bool)</code> — in a handler or tool, the request being served</li>
         <li><code>handle.AsTool(toolName, toolDesc) (*llm.Tool, error)</code> — shorthand for <code>Client.AsTool</code></li>
         <li><code>handle.AgentInfo</code> — embedded <code>AgentInfo</code> with name, owner, session, subjects, etc.</li>
       </ul>
@@ -541,6 +584,7 @@ OPENAI_API_KEY=&lt;key&gt; go run ./examples/nats-agent/multi-agent/orchestrator
         <li><code>ErrEmptyPrompt</code> — empty prompt passed to <code>Prompt</code></li>
         <li><code>ErrPayloadTooLarge</code> — prompt exceeds the agent's advertised or the connection's max payload</li>
         <li><code>ErrAttachmentsNotAllowed</code> — the agent does not accept attachments</li>
+        <li><code>ErrInvalidAttachment</code> — an attachment has no filename</li>
         <li><code>ErrMalformedEnvelope</code> — the request payload is not a valid envelope</li>
         <li><code>ErrNoAgentsFound</code> — <code>Discover</code> found no matching agents</li>
         <li><code>ErrStreamTimeout</code> — no chunk arrived within the inactivity timeout</li>

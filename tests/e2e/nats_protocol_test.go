@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -354,5 +355,125 @@ func TestNATS_CodedErrorReachesTheCaller(t *testing.T) {
 
 	if natsagent.Permanent(err) {
 		t.Fatal("a 429 must be retryable")
+	}
+}
+
+// echoRequestHandler answers with what RequestFrom shows it: the X-Tenant
+// header, the prompt's length, and each attachment's name and size.
+type echoRequestHandler struct{}
+
+func (echoRequestHandler) Run(ctx context.Context, _ ...llm.ContentPart) (*agent.Result, error) {
+	r, ok := natsagent.RequestFrom(ctx)
+	if !ok {
+		return nil, errors.New("no request in context")
+	}
+
+	answer := fmt.Sprintf("tenant=%s prompt=%d", r.Header.Get("X-Tenant"), len(r.Prompt))
+	for _, a := range r.Attachments {
+		answer += fmt.Sprintf(" %s=%d", a.Filename, len(a.Content))
+	}
+
+	return &agent.Result{Parts: []llm.ContentPart{llm.Text(answer)}}, nil
+}
+
+// startEchoRequestAgent serves echoRequestHandler and returns its handle.
+func startEchoRequestAgent(ctx context.Context, t *testing.T, nc *natsio.Conn) *natsagent.AgentHandle {
+	t.Helper()
+
+	owner := "req-" + uuid.NewString()[:8]
+
+	hbSub, err := nc.SubscribeSync("agents.hb.phero." + owner + ".*")
+	if err != nil {
+		t.Fatalf("subscribe heartbeats: %v", err)
+	}
+	defer hbSub.Unsubscribe() //nolint:errcheck
+
+	srv, err := natsagent.New(nc, echoRequestHandler{}, owner, "echo", natsagent.WithAttachmentsOk(true))
+	if err != nil {
+		t.Fatalf("natsagent.New: %v", err)
+	}
+
+	srvCtx, srvCancel := context.WithCancel(context.Background())
+	t.Cleanup(srvCancel)
+
+	go func() { _ = srv.Start(srvCtx) }()
+
+	if _, err = hbSub.NextMsgWithContext(ctx); err != nil {
+		t.Fatalf("waiting for a heartbeat: %v", err)
+	}
+
+	agents, err := natsagent.NewClient(nc).Discover(ctx, natsagent.FilterByOwner(owner))
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	return agents[0]
+}
+
+// TestNATS_SendHeadersAndAttachments is issues #6 and #7, phero to phero: the
+// client sends a header and a PDF, and the handler sees both.
+func TestNATS_SendHeadersAndAttachments(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	nc := requireNATS(t)
+	echo := startEchoRequestAgent(ctx, t, nc)
+
+	stream, err := echo.Send(ctx, &natsagent.Request{
+		Prompt:      "summarise",
+		Attachments: []natsagent.Attachment{{Filename: "report.pdf", Content: make([]byte, 4096)}},
+		Header:      natsio.Header{"X-Tenant": []string{"acme"}},
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	defer stream.Close()
+
+	got, err := stream.Text(ctx)
+	if err != nil {
+		t.Fatalf("Text: %v", err)
+	}
+
+	if want := "tenant=acme prompt=9 report.pdf=4096"; got != want {
+		t.Fatalf("agent saw %q, want %q", got, want)
+	}
+}
+
+// TestNATS_SendSizeIncludesHeaders checks the local size check against a real
+// broker: a request whose payload plus headers is exactly max_payload is
+// delivered, and one byte more fails locally with ErrPayloadTooLarge rather
+// than at the broker.
+func TestNATS_SendSizeIncludesHeaders(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	nc := requireNATS(t)
+	echo := startEchoRequestAgent(ctx, t, nc)
+
+	header := natsio.Header{"X-Tenant": []string{"acme"}}
+	headerBytes := (&natsio.Msg{Header: header}).Size()
+	envelopeOverhead := len(`{"prompt":""}`)
+	promptLen := int(nc.MaxPayload()) - headerBytes - envelopeOverhead
+
+	exact := &natsagent.Request{Prompt: strings.Repeat("a", promptLen), Header: header}
+
+	stream, err := echo.Send(ctx, exact)
+	if err != nil {
+		t.Fatalf("Send at exactly max_payload: %v", err)
+	}
+	defer stream.Close()
+
+	got, err := stream.Text(ctx)
+	if err != nil {
+		t.Fatalf("Text: %v", err)
+	}
+
+	if want := fmt.Sprintf("tenant=acme prompt=%d", promptLen); got != want {
+		t.Fatalf("agent saw %q, want %q", got, want)
+	}
+
+	over := &natsagent.Request{Prompt: strings.Repeat("a", promptLen+1), Header: header}
+	if _, err = echo.Send(ctx, over); !errors.Is(err, natsagent.ErrPayloadTooLarge) {
+		t.Fatalf("Send one byte over: err = %v, want ErrPayloadTooLarge", err)
 	}
 }
