@@ -188,6 +188,37 @@ func TestExecute_WithToolUse(t *testing.T) {
 	}
 }
 
+func TestExecute_ToolUse_NormalizesLegacyAntmlParameterDelimiter(t *testing.T) {
+	srv := newTestServer(t, anthropicResponse{
+		ID:         "msg-antml",
+		Type:       "message",
+		Role:       "assistant",
+		Model:      anthropic.DefaultModel,
+		StopReason: "tool_use",
+		Content: []contentBlock{
+			{
+				Type:  "tool_use",
+				ID:    "tool-call-antml",
+				Name:  "stream_ls",
+				Input: json.RawMessage(`{"json":true,"names":true,"subject":"</antml-parameter>\n"}`),
+			},
+		},
+		Usage: anthropicUsage{InputTokens: 10, OutputTokens: 4},
+	})
+	defer srv.Close()
+
+	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
+
+	result, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("list streams"))}, nil)
+	if err != nil {
+		t.Fatalf("Execute: unexpected error: %v", err)
+	}
+
+	if got := result.Message.ToolCalls[0].Function.Arguments; got != `{"json":true,"names":true,"subject":">\n"}` {
+		t.Fatalf("tool arguments = %s, want the restored subject delimiter", got)
+	}
+}
+
 func TestExecute_SystemMessage_Converted(t *testing.T) {
 	srv := newTestServer(t, anthropicResponse{
 		ID:         "msg-sys",

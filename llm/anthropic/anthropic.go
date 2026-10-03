@@ -17,6 +17,7 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"strings"
 
 	anthropicapi "github.com/anthropics/anthropic-sdk-go"
@@ -488,10 +489,7 @@ func messageFromAnthropic(m *anthropicapi.Message) (*llm.Message, error) {
 				parts = append(parts, llm.RedactedReasoning(b.Data))
 			}
 		case "tool_use":
-			args := strings.TrimSpace(string(b.Input))
-			if args == "" {
-				args = "{}"
-			}
+			args := normalizeToolArguments(b.Input)
 
 			toolCalls = append(toolCalls, llm.ToolCall{
 				ID:   b.ID,
@@ -513,6 +511,26 @@ func messageFromAnthropic(m *anthropicapi.Message) (*llm.Message, error) {
 	}
 
 	return msg, nil
+}
+
+var legacyAntmlParameterEnd = regexp.MustCompile(`(?i)(?:</antml[-:]parameter>|\\u003c/antml[-:]parameter\\u003e)`)
+
+// normalizeToolArguments removes a legacy AntML parameter delimiter that can
+// leak into structured tool input when an Anthropic-compatible endpoint parses
+// a literal `>` at the end of an XML-style parameter. Only the exact closing
+// marker is changed, and malformed JSON is returned untouched.
+func normalizeToolArguments(input json.RawMessage) string {
+	args := strings.TrimSpace(string(input))
+	if args == "" {
+		return "{}"
+	}
+
+	normalized := legacyAntmlParameterEnd.ReplaceAllString(args, ">")
+	if normalized == args || !json.Valid([]byte(normalized)) {
+		return args
+	}
+
+	return normalized
 }
 
 func anthropicTools(tools []*llm.Tool) []anthropicapi.ToolUnionParam {
