@@ -18,7 +18,7 @@ import (
 	"context"
 	"iter"
 
-	"github.com/henomis/phero/document"
+	"github.com/henomis/phero/v2/document"
 )
 
 // Splitter is the interface implemented by all text-splitting strategies.

@@ -25,7 +25,7 @@ import (
 
 	natsio "github.com/nats-io/nats.go/micro"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // Machine-readable codes (§9.1) the server sends for a failed run.

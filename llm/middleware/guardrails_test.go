@@ -19,7 +19,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 var errGuard = errors.New("guard blocked")

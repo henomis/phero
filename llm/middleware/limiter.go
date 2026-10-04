@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // limiterLLM enforces both a per-second rate limit and a maximum concurrency

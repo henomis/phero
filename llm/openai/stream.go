@@ -23,7 +23,7 @@ import (
 
 	"github.com/sashabaranov/go-openai"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // Client streams responses via the Chat Completions streaming API.

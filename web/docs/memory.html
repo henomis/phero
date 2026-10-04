@@ -62,7 +62,7 @@
         When the capacity is reached, older messages roll off.
       </p>
 
-      <pre><code class="language-go">import memory "github.com/henomis/phero/memory/simple"
+      <pre><code class="language-go">import memory "github.com/henomis/phero/v2/memory/simple"
 
 conversationMemory := memory.New(20)
 
@@ -80,7 +80,7 @@ a.SetMemory(conversationMemory)</code></pre>
         The file path acts as the session identifier, so restarting the process and pointing at the same file resumes the same history.
       </p>
 
-      <pre><code class="language-go">import memory "github.com/henomis/phero/memory/jsonfile"
+      <pre><code class="language-go">import memory "github.com/henomis/phero/v2/memory/jsonfile"
 
 conversationMemory, err := memory.New("memory.json")
 if err != nil {
@@ -122,8 +122,8 @@ a.SetMemory(conversationMemory)</code></pre>
       </p>
 
       <pre><code class="language-go">import (
-    ragmemory "github.com/henomis/phero/memory/rag"
-    "github.com/henomis/phero/rag"
+    ragmemory "github.com/henomis/phero/v2/memory/rag"
+    "github.com/henomis/phero/v2/rag"
 )
 
 ragEngine, _ := rag.New(store, embedder)
@@ -174,7 +174,7 @@ a.SetMemory(conversationMemory)</code></pre>
 
     "github.com/nats-io/nats.go"
 
-    natsmemory "github.com/henomis/phero/memory/nats"
+    natsmemory "github.com/henomis/phero/v2/memory/nats"
 )
 
 nc, _ := nats.Connect(os.Getenv("NATS_URL"))
@@ -213,7 +213,7 @@ a.SetMemory(conversationMemory)</code></pre>
 
     _ "github.com/jackc/pgx/v5/stdlib"
 
-    "github.com/henomis/phero/memory/psql"
+    "github.com/henomis/phero/v2/memory/psql"
 )
 
 db, err := sql.Open("pgx", os.Getenv("DATABASE_URL"))

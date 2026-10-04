@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // GlobInput is the input schema for the glob tool.

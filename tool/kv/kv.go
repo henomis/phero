@@ -21,8 +21,8 @@ import (
 
 	"github.com/nats-io/nats.go"
 
-	"github.com/henomis/phero/internal/natskv"
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/internal/natskv"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // Store exposes a JetStream key-value bucket to an agent as a pair of tools.
@@ -45,7 +45,7 @@ func New(kv nats.KeyValue) (*Store, error) {
 }
 
 // Open binds the bucket named bucket on nc, creating it if it does not exist,
-// and wraps it. See [github.com/henomis/phero/memory/nats.Open] for why the
+// and wraps it. See [github.com/henomis/phero/v2/memory/nats.Open] for why the
 // create-or-bind belongs in the library rather than in each caller.
 func Open(nc *nats.Conn, bucket string) (*Store, error) {
 	kv, err := natskv.OpenBucket(nc, bucket)

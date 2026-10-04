@@ -136,7 +136,7 @@ if err := json.Unmarshal([]byte(res.Message.TextContent()), &cv); err != nil {
       <pre><code class="language-go">import (
     "os"
 
-    "github.com/henomis/phero/llm/anthropic"
+    "github.com/henomis/phero/v2/llm/anthropic"
 )
 
 llmClient := anthropic.New(
@@ -207,7 +207,7 @@ fmt.Println("answer:", result.Message.TextContent())</code></pre>
 
       <pre><code class="language-go">import (
     "os"
-    "github.com/henomis/phero/llm/openai"
+    "github.com/henomis/phero/v2/llm/openai"
 )
 
 llmClient := openai.New(
@@ -502,8 +502,8 @@ timeTool.Use(func(tool *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
       </p>
 
       <pre><code class="language-go">import (
-    "github.com/henomis/phero/trace"
-    "github.com/henomis/phero/trace/text"
+    "github.com/henomis/phero/v2/trace"
+    "github.com/henomis/phero/v2/trace/text"
 )
 
 traced := trace.NewLLM(llmClient, text.New(os.Stderr))

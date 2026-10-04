@@ -26,9 +26,9 @@ import (
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
-	phmcp "github.com/henomis/phero/mcp"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
+	phmcp "github.com/henomis/phero/v2/mcp"
 )
 
 func newMCPSession(t *testing.T, ctx context.Context) *gomcp.ClientSession {

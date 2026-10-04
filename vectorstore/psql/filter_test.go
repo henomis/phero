@@ -19,7 +19,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/henomis/phero/vectorstore"
+	"github.com/henomis/phero/v2/vectorstore"
 )
 
 func TestFilterSQLNil(t *testing.T) {

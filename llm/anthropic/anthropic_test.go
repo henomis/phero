@@ -24,8 +24,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/llm/anthropic"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/llm/anthropic"
 )
 
 // -- helpers -----------------------------------------------------------------

@@ -19,7 +19,7 @@ import (
 
 	"github.com/sashabaranov/go-openai"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // providerName is the llm.ProviderError Provider value for this package.

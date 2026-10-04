@@ -19,8 +19,8 @@ import (
 	"iter"
 	"time"
 
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/trace"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/trace"
 )
 
 // EventType identifies the kind of an Event emitted by RunStream.

@@ -17,7 +17,7 @@ package kv
 import (
 	"errors"
 
-	"github.com/henomis/phero/internal/natskv"
+	"github.com/henomis/phero/v2/internal/natskv"
 )
 
 var (

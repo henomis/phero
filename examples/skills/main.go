@@ -23,12 +23,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/llm/openai"
-	"github.com/henomis/phero/tool/bash"
-	"github.com/henomis/phero/tool/file"
-	skilltool "github.com/henomis/phero/tool/skill"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/llm/openai"
+	"github.com/henomis/phero/v2/tool/bash"
+	"github.com/henomis/phero/v2/tool/file"
+	skilltool "github.com/henomis/phero/v2/tool/skill"
 )
 
 type Options[I, O any] struct {

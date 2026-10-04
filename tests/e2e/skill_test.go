@@ -25,11 +25,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
-	skillpkg "github.com/henomis/phero/skill"
-	toolfile "github.com/henomis/phero/tool/file"
-	toolskill "github.com/henomis/phero/tool/skill"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
+	skillpkg "github.com/henomis/phero/v2/skill"
+	toolfile "github.com/henomis/phero/v2/tool/file"
+	toolskill "github.com/henomis/phero/v2/tool/skill"
 )
 
 const skillsRoot = "../../examples/skills/skills"

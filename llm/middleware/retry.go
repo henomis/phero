@@ -19,7 +19,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 const (

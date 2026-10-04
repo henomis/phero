@@ -21,7 +21,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // EditInput is the input schema for the edit tool.

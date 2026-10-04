@@ -24,8 +24,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/llm/middleware"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/llm/middleware"
 )
 
 // TestMiddleware_Retry verifies that the retry middleware retries on error and

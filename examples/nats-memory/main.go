@@ -26,11 +26,11 @@ import (
 
 	"github.com/nats-io/nats.go"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/llm/openai"
-	natsmemory "github.com/henomis/phero/memory/nats"
-	"github.com/henomis/phero/trace"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/llm/openai"
+	natsmemory "github.com/henomis/phero/v2/memory/nats"
+	"github.com/henomis/phero/v2/trace"
 )
 
 func main() {

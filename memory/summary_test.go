@@ -18,7 +18,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 func TestClampSummarySize(t *testing.T) {

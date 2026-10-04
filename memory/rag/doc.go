@@ -16,8 +16,8 @@
 // retrieval-augmented generation (RAG) store.
 //
 // Import path note:
-//   - This package lives at "github.com/henomis/phero/memory/rag".
-//   - It wraps types from the top-level "github.com/henomis/phero/rag".
+//   - This package lives at "github.com/henomis/phero/v2/memory/rag".
+//   - It wraps types from the top-level "github.com/henomis/phero/v2/rag".
 //
 // The adapter is useful when you want an agent's "memory" to be semantic: saving
 // and retrieving messages via similarity search instead of a simple FIFO buffer.

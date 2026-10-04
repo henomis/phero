@@ -22,9 +22,9 @@ import (
 	"strings"
 	"sync"
 
-	sqlutil "github.com/henomis/phero/internal/sql"
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/memory"
+	sqlutil "github.com/henomis/phero/v2/internal/sql"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/memory"
 )
 
 var _ memory.Memory = (*Memory)(nil)

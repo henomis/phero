@@ -25,10 +25,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/llm/openai"
-	memory "github.com/henomis/phero/memory/simple"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/llm/openai"
+	memory "github.com/henomis/phero/v2/memory/simple"
 )
 
 type GoRunInput struct {

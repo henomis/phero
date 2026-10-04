@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/henomis/phero/trace"
+	"github.com/henomis/phero/v2/trace"
 )
 
 const (

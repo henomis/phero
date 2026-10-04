@@ -17,9 +17,9 @@ package rag
 import (
 	"context"
 
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/memory"
-	"github.com/henomis/phero/rag"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/memory"
+	"github.com/henomis/phero/v2/rag"
 )
 
 var _ memory.Memory = (*Memory)(nil)

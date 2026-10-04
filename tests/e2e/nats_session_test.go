@@ -21,9 +21,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
-	natsagent "github.com/henomis/phero/nats"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
+	natsagent "github.com/henomis/phero/v2/nats"
 )
 
 // staticHandler answers immediately; these tests are about registration

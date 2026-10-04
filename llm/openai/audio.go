@@ -21,7 +21,7 @@ import (
 
 	openaiapi "github.com/sashabaranov/go-openai"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 var (

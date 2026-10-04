@@ -17,7 +17,7 @@ package memory
 import (
 	"fmt"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 //nolint:misspell // accepted as is

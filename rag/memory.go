@@ -19,10 +19,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/henomis/phero/document"
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/memory"
-	"github.com/henomis/phero/vectorstore"
+	"github.com/henomis/phero/v2/document"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/memory"
+	"github.com/henomis/phero/v2/vectorstore"
 )
 
 const (

@@ -20,8 +20,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/henomis/phero/document"
-	"github.com/henomis/phero/textsplitter"
+	"github.com/henomis/phero/v2/document"
+	"github.com/henomis/phero/v2/textsplitter"
 )
 
 const (

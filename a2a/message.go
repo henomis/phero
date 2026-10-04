@@ -21,8 +21,8 @@ import (
 
 	sdka2a "github.com/a2aproject/a2a-go/v2/a2a"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // translatePartsToPhero converts an A2A message into phero ContentParts.

@@ -21,8 +21,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/memory"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/memory"
 )
 
 type mockSummaryLLM struct {

@@ -23,8 +23,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/llm/openai"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/llm/openai"
 )
 
 // sseServer returns a server that writes the given SSE data frames followed by

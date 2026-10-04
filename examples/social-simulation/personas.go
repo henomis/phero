@@ -20,9 +20,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
-	simplemem "github.com/henomis/phero/memory/simple"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
+	simplemem "github.com/henomis/phero/v2/memory/simple"
 )
 
 // Persona represents a simulated participant in the social simulation.

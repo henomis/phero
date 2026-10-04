@@ -18,7 +18,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // tracedLLM wraps an llm.LLM and emits LLMRequestEvent / LLMResponseEvent

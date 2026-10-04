@@ -23,13 +23,13 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/henomis/phero/embedding"
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/llm/middleware"
-	"github.com/henomis/phero/vectorstore"
-	vspsql "github.com/henomis/phero/vectorstore/psql"
-	vsqdrant "github.com/henomis/phero/vectorstore/qdrant"
-	vsweaviate "github.com/henomis/phero/vectorstore/weaviate"
+	"github.com/henomis/phero/v2/embedding"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/llm/middleware"
+	"github.com/henomis/phero/v2/vectorstore"
+	vspsql "github.com/henomis/phero/v2/vectorstore/psql"
+	vsqdrant "github.com/henomis/phero/v2/vectorstore/qdrant"
+	vsweaviate "github.com/henomis/phero/v2/vectorstore/weaviate"
 )
 
 // constEmbedder embeds every text to the same vector, so every lookup is a

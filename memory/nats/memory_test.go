@@ -23,7 +23,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // fakeEntry is the part of nats.KeyValueEntry that Memory reads.

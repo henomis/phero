@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/henomis/phero/vectorstore"
+	"github.com/henomis/phero/v2/vectorstore"
 )
 
 // filterSQL translates a portable vectorstore.Filter into SQL predicates over

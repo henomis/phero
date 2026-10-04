@@ -27,14 +27,14 @@ import (
 
 	qdrantapi "github.com/qdrant/go-client/qdrant"
 
-	"github.com/henomis/phero/agent"
-	embeddingopenai "github.com/henomis/phero/embedding/openai"
-	"github.com/henomis/phero/llm"
-	llmopenai "github.com/henomis/phero/llm/openai"
-	memory "github.com/henomis/phero/memory/simple"
-	"github.com/henomis/phero/rag"
-	textsplitterrecursive "github.com/henomis/phero/textsplitter/recursive"
-	vsqdrant "github.com/henomis/phero/vectorstore/qdrant"
+	"github.com/henomis/phero/v2/agent"
+	embeddingopenai "github.com/henomis/phero/v2/embedding/openai"
+	"github.com/henomis/phero/v2/llm"
+	llmopenai "github.com/henomis/phero/v2/llm/openai"
+	memory "github.com/henomis/phero/v2/memory/simple"
+	"github.com/henomis/phero/v2/rag"
+	textsplitterrecursive "github.com/henomis/phero/v2/textsplitter/recursive"
+	vsqdrant "github.com/henomis/phero/v2/vectorstore/qdrant"
 )
 
 func main() {

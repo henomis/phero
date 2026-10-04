@@ -22,8 +22,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/henomis/phero/textsplitter/markdown"
-	"github.com/henomis/phero/textsplitter/recursive"
+	"github.com/henomis/phero/v2/textsplitter/markdown"
+	"github.com/henomis/phero/v2/textsplitter/recursive"
 )
 
 // TestTextSplitter_Recursive verifies that the recursive character-based splitter

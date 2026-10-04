@@ -22,8 +22,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/llm/anthropic"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/llm/anthropic"
 )
 
 // sseEvent renders one SSE event with the given event name and JSON data.

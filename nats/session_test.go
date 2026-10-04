@@ -20,8 +20,8 @@ import (
 
 	natsclient "github.com/nats-io/nats.go"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // nopHandler satisfies Handler without an LLM, so the registration rules can be

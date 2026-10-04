@@ -23,7 +23,7 @@ import (
 	sdka2a "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 
-	"github.com/henomis/phero/agent"
+	"github.com/henomis/phero/v2/agent"
 )
 
 // agentExecutor bridges the a2asrv.AgentExecutor interface to a phero agent.

@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/henomis/phero/skill"
+	"github.com/henomis/phero/v2/skill"
 )
 
 func TestParse_ValidSkill(t *testing.T) {

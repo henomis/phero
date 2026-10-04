@@ -27,7 +27,7 @@ import (
 	"github.com/weaviate/weaviate-go-client/v4/weaviate/graphql"
 	"github.com/weaviate/weaviate/entities/models"
 
-	"github.com/henomis/phero/vectorstore"
+	"github.com/henomis/phero/v2/vectorstore"
 )
 
 var _ vectorstore.Store = (*Store)(nil)

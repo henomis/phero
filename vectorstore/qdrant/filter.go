@@ -17,7 +17,7 @@ package qdrant
 import (
 	qdrantapi "github.com/qdrant/go-client/qdrant"
 
-	"github.com/henomis/phero/vectorstore"
+	"github.com/henomis/phero/v2/vectorstore"
 )
 
 // translateFilter converts a portable vectorstore.Filter into a native Qdrant

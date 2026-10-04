@@ -26,14 +26,14 @@ import (
 
 	qdrantapi "github.com/qdrant/go-client/qdrant"
 
-	"github.com/henomis/phero/agent"
-	embeddingopenai "github.com/henomis/phero/embedding/openai"
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/llm/openai"
-	nestmemory "github.com/henomis/phero/memory"
-	ragmemory "github.com/henomis/phero/memory/rag"
-	"github.com/henomis/phero/rag"
-	vsqdrant "github.com/henomis/phero/vectorstore/qdrant"
+	"github.com/henomis/phero/v2/agent"
+	embeddingopenai "github.com/henomis/phero/v2/embedding/openai"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/llm/openai"
+	nestmemory "github.com/henomis/phero/v2/memory"
+	ragmemory "github.com/henomis/phero/v2/memory/rag"
+	"github.com/henomis/phero/v2/rag"
+	vsqdrant "github.com/henomis/phero/v2/vectorstore/qdrant"
 )
 
 type TimeInput struct{}

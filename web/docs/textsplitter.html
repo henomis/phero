@@ -87,7 +87,7 @@ type Splitter interface {
       <pre><code class="language-go">import (
     "context"
 
-    "github.com/henomis/phero/textsplitter/recursive"
+    "github.com/henomis/phero/v2/textsplitter/recursive"
 )
 
 const (
@@ -111,7 +111,7 @@ for doc, err := range splitter.Split(context.Background()) {
         For Markdown files, use <code>markdown.New</code> from <code>textsplitter/markdown</code>:
       </p>
 
-      <pre><code class="language-go">import "github.com/henomis/phero/textsplitter/markdown"
+      <pre><code class="language-go">import "github.com/henomis/phero/v2/textsplitter/markdown"
 
 splitter := markdown.New("./README.md", chunkSize, chunkOverlap)
 

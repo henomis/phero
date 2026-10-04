@@ -21,7 +21,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/henomis/phero/trace"
+	"github.com/henomis/phero/v2/trace"
 )
 
 const noTools = "none"

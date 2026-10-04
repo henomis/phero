@@ -15,8 +15,8 @@
 package markdown
 
 import (
-	"github.com/henomis/phero/textsplitter"
-	"github.com/henomis/phero/textsplitter/recursive"
+	"github.com/henomis/phero/v2/textsplitter"
+	"github.com/henomis/phero/v2/textsplitter/recursive"
 )
 
 var separators = []string{

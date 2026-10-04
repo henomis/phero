@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/trace"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/trace"
 )
 
 type runStats struct {

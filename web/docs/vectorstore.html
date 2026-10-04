@@ -200,7 +200,7 @@ go run ./examples/long-term-memory</code></pre>
 
     _ "github.com/jackc/pgx/v5/stdlib"
 
-    vspql "github.com/henomis/phero/vectorstore/psql"
+    vspql "github.com/henomis/phero/v2/vectorstore/psql"
 )
 
 db, err := sql.Open("pgx", os.Getenv("DATABASE_URL"))
@@ -230,7 +230,7 @@ _ = store.EnsureCollection(ctx)</code></pre>
       <pre><code class="language-go">import (
     weaviateclient "github.com/weaviate/weaviate-go-client/v4/weaviate"
 
-    vsweaviate "github.com/henomis/phero/vectorstore/weaviate"
+    vsweaviate "github.com/henomis/phero/v2/vectorstore/weaviate"
 )
 
 c := weaviateclient.New(weaviateclient.Config{

@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // TestNewRetry_Validation checks that zero/negative maxAttempts is rejected.

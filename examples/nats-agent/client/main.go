@@ -33,7 +33,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 
-	natsagent "github.com/henomis/phero/nats"
+	natsagent "github.com/henomis/phero/v2/nats"
 )
 
 func main() {

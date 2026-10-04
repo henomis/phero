@@ -28,9 +28,9 @@ import (
 	"github.com/google/uuid"
 	natsio "github.com/nats-io/nats.go"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
-	natsagent "github.com/henomis/phero/nats"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
+	natsagent "github.com/henomis/phero/v2/nats"
 )
 
 // echoHandler answers every prompt with a fixed text, without an LLM.

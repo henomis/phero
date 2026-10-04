@@ -117,7 +117,7 @@ license:
 ## doc: Generate Go documentation in HTML format
 doc:
 	@echo "Generating Go documentation..."
-	@echo "Open http://localhost:6060/pkg/github.com/henomis/phero/ in your browser. Press Ctrl+C to stop."
+	@echo "Open http://localhost:6060/pkg/github.com/henomis/phero/v2/ in your browser. Press Ctrl+C to stop."
 	godoc -http=:6060
 
 ## check: Run all checks (test + lint + vet)
