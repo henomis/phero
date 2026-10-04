@@ -73,6 +73,11 @@ func (h *AgentHandle) Prompt(ctx context.Context, text string) (*Stream, error) 
 	return h.client.Prompt(ctx, &h.AgentInfo, text)
 }
 
+// Send sends req to this agent. It delegates to [Client.Send].
+func (h *AgentHandle) Send(ctx context.Context, req *Request) (*Stream, error) {
+	return h.client.Send(ctx, &h.AgentInfo, req)
+}
+
 // AsTool wraps this agent as an [llm.Tool]. It delegates to [Client.AsTool].
 func (h *AgentHandle) AsTool(toolName, toolDesc string) (*llm.Tool, error) {
 	return h.client.AsTool(&h.AgentInfo, toolName, toolDesc)
@@ -98,7 +103,9 @@ func NewClient(nc *natsclient.Conn, opts ...ClientOption) *Client {
 }
 
 // Discover sends a $SRV.INFO.agents fan-out request and collects all
-// responding compliant agent instances.
+// responding compliant agent instances. An instance whose protocol_version this
+// package cannot speak (see §11: within 0.x the MAJOR.MINOR must match exactly)
+// is skipped like any other non-compliant reply.
 //
 // It uses a stall strategy: collection ends after 750 ms of silence from the
 // last response, capped by a 2 s absolute deadline (both configurable via
@@ -187,51 +194,40 @@ func (c *Client) Discover(ctx context.Context, opts ...DiscoverOption) ([]*Agent
 
 // Prompt sends a plain-text prompt to the agent described by info and returns
 // a [Stream] for consuming the streamed response.  The caller must call
-// [Stream.Close] when done.
+// [Stream.Close] when done. It is [Client.Send] with only a prompt.
+func (c *Client) Prompt(ctx context.Context, info *AgentInfo, text string) (*Stream, error) {
+	return c.Send(ctx, info, &Request{Prompt: text})
+}
+
+// Send sends req — a prompt, with optional attachments and headers — to the
+// agent described by info and returns a [Stream] for consuming the streamed
+// response.  The caller must call [Stream.Close] when done.
+//
+// The request is checked before anything is published (§5.4): an empty prompt,
+// attachments the agent does not accept, an attachment without a filename, and
+// a request larger than the agent's or the connection's max_payload all fail
+// here, with an error [Permanent] reports as permanent.
 //
 // An already-ended ctx returns its error without publishing: the send itself
 // does not block, but starting work on behalf of a call that is already over
 // means an agent runs — and bills — a prompt with nobody left to read it.
 // Reading the reply is bounded by the ctx passed to [Stream.Text].
-func (c *Client) Prompt(ctx context.Context, info *AgentInfo, text string) (*Stream, error) {
+func (c *Client) Send(ctx context.Context, info *AgentInfo, req *Request) (*Stream, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	if strings.TrimSpace(text) == "" {
-		return nil, ErrEmptyPrompt
-	}
-
-	env := envelope{Prompt: text}
-
-	body, err := json.Marshal(env)
+	msg, err := c.requestMsg(info, req)
 	if err != nil {
-		return nil, fmt.Errorf("nats: encode prompt: %w", err)
+		return nil, err
 	}
 
-	// Both caps, because they are different facts. The advertised one is the
-	// agent's policy; the connection's is what the transport will actually
-	// carry, and exceeding it fails at publish as `nats: maximum payload
-	// exceeded` — the opaque error ErrPayloadTooLarge exists to replace. The
-	// comparison is exact: nats.go rejects on len(data)+len(headers), and a
-	// prompt request carries no headers.
-	if info.MaxPayloadBytes > 0 && int64(len(body)) > info.MaxPayloadBytes {
-		return nil, ErrPayloadTooLarge
-	}
-
-	if connLimit := c.nc.MaxPayload(); connLimit > 0 && int64(len(body)) > connLimit {
-		return nil, fmt.Errorf("%w: %d bytes exceeds this connection's max_payload (%d bytes)",
-			ErrPayloadTooLarge, len(body), connLimit)
-	}
-
-	inbox := c.nc.NewInbox()
-
-	sub, err := c.nc.SubscribeSync(inbox)
+	sub, err := c.nc.SubscribeSync(msg.Reply)
 	if err != nil {
 		return nil, fmt.Errorf("nats: subscribe reply: %w", err)
 	}
 
-	if pubErr := c.nc.PublishRequest(info.PromptSubject, inbox, body); pubErr != nil {
+	if pubErr := c.nc.PublishMsg(msg); pubErr != nil {
 		_ = sub.Unsubscribe()
 		return nil, fmt.Errorf("nats: publish prompt: %w", pubErr)
 	}
@@ -240,6 +236,50 @@ func (c *Client) Prompt(ctx context.Context, info *AgentInfo, text string) (*Str
 		sub:               sub,
 		inactivityTimeout: c.cfg.inactivityTimeout,
 	}, nil
+}
+
+// requestMsg validates req against info and the connection (§5.4) and builds
+// the message that carries it, with a fresh inbox as its reply subject.
+func (c *Client) requestMsg(info *AgentInfo, req *Request) (*natsclient.Msg, error) {
+	if req == nil || strings.TrimSpace(req.Prompt) == "" {
+		return nil, ErrEmptyPrompt
+	}
+
+	if len(req.Attachments) > 0 && !info.AttachmentsOk {
+		return nil, ErrAttachmentsNotAllowed
+	}
+
+	for _, a := range req.Attachments {
+		if strings.TrimSpace(a.Filename) == "" {
+			return nil, ErrInvalidAttachment
+		}
+	}
+
+	body, err := json.Marshal(req.envelope())
+	if err != nil {
+		return nil, fmt.Errorf("nats: encode prompt: %w", err)
+	}
+
+	msg := &natsclient.Msg{Subject: info.PromptSubject, Reply: c.nc.NewInbox(), Header: req.Header, Data: body}
+
+	// Both caps, because they are different facts. The advertised one is the
+	// agent's policy; the connection's is what the transport will actually
+	// carry, and exceeding it fails at publish as `nats: maximum payload
+	// exceeded` — the opaque error ErrPayloadTooLarge exists to replace. The
+	// comparison is exact: nats.go rejects on len(data)+len(headers), and
+	// Msg.Size measures the headers as nats.go encodes them.
+	size := int64(msg.Size() - len(msg.Subject) - len(msg.Reply))
+
+	if info.MaxPayloadBytes > 0 && size > info.MaxPayloadBytes {
+		return nil, ErrPayloadTooLarge
+	}
+
+	if connLimit := c.nc.MaxPayload(); connLimit > 0 && size > connLimit {
+		return nil, fmt.Errorf("%w: %d bytes exceeds this connection's max_payload (%d bytes)",
+			ErrPayloadTooLarge, size, connLimit)
+	}
+
+	return msg, nil
 }
 
 // AsTool wraps a remote NATS agent as an [llm.Tool] that any local Phero
@@ -266,18 +306,32 @@ func (c *Client) AsTool(info *AgentInfo, toolName, toolDesc string) (*llm.Tool, 
 type Stream struct {
 	sub               *natsclient.Subscription
 	inactivityTimeout time.Duration
+
+	// next, when set, replaces nextMsg: tests use it to script a stream
+	// without a broker.
+	next func(ctx context.Context) (*natsclient.Msg, error)
 }
 
 // Text reads all response chunks from the stream and returns the concatenated
 // text.  It returns [ErrStreamTimeout] when no message arrives within the
 // inactivity timeout (§6.6).  The stream is automatically drained on return.
+//
+// If the agent asks a question mid-stream (§7), Text returns a *[QueryError]
+// carrying it: this client cannot answer, and waiting would only end in a
+// timeout. Text discards any text received before the error, as it does for
+// a service error.
 func (s *Stream) Text(ctx context.Context) (string, error) {
 	defer s.sub.Unsubscribe() //nolint:errcheck
+
+	next := s.nextMsg
+	if s.next != nil {
+		next = s.next
+	}
 
 	var sb strings.Builder
 
 	for {
-		msg, err := s.nextMsg(ctx)
+		msg, err := next(ctx)
 		if err != nil {
 			if errors.Is(err, natsclient.ErrTimeout) {
 				return "", ErrStreamTimeout
@@ -299,8 +353,11 @@ func (s *Stream) Text(ctx context.Context) (string, error) {
 			continue // §6.6: silently ignore unknown or unparseable chunks
 		}
 
-		if chunk.Type == chunkTypeResponse {
+		switch chunk.Type {
+		case chunkTypeResponse:
 			sb.WriteString(decodeResponseText(chunk.Data))
+		case chunkTypeQuery:
+			return "", parseQuery(chunk.Data)
 		}
 		// "status" ack chunks and unknown types are silently ignored (§6.4, §6.6).
 	}
@@ -339,7 +396,7 @@ func parseAgentInfo(data []byte) *AgentInfo {
 		return nil
 	}
 
-	if svc.Metadata[metaProtocolVersion] == "" {
+	if !compatibleProtocol(svc.Metadata[metaProtocolVersion]) {
 		return nil
 	}
 
@@ -353,7 +410,7 @@ func parseAgentInfo(data []byte) *AgentInfo {
 
 	for _, ep := range svc.Endpoints {
 		switch ep.Name {
-		case "prompt":
+		case endpointPrompt:
 			info.PromptSubject = ep.Subject
 			if v := ep.Metadata["max_payload"]; v != "" {
 				if n, err := parseMaxPayload(v); err == nil {
@@ -376,6 +433,62 @@ func parseAgentInfo(data []byte) *AgentInfo {
 	}
 
 	return info
+}
+
+// compatibleProtocol reports whether an agent advertising protocol version v
+// can be prompted by this package, which implements [protocolVersion] (§11).
+//
+// Only the MAJOR.MINOR prefix carries meaning; patch and pre-release qualifiers
+// ("0.3.1", "0.3-rc1") are ignored (§11.1). Different MAJOR versions have no
+// interoperability guarantee. Within 0.x a MINOR bump may break the wire — 0.2
+// used a different subject hierarchy — so callers pin the exact MAJOR.MINOR
+// until 1.0 (§11.2). From 1.0, a different MINOR of the same MAJOR is compatible.
+func compatibleProtocol(v string) bool {
+	major, minor, ok := majorMinor(v)
+	if !ok {
+		return false
+	}
+
+	ourMajor, ourMinor, _ := majorMinor(protocolVersion)
+
+	if major != ourMajor {
+		return false
+	}
+
+	return major != "0" || minor == ourMinor
+}
+
+// majorMinor extracts the MAJOR and MINOR numbers of a version string.
+func majorMinor(v string) (major, minor string, ok bool) {
+	major, rest, found := strings.Cut(v, ".")
+	if !found || !isDigits(major) {
+		return "", "", false
+	}
+
+	end := 0
+	for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
+		end++
+	}
+
+	if end == 0 {
+		return "", "", false
+	}
+
+	return major, rest[:end], true
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+
+	return true
 }
 
 // instanceNameFromSubject extracts the 5th token from a verb-first subject

@@ -18,6 +18,19 @@
 // per-session key inside a JetStream KV bucket. Because NATS JetStream
 // persists bucket data to disk, memory survives process restarts.
 //
+// Several processes can share one session. Save writes with a compare-and-swap
+// on the key's revision: a writer that lost the race reloads the history and
+// tries again, so no messages are overwritten. A Save that keeps losing gives
+// up with [ErrConcurrentUpdate] and stores nothing.
+//
+// A session is stored as one value, so it must fit in one NATS message: the
+// server's max_payload (1MB by default), or the bucket's MaxValueSize if that
+// is smaller. Images count base64-encoded. Past the limit Save returns
+// [ErrSessionTooLarge], and so will every later Save to that session. To stay
+// under it, enable [WithSummarization] (which also drops the images of the
+// messages it summarizes), start a new session, raise max_payload, or use
+// memory/psql, which stores each message as its own row.
+//
 // Requirements:
 //   - A NATS server with JetStream enabled (start with: nats -js).
 //   - A pre-created nats.KeyValue bucket, injected at construction time.

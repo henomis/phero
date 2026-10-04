@@ -41,7 +41,7 @@ func TestGuardrails_NoGuards(t *testing.T) {
 	mw := NewGuardrails()
 	client := llm.Use(okLLM("hello"), mw)
 
-	result, err := client.Execute(context.Background(), nil, nil)
+	result, err := client.Execute(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestGuardrails_MessageGuard_Pass(t *testing.T) {
 	mw := NewGuardrails(WithMessageGuard("allow-all", passMessageGuard))
 	client := llm.Use(okLLM("ok"), mw)
 
-	_, err := client.Execute(context.Background(), nil, nil)
+	_, err := client.Execute(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -66,13 +66,13 @@ func TestGuardrails_MessageGuard_Pass(t *testing.T) {
 func TestGuardrails_MessageGuard_Block(t *testing.T) {
 	mw := NewGuardrails(WithMessageGuard("block", blockMessageGuard))
 	reached := false
-	inner := &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+	inner := &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []llm.CallOption) (*llm.Result, error) {
 		reached = true
 		return nil, nil
 	}}
 	client := llm.Use(inner, mw)
 
-	_, err := client.Execute(context.Background(), nil, nil)
+	_, err := client.Execute(context.Background(), nil)
 
 	var gErr *GuardrailError
 	if !errors.As(err, &gErr) {
@@ -101,7 +101,7 @@ func TestGuardrails_ResultGuard_Pass(t *testing.T) {
 	mw := NewGuardrails(WithResultGuard("allow-all", passResultGuard))
 	client := llm.Use(okLLM("ok"), mw)
 
-	result, err := client.Execute(context.Background(), nil, nil)
+	result, err := client.Execute(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestGuardrails_ResultGuard_Block(t *testing.T) {
 	mw := NewGuardrails(WithResultGuard("block", blockResultGuard))
 	client := llm.Use(okLLM("ok"), mw)
 
-	_, err := client.Execute(context.Background(), nil, nil)
+	_, err := client.Execute(context.Background(), nil)
 
 	var gErr *GuardrailError
 	if !errors.As(err, &gErr) {
@@ -142,7 +142,7 @@ func TestGuardrails_InnerError(t *testing.T) {
 	mw := NewGuardrails(WithResultGuard("block", blockResultGuard))
 	client := llm.Use(errLLM(sentinel), mw)
 
-	_, err := client.Execute(context.Background(), nil, nil)
+	_, err := client.Execute(context.Background(), nil)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("got %v, want sentinel inner error", err)
 	}
@@ -165,7 +165,7 @@ func TestGuardrails_GuardOrder(t *testing.T) {
 	)
 	client := llm.Use(okLLM("ok"), mw)
 
-	_, err := client.Execute(context.Background(), nil, nil)
+	_, err := client.Execute(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}

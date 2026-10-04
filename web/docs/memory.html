@@ -149,6 +149,25 @@ a.SetMemory(conversationMemory)</code></pre>
         Multiple sessions can coexist in the same bucket by using different session IDs — useful for running
         independent conversations side-by-side without separate databases.
       </p>
+      <p>
+        Several processes can also share <em>one</em> session, for example replicas of the same agent.
+        <code>Save</code> writes only if the key has not changed since it was read; if another process wrote
+        first, it reloads the history and tries again, so no messages are overwritten. If the session keeps
+        changing on every attempt, <code>Save</code> gives up with <code>ErrConcurrentUpdate</code> and stores
+        nothing.
+      </p>
+      <p>
+        <strong>Size limit.</strong> A session is stored as one value, so it must fit in one NATS message: the
+        server's <code>max_payload</code> (1MB by default), or the bucket's <code>MaxValueSize</code> if that is
+        smaller. Images are stored base64-encoded, so a few screenshots can be enough. Past the limit,
+        <code>Save</code> returns <code>ErrSessionTooLarge</code> (a <code>*SessionTooLargeError</code> with the
+        session and its size). Through an agent, this shows up as <code>agent.ErrSessionSaveFailed</code>: the
+        answer is still returned, but the turn is not stored, and later turns will not be either. To stay under
+        it, enable <code>WithSummarization</code>, which also drops the images of the messages it summarizes;
+        start a new session or <code>Clear</code> this one; raise <code>max_payload</code> on the NATS server;
+        or, for long sessions with many images, use <code>memory/psql</code>, which stores each message as its
+        own row.
+      </p>
 
       <pre><code class="language-go">import (
     "os"

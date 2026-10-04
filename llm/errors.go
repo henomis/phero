@@ -17,6 +17,7 @@ package llm
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 // ErrSchemaAdditionalPropertiesSet is returned when an object schema explicitly
@@ -117,5 +118,61 @@ func (e *ToolArgumentParseError) Error() string {
 }
 
 func (e *ToolArgumentParseError) Unwrap() error {
+	return e.Err
+}
+
+// ErrInvalidToolChoice is returned when a call's tool choice is incoherent: an
+// unknown mode, a forced tool that is not offered, or a tool requirement on a
+// call that offers no tools.
+var ErrInvalidToolChoice = errors.New("invalid tool choice")
+
+// ErrInvalidResponseFormat is returned when a response format has no name or
+// no schema.
+var ErrInvalidResponseFormat = errors.New("invalid response format: name and schema are required")
+
+// ErrUnsupportedCallOption is returned by a backend that cannot honor a call
+// option it was given, rather than silently ignoring it.
+var ErrUnsupportedCallOption = errors.New("call option not supported by this LLM")
+
+// ResponseFormatSchemaError is returned when building a response format's JSON
+// schema fails.
+type ResponseFormatSchemaError struct {
+	Name string
+	Err  error
+}
+
+func (e *ResponseFormatSchemaError) Error() string {
+	return fmt.Sprintf("failed to build response format %q schema: %v", e.Name, e.Err)
+}
+
+func (e *ResponseFormatSchemaError) Unwrap() error {
+	return e.Err
+}
+
+// ProviderError is an error answered by an LLM provider's API with an HTTP
+// status, in a form that does not depend on the provider's SDK. Provider
+// packages (llm/openai, llm/anthropic) wrap such errors in it, so code that is
+// not allowed to import an SDK — a retry policy, a server choosing the error
+// code it sends — can still tell a rate limit from a bad API key with
+// errors.As.
+//
+// Error returns the wrapped error's text unchanged.
+type ProviderError struct {
+	// Provider names the provider package, such as "openai" or "anthropic".
+	Provider string
+	// StatusCode is the HTTP status the API answered with.
+	StatusCode int
+	// RetryAfter is how long the provider asked the caller to wait, typically
+	// with a 429; 0 when it did not say or the SDK does not expose it.
+	RetryAfter time.Duration
+	// Err is the SDK's own error.
+	Err error
+}
+
+func (e *ProviderError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *ProviderError) Unwrap() error {
 	return e.Err
 }

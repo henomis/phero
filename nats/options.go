@@ -14,12 +14,18 @@
 
 package nats
 
-import "time"
+import (
+	"log/slog"
+	"time"
+)
 
 // defaultMaxPayload is the advertised prompt-endpoint cap when none is set. It
 // matches NATS's own default max_payload, and [New] tightens it when the
 // connection turns out to allow less.
 const defaultMaxPayload = "1MB"
+
+// defaultAgentID is the metadata.agent value when none is set.
+const defaultAgentID = "phero"
 
 const (
 	defaultHeartbeatInterval = 30 * time.Second
@@ -57,11 +63,17 @@ type serverConfig struct {
 	// drainTimeout bounds how long a shutdown waits for in-flight prompt
 	// handlers before cancelling them.
 	drainTimeout time.Duration
+	// errorMapper, when set, chooses the error sent for a failed run before
+	// the defaults do.
+	errorMapper func(error) *CodedError
+	// logger receives what the server cannot tell the caller; nil means
+	// slog.Default().
+	logger *slog.Logger
 }
 
 func defaultServerConfig() *serverConfig {
 	return &serverConfig{
-		agentID:           "phero",
+		agentID:           defaultAgentID,
 		version:           "0.1.0",
 		maxPayload:        defaultMaxPayload,
 		attachmentsOk:     false,
@@ -136,6 +148,25 @@ func WithKeepaliveInterval(d time.Duration) ServerOption {
 // means a restart abandons every call in flight.
 func WithDrainTimeout(d time.Duration) ServerOption {
 	return func(c *serverConfig) { c.drainTimeout = d }
+}
+
+// WithLogger sets the structured logger for what the server cannot tell the
+// caller, such as handoffs the protocol has no way to carry. Default
+// slog.Default().
+func WithLogger(logger *slog.Logger) ServerOption {
+	return func(c *serverConfig) { c.logger = logger }
+}
+
+// WithErrorMapper sets fn to choose the error a caller receives when the
+// handler fails (§9). It sees the error first: return a [CodedError] to send
+// it, or nil to fall back to the defaults — a CodedError in the error's chain,
+// then the mapping of LLM provider errors, then 500 "internal_error".
+//
+// It is also the place to keep internal detail away from callers: by default
+// the error's text is sent as the message, and an LLM provider's error text
+// can carry account, quota or endpoint details.
+func WithErrorMapper(fn func(error) *CodedError) ServerOption {
+	return func(c *serverConfig) { c.errorMapper = fn }
 }
 
 // — Client options ——————————————————————————————————————————————————————————

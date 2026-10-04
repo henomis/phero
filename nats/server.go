@@ -16,7 +16,10 @@ package nats
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,9 +32,31 @@ import (
 
 const protocolVersion = "0.3"
 
-// drainingMessage is the 503 description returned to a prompt that arrives after
+// drainingMessage is the description returned to a prompt that arrives after
 // the server has stopped accepting work.
 const drainingMessage = "server is draining"
+
+// errCodeServerDraining is the §9.1 machine-readable code of a drain refusal.
+const errCodeServerDraining = "server_draining"
+
+// §9.1 machine-readable codes of a response that could not be sent.
+const (
+	errCodeResponseTooLarge = "response_too_large"
+	errCodeResponseFailed   = "response_failed"
+)
+
+// readyFlushTimeout bounds each flush that confirms registration with the
+// broker, and readyRetryInterval spaces the retries while the connection is
+// down. Neither bounds readiness itself: Start keeps trying until it serves or
+// shuts down.
+const (
+	readyFlushTimeout  = 5 * time.Second
+	readyRetryInterval = 250 * time.Millisecond
+)
+
+// natsDefaultMaxPayload is NATS's default max_payload (1MB), assumed when the
+// connection does not report its own.
+const natsDefaultMaxPayload = 1 << 20
 
 // Handler is implemented by anything that can process a prompt — *agent.Agent
 // and workflow executors both satisfy it.
@@ -74,6 +99,10 @@ type Server struct {
 	drainOnce sync.Once
 	drained   chan struct{}
 	drainErr  error
+
+	// ready is closed, under mu, when the broker has the registration and the
+	// first heartbeat. It stays open if Start fails or a drain gets there first.
+	ready chan struct{}
 }
 
 // InstanceName returns the name an agent is registered under: its own name,
@@ -153,6 +182,7 @@ func New(nc *natsclient.Conn, h Handler, owner, name string, opts ...ServerOptio
 		name:    name,
 		gate:    newGate(),
 		drained: make(chan struct{}),
+		ready:   make(chan struct{}),
 	}, nil
 }
 
@@ -210,6 +240,8 @@ func (s *Server) Start(ctx context.Context) error {
 		return err
 	}
 
+	s.awaitReady(serveCtx)
+
 	<-serveCtx.Done()
 
 	// ctx is done — that is the shutdown signal — so waiting on it would end the
@@ -221,12 +253,101 @@ func (s *Server) Start(ctx context.Context) error {
 	return s.Drain(context.WithoutCancel(ctx))
 }
 
+// Ready returns a channel that is closed once [Server.Start] has registered the
+// service and the broker has acknowledged it: from then on, any connection can
+// discover and prompt this agent, and the first heartbeat has been published.
+//
+// It is never closed if Start fails or the server drains first, so wait on it
+// together with Start's result:
+//
+//	errc := make(chan error, 1)
+//	go func() { errc <- srv.Start(ctx) }()
+//
+//	select {
+//	case <-srv.Ready():
+//	case err := <-errc:
+//		return err
+//	}
+//
+// Ready is a one-time startup signal, not a health check: it stays closed
+// through a lost connection and after a drain.
+func (s *Server) Ready() <-chan struct{} {
+	return s.ready
+}
+
+// awaitReady closes ready once the broker has processed the registration and
+// the first heartbeat. When register returns, both are only buffered — micro
+// subscribes without flushing — and a prompt sent before the broker has the
+// subscriptions finds no responders. The broker handles a connection's
+// protocol in order, so a flush round-trip confirms everything before it.
+//
+// While the connection is down the flush fails; the subscriptions are replayed
+// on reconnect, so it retries until serving ends.
+func (s *Server) awaitReady(ctx context.Context) {
+	for {
+		flushCtx, cancel := context.WithTimeout(ctx, readyFlushTimeout)
+		err := s.nc.FlushWithContext(flushCtx)
+
+		cancel()
+
+		if err == nil {
+			s.markReady()
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(readyRetryInterval):
+		}
+	}
+}
+
+// markReady closes ready unless a drain has begun: a server that is going away
+// must not announce itself. Holding s.mu makes the check-then-close atomic, so
+// a second Start on the same server cannot close it twice.
+func (s *Server) markReady() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.draining {
+		return
+	}
+
+	select {
+	case <-s.ready:
+	default:
+		close(s.ready)
+	}
+}
+
+// promptSubject is the subject the prompt endpoint serves on (§2).
+func (s *Server) promptSubject() string {
+	return fmt.Sprintf("agents.prompt.%s.%s.%s", s.cfg.agentID, s.owner, s.name)
+}
+
+// promptMetadata is the prompt endpoint's metadata (§2.1). Registration and the
+// heartbeat's endpoints declaration (§8.3) both use it, since the declaration
+// must copy the registration verbatim.
+func (s *Server) promptMetadata() map[string]string {
+	attachmentsOk := "false"
+	if s.cfg.attachmentsOk {
+		attachmentsOk = attachmentsOkTrue
+	}
+
+	return map[string]string{
+		"max_payload":    s.cfg.maxPayload,
+		"attachments_ok": attachmentsOk,
+	}
+}
+
 // register adds the micro service and its endpoints and starts the heartbeat
 // publisher. Callers hold s.mu. On error nothing is left registered.
 func (s *Server) register(serveCtx, promptCtx context.Context) (natsio.Service, error) {
-	attachmentsOkStr := "false"
-	if s.cfg.attachmentsOk {
-		attachmentsOkStr = attachmentsOkTrue
+	// micro.AddService dereferences nil on a closed connection (nats.go v1.52.0)
+	// instead of returning an error.
+	if s.nc.IsClosed() {
+		return nil, fmt.Errorf("nats: register micro service: %w", natsclient.ErrConnectionClosed)
 	}
 
 	metadata := map[string]string{
@@ -248,7 +369,6 @@ func (s *Server) register(serveCtx, promptCtx context.Context) (natsio.Service, 
 		return nil, fmt.Errorf("nats: register micro service: %w", err)
 	}
 
-	promptSubject := fmt.Sprintf("agents.prompt.%s.%s.%s", s.cfg.agentID, s.owner, s.name)
 	statusSubject := fmt.Sprintf("agents.status.%s.%s.%s", s.cfg.agentID, s.owner, s.name)
 	hbSubject := fmt.Sprintf("agents.hb.%s.%s.%s", s.cfg.agentID, s.owner, s.name)
 
@@ -257,14 +377,11 @@ func (s *Server) register(serveCtx, promptCtx context.Context) (natsio.Service, 
 	// server that is perfectly healthy.
 	s.gate.unlock()
 
-	if addErr := svc.AddEndpoint("prompt",
+	if addErr := svc.AddEndpoint(endpointPrompt,
 		natsio.ContextHandler(promptCtx, s.handlePrompt),
-		natsio.WithEndpointSubject(promptSubject),
+		natsio.WithEndpointSubject(s.promptSubject()),
 		natsio.WithEndpointQueueGroup(svcNameAgents),
-		natsio.WithEndpointMetadata(map[string]string{
-			"max_payload":    s.cfg.maxPayload,
-			"attachments_ok": attachmentsOkStr,
-		}),
+		natsio.WithEndpointMetadata(s.promptMetadata()),
 	); addErr != nil {
 		_ = svc.Stop()
 		return nil, fmt.Errorf("nats: register prompt endpoint: %w", addErr)
@@ -281,6 +398,9 @@ func (s *Server) register(serveCtx, promptCtx context.Context) (natsio.Service, 
 
 	instanceID := svc.Info().ID
 
+	// The first heartbeat goes out now rather than from the publisher, so the
+	// flush that marks the server ready covers it too.
+	s.publishHeartbeat(hbSubject, instanceID)
 	s.hbWG.Go(func() { s.startHeartbeats(serveCtx, hbSubject, instanceID) })
 
 	return svc, nil
@@ -293,12 +413,15 @@ func (s *Server) register(serveCtx, promptCtx context.Context) (natsio.Service, 
 // A request that arrives once a drain has begun is refused rather than served.
 // Unsubscribing the endpoint is asynchronous — the micro service drains its
 // subscriptions — so a request buffered before that can still land here, and
-// serving it would mean admitting work into a shutdown nobody is waiting on. A
-// 503 lets the caller retry against a replica that is not going away.
+// serving it would mean admitting work into a shutdown nobody is waiting on.
+//
+// The refusal is a 500 carrying error code "server_draining". §9.2 says agents
+// MUST use codes from its table, which has no 503; 500 is the one that keeps the
+// meaning callers need, a server-side fault worth retrying against a replica
+// that is not going away, and the body code says why.
 func (s *Server) handlePrompt(ctx context.Context, req natsio.Request) {
 	if !s.gate.enter() {
-		_ = req.Error("503", drainingMessage, encodeErrorBody("server_draining", drainingMessage))
-		_ = req.Respond(nil) // terminator (§9.3)
+		sendError(req, "500", errCodeServerDraining, drainingMessage)
 
 		return
 	}
@@ -313,27 +436,34 @@ func (s *Server) handlePrompt(ctx context.Context, req natsio.Request) {
 // processPrompt decodes the envelope, invokes the agent, streams the result,
 // and always terminates the response stream with the zero-byte terminator (§6.5).
 func (s *Server) processPrompt(ctx context.Context, req natsio.Request) {
-	sendErr := func(code, errCode, message string) {
-		_ = req.Error(code, message, encodeErrorBody(errCode, message))
-		_ = req.Respond(nil) // terminator (§9.3)
-	}
+	badRequest := func(errCode, message string) { sendError(req, "400", errCode, message) }
 
 	env, err := decodeEnvelope(req.Data())
 	if err != nil {
-		sendErr("400", "malformed_envelope", err.Error())
+		badRequest("malformed_envelope", err.Error())
 		return
 	}
 
 	if !s.cfg.attachmentsOk && len(env.Attachments) > 0 {
-		sendErr("400", "attachments_not_allowed", "this agent does not accept attachments")
+		badRequest("attachments_not_allowed", "this agent does not accept attachments")
 		return
 	}
 
 	parts, err := envelopeToContentParts(env)
 	if err != nil {
-		sendErr("400", "malformed_envelope", err.Error())
+		badRequest("malformed_envelope", err.Error())
 		return
 	}
+
+	request, err := requestFromEnvelope(env, natsclient.Header(req.Headers()))
+	if err != nil {
+		badRequest("malformed_envelope", err.Error())
+		return
+	}
+
+	// The handler — and, through an agent, its tools — can read the request it
+	// is serving with RequestFrom.
+	ctx = withRequest(ctx, request)
 
 	// Mandatory first message: ack before any latency-inducing work (§6.4).
 	_ = req.Respond(encodeStatusChunk("ack"))
@@ -365,12 +495,110 @@ func (s *Server) processPrompt(ctx context.Context, req natsio.Request) {
 	kaWg.Wait()
 
 	if runErr != nil {
-		sendErr("500", "internal_error", runErr.Error())
+		sendCodedError(req, s.errorFor(ctx, runErr))
 		return
 	}
 
-	_ = req.Respond(encodeResponseChunk(result.TextContent()))
+	s.warnDroppedHandoffs(ctx, result)
+	s.sendResponse(req, result.ReplyText())
+}
+
+// warnDroppedHandoffs logs the handoffs in result, which the response cannot
+// carry: the protocol has no field for them, and the caller — another process,
+// perhaps another SDK — could not run a phero agent anyway. Without the
+// warning, an agent that hands off locally would silently stop doing so once
+// served over NATS. Only the text is sent (agent.Result.ReplyText, which names
+// the targets when the model wrote no text); Summary is dropped too, on every
+// call, so it is documented rather than logged.
+func (s *Server) warnDroppedHandoffs(ctx context.Context, result *agent.Result) {
+	if result == nil || len(result.Handoffs) == 0 {
+		return
+	}
+
+	names := make([]string, 0, len(result.Handoffs))
+	for _, h := range result.Handoffs {
+		if h.Agent != nil {
+			names = append(names, h.Agent.Name())
+		}
+	}
+
+	s.logger().WarnContext(ctx, "nats: handoffs dropped: the protocol cannot carry them",
+		slog.String("owner", s.owner),
+		slog.String("name", s.name),
+		slog.Any("handoffs", names),
+	)
+}
+
+// logger returns the configured logger, or slog.Default().
+func (s *Server) logger() *slog.Logger {
+	if s.cfg.logger != nil {
+		return s.cfg.logger
+	}
+
+	return slog.Default()
+}
+
+// sendResponse sends text as one or more response chunks (§6.3), each small
+// enough to publish on this connection, then the terminator (§6.5).
+//
+// A failed publish is reported, not ignored: ignoring it would still send the
+// terminator, and the caller would read a lost answer as an empty one. The
+// error follows whatever content already went out, which §9.3 allows, and the
+// caller discards that partial text when it sees the error.
+func (s *Server) sendResponse(req natsio.Request, text string) {
+	chunks, ok := encodeResponseChunks(text, s.maxPublishBytes())
+	if !ok {
+		sendError(req, "500", errCodeResponseTooLarge, "response does not fit in this connection's max_payload")
+		return
+	}
+
+	for _, chunk := range chunks {
+		if err := req.Respond(chunk); err != nil {
+			errCode := errCodeResponseFailed
+			if isMaxPayloadError(err) {
+				errCode = errCodeResponseTooLarge
+			}
+
+			sendError(req, "500", errCode, "send response: "+err.Error())
+
+			return
+		}
+	}
+
 	_ = req.Respond(nil) // terminator (§6.5)
+}
+
+// isMaxPayloadError reports whether err is a publish rejected for exceeding
+// max_payload. micro.Request.Respond wraps the publish error with %s, not %w,
+// so ErrMaxPayload only survives as text.
+func isMaxPayloadError(err error) bool {
+	return errors.Is(err, natsclient.ErrMaxPayload) ||
+		strings.Contains(err.Error(), natsclient.ErrMaxPayload.Error())
+}
+
+// maxPublishBytes is the largest message this server can publish: the
+// connection's max_payload, or NATS's default when the connection does not
+// report one (it is not connected, or there is none, as in tests).
+func (s *Server) maxPublishBytes() int {
+	if s.nc != nil {
+		if n := s.nc.MaxPayload(); n > 0 {
+			return int(n)
+		}
+	}
+
+	return natsDefaultMaxPayload
+}
+
+// sendError sends a service error (§9.1) followed by the terminator (§9.3).
+func sendError(req natsio.Request, code, errCode, message string) {
+	sendErrorBody(req, code, headerSafe(message), encodeErrorBody(errCode, message, 0))
+}
+
+// sendErrorBody sends a service error with a prepared body (§9.1), followed by
+// the terminator (§9.3).
+func sendErrorBody(req natsio.Request, code, description string, body []byte) {
+	_ = req.Error(code, description, body)
+	_ = req.Respond(nil) // terminator (§9.3)
 }
 
 // handleStatus replies with a heartbeat-shaped JSON payload (§8.7).
@@ -386,13 +614,5 @@ func (s *Server) handleStatus(_ context.Context, req natsio.Request) {
 		instanceID = svc.Info().ID
 	}
 
-	p := heartbeatPayload{
-		Agent:      s.cfg.agentID,
-		Owner:      s.owner,
-		Session:    s.cfg.session,
-		InstanceID: instanceID,
-		TS:         time.Now().UTC().Format(time.RFC3339),
-		IntervalS:  heartbeatIntervalSeconds(s.cfg.heartbeatInterval),
-	}
-	_ = req.Respond(encodeHeartbeat(p))
+	_ = req.Respond(encodeHeartbeat(s.heartbeat(instanceID)))
 }

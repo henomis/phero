@@ -180,9 +180,10 @@ func main() {
 				break
 			}
 
-			if len(result.HandoffAgents) > 0 {
-				fmt.Printf("[handoff] %s → %s\n", routingAgent.Name(), result.HandoffAgents[0].Name())
-				routingAgent = result.HandoffAgents[0]
+			if len(result.Handoffs) > 0 {
+				handoff := result.Handoffs[0]
+				fmt.Printf("[handoff] %s → %s (%s)\n", routingAgent.Name(), handoff.Agent.Name(), handoff.Context)
+				routingAgent = handoff.Agent
 				// Empty input: the specialist reads context from shared memory.
 				currentInput = ""
 

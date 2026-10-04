@@ -35,10 +35,10 @@ var _ llm.StreamingLLM = (*Client)(nil)
 //
 //nolint:gocognit
 func (c *Client) ExecuteStream(
-	ctx context.Context, messages []llm.Message, tools []*llm.Tool,
+	ctx context.Context, messages []llm.Message, opts ...llm.CallOption,
 ) iter.Seq2[llm.StreamChunk, error] {
 	return func(yield func(llm.StreamChunk, error) bool) {
-		params, err := c.buildParams(messages, tools)
+		params, err := c.buildParams(messages, opts)
 		if err != nil {
 			yield(llm.StreamChunk{}, err)
 			return
@@ -71,7 +71,7 @@ func (c *Client) ExecuteStream(
 		}
 
 		if streamErr := stream.Err(); streamErr != nil {
-			yield(llm.StreamChunk{}, streamErr)
+			yield(llm.StreamChunk{}, wrapAPIError(streamErr))
 			return
 		}
 
@@ -123,9 +123,9 @@ func requiresStreaming(params anthropicapi.MessageNewParams) bool {
 // assembled reply, so a caller of Execute never sees the stream. It is the
 // fallback Execute takes for requests that cannot be buffered.
 func (c *Client) executeStreaming(
-	ctx context.Context, messages []llm.Message, tools []*llm.Tool,
+	ctx context.Context, messages []llm.Message, opts []llm.CallOption,
 ) (*llm.Result, error) {
-	for chunk, err := range c.ExecuteStream(ctx, messages, tools) {
+	for chunk, err := range c.ExecuteStream(ctx, messages, opts...) {
 		if err != nil {
 			return nil, err
 		}

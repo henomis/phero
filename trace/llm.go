@@ -39,9 +39,11 @@ func NewLLM(inner llm.LLM, t Tracer) llm.LLM {
 
 // Execute emits an LLMRequestEvent, delegates to the inner LLM, then emits an
 // LLMResponseEvent.
-func (tl *tracedLLM) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
+func (tl *tracedLLM) Execute(ctx context.Context, messages []llm.Message, opts ...llm.CallOption) (*llm.Result, error) {
 	agentName := agentNameFromContext(ctx)
 	iteration := iterationFromContext(ctx)
+
+	tools := llm.NewCallConfig(opts...).Tools
 
 	toolNames := make([]string, len(tools))
 	for i, t := range tools {
@@ -56,7 +58,7 @@ func (tl *tracedLLM) Execute(ctx context.Context, messages []llm.Message, tools 
 		Timestamp:    time.Now(),
 	})
 
-	result, err := tl.inner.Execute(ctx, messages, tools)
+	result, err := tl.inner.Execute(ctx, messages, opts...)
 
 	var (
 		msg   *llm.Message

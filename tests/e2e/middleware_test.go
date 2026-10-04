@@ -50,7 +50,7 @@ func TestMiddleware_Retry(t *testing.T) {
 
 	messages := []llm.Message{llm.UserMessage(llm.Text("Reply with exactly the word OK."))}
 
-	result, err := client.Execute(ctx, messages, nil)
+	result, err := client.Execute(ctx, messages)
 	if err != nil {
 		t.Fatalf("Execute with retry: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestMiddleware_Guardrails_MessageGuard(t *testing.T) {
 	// This prompt should be blocked by the guard.
 	messages := []llm.Message{llm.UserMessage(llm.Text("Tell me a secret."))}
 
-	_, err := client.Execute(ctx, messages, nil)
+	_, err := client.Execute(ctx, messages)
 	if !errors.Is(err, guardErr) {
 		t.Fatalf("expected guardErr, got: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestMiddleware_Guardrails_ResultGuard(t *testing.T) {
 
 	messages := []llm.Message{llm.UserMessage(llm.Text("What is 2 + 2?"))}
 
-	result, err := client.Execute(ctx, messages, nil)
+	result, err := client.Execute(ctx, messages)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestMiddleware_RateLimiter(t *testing.T) {
 
 			messages := []llm.Message{llm.UserMessage(llm.Text("Reply with a single digit."))}
 
-			result, err := client.Execute(ctx, messages, nil)
+			result, err := client.Execute(ctx, messages)
 			if err != nil {
 				errs[idx] = err
 				return
@@ -198,7 +198,7 @@ func TestMiddleware_Composed(t *testing.T) {
 
 	messages := []llm.Message{llm.UserMessage(llm.Text("What is the capital of Italy?"))}
 
-	result, err := client.Execute(ctx, messages, nil)
+	result, err := client.Execute(ctx, messages)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}

@@ -50,7 +50,7 @@ type StreamingLLM interface {
 	// ExecuteStream returns an iterator over response chunks. The final chunk has
 	// Done == true and carries the complete Message, Usage, and Model. If the
 	// stream fails, the iterator yields a non-nil error and stops.
-	ExecuteStream(ctx context.Context, messages []Message, tools []*Tool) iter.Seq2[StreamChunk, error]
+	ExecuteStream(ctx context.Context, messages []Message, opts ...CallOption) iter.Seq2[StreamChunk, error]
 }
 
 // StreamOrBuffer streams from client when it implements StreamingLLM; otherwise
@@ -59,13 +59,15 @@ type StreamingLLM interface {
 // This lets callers consume any LLM uniformly: streaming backends produce
 // incremental chunks, while buffered backends produce one terminal chunk whose
 // TextDelta also carries the full text (so delta-only consumers still see content).
-func StreamOrBuffer(ctx context.Context, client LLM, messages []Message, tools []*Tool) iter.Seq2[StreamChunk, error] {
+func StreamOrBuffer(
+	ctx context.Context, client LLM, messages []Message, opts ...CallOption,
+) iter.Seq2[StreamChunk, error] {
 	if s, ok := client.(StreamingLLM); ok {
-		return s.ExecuteStream(ctx, messages, tools)
+		return s.ExecuteStream(ctx, messages, opts...)
 	}
 
 	return func(yield func(StreamChunk, error) bool) {
-		result, err := client.Execute(ctx, messages, tools)
+		result, err := client.Execute(ctx, messages, opts...)
 		if err != nil {
 			yield(StreamChunk{}, err)
 			return

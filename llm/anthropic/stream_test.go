@@ -117,7 +117,7 @@ func TestExecute_LargeMaxTokens_FallsBackToStreaming(t *testing.T) {
 
 	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL), anthropic.WithMaxTokens(32000))
 
-	res, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))}, nil)
+	res, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestExecute_OrdinaryMaxTokens_StaysBuffered(t *testing.T) {
 
 	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL), anthropic.WithMaxTokens(2048))
 
-	if _, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))}, nil); err != nil {
+	if _, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))}); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 

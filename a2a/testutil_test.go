@@ -33,7 +33,7 @@ type stubLLM struct {
 	callIdx   int
 }
 
-func (s *stubLLM) Execute(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+func (s *stubLLM) Execute(_ context.Context, _ []llm.Message, _ ...llm.CallOption) (*llm.Result, error) {
 	idx := s.callIdx
 	if idx >= len(s.responses) {
 		idx = len(s.responses) - 1

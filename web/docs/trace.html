@@ -137,7 +137,7 @@ func main() {
 
       <pre><code class="language-go">tracedClient := trace.NewLLM(client, text.New(os.Stderr))
 
-result, err := tracedClient.Execute(ctx, messages, tools)</code></pre>
+result, err := tracedClient.Execute(ctx, messages, llm.WithTools(tools...))</code></pre>
 
       <p>
         When the wrapper runs inside an agent, request and response events are automatically annotated with the agent name and
@@ -178,7 +178,7 @@ a.SetTracer(t)</code></pre>
         <li><code>RunSummary.Latency</code> &mdash; <code>LatencySummary{Total, LLM, Tool, Memory}</code></li>
         <li><code>RunSummary.Tools</code> &mdash; <code>[]ToolCallSummary{ToolName, Calls, Errors}</code></li>
         <li><code>RunSummary.Iterations</code>, <code>LLMCalls</code>, <code>ToolCalls</code>, <code>ToolErrors</code></li>
-        <li><code>RunSummary.HandoffAgent</code> &mdash; non-empty when the run ended via a handoff</li>
+        <li><code>RunSummary.HandoffAgents</code> &mdash; names of the agents the run handed work to, empty when there was no handoff; more than one means fan-out</li>
       </ul>
 
       <pre><code class="language-go">result, err := a.Run(ctx, llm.Text(input))

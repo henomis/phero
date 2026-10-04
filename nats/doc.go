@@ -25,7 +25,7 @@
 //     any local Phero agent can call.
 //
 // Wire format is defined by the NATS Agent Protocol spec
-// (https://github.com/synadia-ai/nats-agent-sdk-docs/blob/main/core-protocol.md).
+// (https://github.com/synadia-ai/synadia-agent-sdk-docs/blob/main/core-protocol.md).
 // This implementation is wire-compatible with the TypeScript and Python SDKs
 // in the synadia-agents repository.
 //
@@ -44,6 +44,35 @@
 // and the handlers already running keep a context of their own and finish. See
 // [Server.Drain] and [WithDrainTimeout] for the budget. Drain is also how you
 // trigger the same shutdown from elsewhere, on a context of your own.
+//
+// Start blocks for the server's whole life; [Server.Ready] is closed once the
+// broker has the registration and the first heartbeat, so the agent can be
+// discovered and prompted. It is never closed if Start fails or the server
+// drains first, so wait on it together with Start's result.
+//
+// A prompt must fit in one NATS message, so it is limited by the agent's
+// advertised max_payload. An answer is not: one larger than the server
+// connection's max_payload is sent as several response chunks, which
+// [Stream.Text] joins back together. An answer that still cannot be published
+// is reported as a 500 service error ("response_too_large" or
+// "response_failed"), never as an empty answer.
+//
+// Errors from a call can be sorted with [Permanent]: a rate limit (429) is
+// worth retrying, and a [ServiceError] says how long to wait in RetryAfter.
+// The client cannot answer an agent that asks a question mid-stream:
+// [Stream.Text] then returns a [QueryError] carrying the question.
+//
+// A handler chooses the error its caller receives by returning a
+// [CodedError]; errors from the LLM are mapped from [llm.ProviderError], and
+// [WithErrorMapper] overrides both.
+//
+// [Client.Send] sends a [Request] with attachments and extra headers; on the
+// server, the handler (and an agent's tools) read it with [RequestFrom].
+//
+// Only the text of an agent's Result crosses the wire. Handoffs are dropped —
+// the caller could not run them, and receives only the handoff tool's
+// acknowledgement — and the server logs a warning (see [WithLogger]). Token
+// usage (Result.Summary) is dropped too; collect it on the server's side.
 //
 // Quick start — client:
 //

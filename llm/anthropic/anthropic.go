@@ -17,6 +17,7 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"regexp"
 	"strings"
 
@@ -130,19 +131,19 @@ func New(apiKey string, opts ...Option) *Client {
 // hand that constraint to every caller, Execute then streams the same request
 // and assembles the reply, so a large max_tokens (which agentic and coding work
 // wants) behaves like any other call. See executeStreaming.
-func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
-	params, err := c.buildParams(messages, tools)
+func (c *Client) Execute(ctx context.Context, messages []llm.Message, opts ...llm.CallOption) (*llm.Result, error) {
+	params, err := c.buildParams(messages, opts)
 	if err != nil {
 		return nil, err
 	}
 
 	if requiresStreaming(params) {
-		return c.executeStreaming(ctx, messages, tools)
+		return c.executeStreaming(ctx, messages, opts)
 	}
 
 	res, err := c.client.Messages.New(ctx, params)
 	if err != nil {
-		return nil, err
+		return nil, wrapAPIError(err)
 	}
 
 	msg, err := messageFromAnthropic(res)
@@ -167,10 +168,17 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*l
 	}, nil
 }
 
-// buildParams converts Phero messages and tools into Anthropic request params,
-// applying the thinking, temperature, max-tokens, and prompt-caching options.
-// It is shared by the buffered Execute and the streaming ExecuteStream.
-func (c *Client) buildParams(messages []llm.Message, tools []*llm.Tool) (anthropicapi.MessageNewParams, error) {
+// buildParams converts Phero messages and call options into Anthropic request
+// params, applying the thinking, temperature, max-tokens, and prompt-caching
+// options. It is shared by the buffered Execute and the streaming ExecuteStream.
+//
+//nolint:cyclop
+func (c *Client) buildParams(messages []llm.Message, opts []llm.CallOption) (anthropicapi.MessageNewParams, error) {
+	cfg := llm.NewCallConfig(opts...)
+	if err := cfg.Validate(); err != nil {
+		return anthropicapi.MessageNewParams{}, err
+	}
+
 	system, anthropicMessages, err := messagesToAnthropic(messages)
 	if err != nil {
 		return anthropicapi.MessageNewParams{}, err
@@ -184,9 +192,11 @@ func (c *Client) buildParams(messages []llm.Message, tools []*llm.Tool) (anthrop
 	}
 
 	if c.effort != "" {
-		params.OutputConfig = anthropicapi.OutputConfigParam{
-			Effort: anthropicapi.OutputConfigEffort(c.effort),
-		}
+		params.OutputConfig.Effort = anthropicapi.OutputConfigEffort(c.effort)
+	}
+
+	if f := cfg.ResponseFormat; f != nil {
+		params.OutputConfig.Format = anthropicapi.JSONOutputFormatParam{Schema: anthropicOutputSchema(f)}
 	}
 
 	switch {
@@ -213,8 +223,14 @@ func (c *Client) buildParams(messages []llm.Message, tools []*llm.Tool) (anthrop
 
 	params.MaxTokens = maxTokens
 
-	if len(tools) > 0 {
-		params.Tools = anthropicTools(tools)
+	// tool_choice goes only with tools: Validate already rejects required and
+	// forced choices without them, and with no tools auto and none hold anyway.
+	if len(cfg.Tools) > 0 {
+		params.Tools = anthropicTools(cfg.Tools)
+
+		if cfg.ToolChoice != nil {
+			params.ToolChoice = toolChoiceToAnthropic(cfg.ToolChoice)
+		}
 	}
 
 	if c.promptCaching {
@@ -222,6 +238,43 @@ func (c *Client) buildParams(messages []llm.Message, tools []*llm.Tool) (anthrop
 	}
 
 	return params, nil
+}
+
+// toolChoiceToAnthropic maps a tool choice to the tool_choice union. Anthropic
+// names "required" as "any".
+func toolChoiceToAnthropic(tc *llm.ToolChoice) anthropicapi.ToolChoiceUnionParam {
+	switch tc.Mode {
+	case llm.ToolChoiceNone:
+		none := anthropicapi.NewToolChoiceNoneParam()
+		return anthropicapi.ToolChoiceUnionParam{OfNone: &none}
+	case llm.ToolChoiceRequired:
+		return anthropicapi.ToolChoiceUnionParam{OfAny: &anthropicapi.ToolChoiceAnyParam{}}
+	case llm.ToolChoiceTool:
+		return anthropicapi.ToolChoiceParamOfTool(tc.Name)
+	case llm.ToolChoiceAuto:
+	}
+
+	return anthropicapi.ToolChoiceUnionParam{OfAuto: &anthropicapi.ToolChoiceAutoParam{}}
+}
+
+// anthropicOutputSchema returns the schema sent as output_config.format.
+// Anthropic has no separate description field, so a format's description is
+// carried as the schema's own top-level description, on a copy.
+func anthropicOutputSchema(f *llm.ResponseFormat) map[string]any {
+	schema := f.Schema()
+	if f.Description() == "" {
+		return schema
+	}
+
+	if _, ok := schema["description"]; ok {
+		return schema
+	}
+
+	out := make(map[string]any, len(schema)+1)
+	maps.Copy(out, schema)
+	out["description"] = f.Description()
+
+	return out
 }
 
 // applyPromptCaching marks the high-value, stable prefix of the request as

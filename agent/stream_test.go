@@ -30,12 +30,12 @@ type streamingStub struct {
 	deltas []string
 }
 
-func (s *streamingStub) Execute(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+func (s *streamingStub) Execute(_ context.Context, _ []llm.Message, _ ...llm.CallOption) (*llm.Result, error) {
 	msg := &llm.Message{Role: llm.RoleAssistant, Parts: []llm.ContentPart{llm.Text(strings.Join(s.deltas, ""))}}
 	return &llm.Result{Message: msg, Model: "test"}, nil
 }
 
-func (s *streamingStub) ExecuteStream(_ context.Context, _ []llm.Message, _ []*llm.Tool) iter.Seq2[llm.StreamChunk, error] {
+func (s *streamingStub) ExecuteStream(_ context.Context, _ []llm.Message, _ ...llm.CallOption) iter.Seq2[llm.StreamChunk, error] {
 	return func(yield func(llm.StreamChunk, error) bool) {
 		var full strings.Builder
 		for _, d := range s.deltas {

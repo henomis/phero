@@ -20,6 +20,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/henomis/phero/llm"
@@ -106,7 +107,7 @@ func TestWithModel_ChangesModel(t *testing.T) {
 	c := openai.New("key", openai.WithModel("gpt-4o"), openai.WithBaseURL(srv.URL+"/v1"))
 	msgs := []llm.Message{llm.UserMessage(llm.Text("hello"))}
 
-	result, err := c.Execute(context.Background(), msgs, nil)
+	result, err := c.Execute(context.Background(), msgs)
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -133,7 +134,7 @@ func TestExecute_TextResponse(t *testing.T) {
 	c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"))
 	msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
 
-	result, err := c.Execute(context.Background(), msgs, nil)
+	result, err := c.Execute(context.Background(), msgs)
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -194,7 +195,7 @@ func TestExecute_WithTemperature(t *testing.T) {
 	c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"), openai.WithTemperature(0.7))
 	msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
 
-	result, err := c.Execute(context.Background(), msgs, nil)
+	result, err := c.Execute(context.Background(), msgs)
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -220,7 +221,7 @@ func TestExecute_EmptyChoices_ReturnsError(t *testing.T) {
 	c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"))
 	msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
 
-	_, err := c.Execute(context.Background(), msgs, nil)
+	_, err := c.Execute(context.Background(), msgs)
 	if !errors.Is(err, openai.ErrEmptyResponse) {
 		t.Fatalf("expected ErrEmptyResponse, got %v", err)
 	}
@@ -268,7 +269,7 @@ func TestExecute_WithToolCalls(t *testing.T) {
 	c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"))
 	msgs := []llm.Message{llm.UserMessage(llm.Text("weather?"))}
 
-	result, err := c.Execute(context.Background(), msgs, []*llm.Tool{tool})
+	result, err := c.Execute(context.Background(), msgs, llm.WithTools(tool))
 	if err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
@@ -293,7 +294,7 @@ func TestExecute_APIError_ReturnsError(t *testing.T) {
 	c := openai.New("bad-key", openai.WithBaseURL(srv.URL+"/v1"))
 	msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
 
-	_, err := c.Execute(context.Background(), msgs, nil)
+	_, err := c.Execute(context.Background(), msgs)
 	if err == nil {
 		t.Fatal("expected error from 401 response, got nil")
 	}
@@ -341,7 +342,7 @@ func TestExecute_WithReasoningEffort(t *testing.T) {
 	c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"), openai.WithReasoningEffort("high"))
 	msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
 
-	if _, err := c.Execute(context.Background(), msgs, nil); err != nil {
+	if _, err := c.Execute(context.Background(), msgs); err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
 
@@ -361,11 +362,182 @@ func TestExecute_NoReasoningEffort_OmitsField(t *testing.T) {
 	c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"))
 	msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
 
-	if _, err := c.Execute(context.Background(), msgs, nil); err != nil {
+	if _, err := c.Execute(context.Background(), msgs); err != nil {
 		t.Fatalf("Execute: unexpected error: %v", err)
 	}
 
 	if _, present := payload["reasoning_effort"]; present {
 		t.Fatalf("reasoning_effort = %v, want omitted", payload["reasoning_effort"])
+	}
+}
+
+func TestExecute_MaxTokens(t *testing.T) {
+	tests := []struct {
+		name        string
+		opts        []openai.Option
+		wantField   string
+		wantAbsent  string
+		wantValue   float64
+		wantNoField bool
+	}{
+		{name: "unset", wantNoField: true},
+		{name: "non-positive ignored", opts: []openai.Option{openai.WithMaxTokens(0), openai.WithLegacyMaxTokens(-1)}, wantNoField: true},
+		{
+			name:      "max_completion_tokens",
+			opts:      []openai.Option{openai.WithMaxTokens(256)},
+			wantField: "max_completion_tokens", wantAbsent: "max_tokens", wantValue: 256,
+		},
+		{
+			name:      "legacy max_tokens",
+			opts:      []openai.Option{openai.WithLegacyMaxTokens(128)},
+			wantField: "max_tokens", wantAbsent: "max_completion_tokens", wantValue: 128,
+		},
+		{
+			name:      "last option wins",
+			opts:      []openai.Option{openai.WithLegacyMaxTokens(128), openai.WithMaxTokens(64)},
+			wantField: "max_completion_tokens", wantAbsent: "max_tokens", wantValue: 64,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var payload map[string]any
+
+			srv := payloadCapturingServer(t, &payload)
+			defer srv.Close()
+
+			opts := append([]openai.Option{openai.WithBaseURL(srv.URL + "/v1")}, tt.opts...)
+			c := openai.New("key", opts...)
+			msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
+
+			if _, err := c.Execute(context.Background(), msgs); err != nil {
+				t.Fatalf("Execute: unexpected error: %v", err)
+			}
+
+			if tt.wantNoField {
+				for _, f := range []string{"max_tokens", "max_completion_tokens"} {
+					if _, present := payload[f]; present {
+						t.Fatalf("%s = %v, want omitted", f, payload[f])
+					}
+				}
+
+				return
+			}
+
+			if got, ok := payload[tt.wantField].(float64); !ok || got != tt.wantValue {
+				t.Fatalf("%s = %v, want %v", tt.wantField, payload[tt.wantField], tt.wantValue)
+			}
+
+			if _, present := payload[tt.wantAbsent]; present {
+				t.Fatalf("%s = %v, want omitted", tt.wantAbsent, payload[tt.wantAbsent])
+			}
+		})
+	}
+}
+
+func TestExecute_ToolChoiceAndResponseFormat(t *testing.T) {
+	tool, err := llm.NewTool("lookup", "look something up", func(_ context.Context, _ struct{}) (string, error) {
+		return "", nil
+	})
+	if err != nil {
+		t.Fatalf("NewTool: %v", err)
+	}
+
+	format, err := llm.NewResponseFormat[struct {
+		Answer string `json:"answer"`
+	}]("answer", "the final answer")
+	if err != nil {
+		t.Fatalf("NewResponseFormat: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		choice     llm.CallOption
+		wantChoice any
+	}{
+		{name: "required", choice: llm.WithToolChoice(llm.ToolChoiceRequired), wantChoice: "required"},
+		{name: "none", choice: llm.WithToolChoice(llm.ToolChoiceNone), wantChoice: "none"},
+		{
+			name:       "forced",
+			choice:     llm.WithForcedTool("lookup"),
+			wantChoice: map[string]any{"type": "function", "function": map[string]any{"name": "lookup"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var payload map[string]any
+
+			srv := payloadCapturingServer(t, &payload)
+			defer srv.Close()
+
+			c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"))
+			msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
+
+			if _, execErr := c.Execute(context.Background(), msgs,
+				llm.WithTools(tool), tt.choice, llm.WithResponseFormat(format)); execErr != nil {
+				t.Fatalf("Execute: %v", execErr)
+			}
+
+			if !reflect.DeepEqual(payload["tool_choice"], tt.wantChoice) {
+				t.Fatalf("tool_choice = %#v, want %#v", payload["tool_choice"], tt.wantChoice)
+			}
+
+			rf, _ := payload["response_format"].(map[string]any)
+			js, _ := rf["json_schema"].(map[string]any)
+
+			if rf["type"] != "json_schema" || js["name"] != "answer" || js["strict"] != true ||
+				js["description"] != "the final answer" {
+				t.Fatalf("response_format = %#v", payload["response_format"])
+			}
+
+			if schema, _ := js["schema"].(map[string]any); schema["type"] != "object" {
+				t.Fatalf("response_format schema = %#v, want an object schema", js["schema"])
+			}
+		})
+	}
+}
+
+func TestExecute_InvalidCallOptions_FailBeforeRequest(t *testing.T) {
+	var payload map[string]any
+
+	srv := payloadCapturingServer(t, &payload)
+	defer srv.Close()
+
+	c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"))
+
+	_, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))},
+		llm.WithToolChoice(llm.ToolChoiceRequired))
+	if !errors.Is(err, llm.ErrInvalidToolChoice) {
+		t.Fatalf("Execute() = %v, want ErrInvalidToolChoice", err)
+	}
+
+	if payload != nil {
+		t.Fatal("request was sent despite invalid options")
+	}
+}
+
+// TestExecute_ToolChoiceWithoutTools_IsOmitted verifies that auto or none on a
+// call that offers no tools sends no tool_choice: OpenAI rejects tool_choice
+// without tools, and with no tools both modes already hold.
+func TestExecute_ToolChoiceWithoutTools_IsOmitted(t *testing.T) {
+	for _, mode := range []llm.ToolChoiceMode{llm.ToolChoiceAuto, llm.ToolChoiceNone} {
+		t.Run(string(mode), func(t *testing.T) {
+			var payload map[string]any
+
+			srv := payloadCapturingServer(t, &payload)
+			defer srv.Close()
+
+			c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"))
+
+			if _, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))},
+				llm.WithToolChoice(mode)); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+
+			if _, present := payload["tool_choice"]; present {
+				t.Fatalf("tool_choice = %#v, want omitted", payload["tool_choice"])
+			}
+		})
 	}
 }

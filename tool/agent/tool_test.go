@@ -24,11 +24,11 @@ import (
 )
 
 type stubLLM struct {
-	execute func(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error)
+	execute func(ctx context.Context, messages []llm.Message, tools []llm.CallOption) (*llm.Result, error)
 }
 
-func (s stubLLM) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
-	return s.execute(ctx, messages, tools)
+func (s stubLLM) Execute(ctx context.Context, messages []llm.Message, opts ...llm.CallOption) (*llm.Result, error) {
+	return s.execute(ctx, messages, opts)
 }
 
 func TestNewRequiresLLM(t *testing.T) {
@@ -39,7 +39,7 @@ func TestNewRequiresLLM(t *testing.T) {
 }
 
 func TestNewExposesFixedToolIdentity(t *testing.T) {
-	tool, err := New(stubLLM{execute: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+	tool, err := New(stubLLM{execute: func(_ context.Context, _ []llm.Message, _ []llm.CallOption) (*llm.Result, error) {
 		return &llm.Result{Message: &llm.Message{Role: llm.RoleAssistant, Parts: []llm.ContentPart{llm.Text("ok")}}}, nil
 	}})
 	if err != nil {
@@ -56,7 +56,7 @@ func TestNewExposesFixedToolIdentity(t *testing.T) {
 }
 
 func TestHandleNilInput(t *testing.T) {
-	tool, err := New(stubLLM{execute: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+	tool, err := New(stubLLM{execute: func(_ context.Context, _ []llm.Message, _ []llm.CallOption) (*llm.Result, error) {
 		return nil, errors.New("should not be called")
 	}})
 	if err != nil {
@@ -70,7 +70,7 @@ func TestHandleNilInput(t *testing.T) {
 }
 
 func TestHandleNameRequired(t *testing.T) {
-	tool, err := New(stubLLM{execute: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+	tool, err := New(stubLLM{execute: func(_ context.Context, _ []llm.Message, _ []llm.CallOption) (*llm.Result, error) {
 		return nil, errors.New("should not be called")
 	}})
 	if err != nil {
@@ -84,7 +84,7 @@ func TestHandleNameRequired(t *testing.T) {
 }
 
 func TestHandleDescriptionRequired(t *testing.T) {
-	tool, err := New(stubLLM{execute: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+	tool, err := New(stubLLM{execute: func(_ context.Context, _ []llm.Message, _ []llm.CallOption) (*llm.Result, error) {
 		return nil, errors.New("should not be called")
 	}})
 	if err != nil {
@@ -98,7 +98,7 @@ func TestHandleDescriptionRequired(t *testing.T) {
 }
 
 func TestHandleInputRequired(t *testing.T) {
-	tool, err := New(stubLLM{execute: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+	tool, err := New(stubLLM{execute: func(_ context.Context, _ []llm.Message, _ []llm.CallOption) (*llm.Result, error) {
 		return nil, errors.New("should not be called")
 	}})
 	if err != nil {
@@ -124,9 +124,9 @@ func TestHandleSuccess(t *testing.T) {
 		t.Fatalf("llm.NewTool() error = %v", err)
 	}
 
-	tool, err := New(stubLLM{execute: func(_ context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
+	tool, err := New(stubLLM{execute: func(_ context.Context, messages []llm.Message, tools []llm.CallOption) (*llm.Result, error) {
 		gotMessages = messages
-		gotTools = tools
+		gotTools = llm.NewCallConfig(tools...).Tools
 
 		return &llm.Result{Message: &llm.Message{Role: llm.RoleAssistant, Parts: []llm.ContentPart{llm.Text("done")}}}, nil
 	}}, extraTool)
@@ -180,7 +180,7 @@ func TestHandleSuccess(t *testing.T) {
 func TestHandleRunError(t *testing.T) {
 	runErr := errors.New("run failed")
 
-	tool, err := New(stubLLM{execute: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+	tool, err := New(stubLLM{execute: func(_ context.Context, _ []llm.Message, _ []llm.CallOption) (*llm.Result, error) {
 		return nil, runErr
 	}})
 	if err != nil {
@@ -194,7 +194,7 @@ func TestHandleRunError(t *testing.T) {
 }
 
 func TestToolMiddlewareOrder(t *testing.T) {
-	tool, err := New(stubLLM{execute: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+	tool, err := New(stubLLM{execute: func(_ context.Context, _ []llm.Message, _ []llm.CallOption) (*llm.Result, error) {
 		return &llm.Result{Message: &llm.Message{Role: llm.RoleAssistant, Parts: []llm.ContentPart{llm.Text("ok")}}}, nil
 	}})
 	if err != nil {
@@ -237,7 +237,7 @@ func TestToolMiddlewareOrder(t *testing.T) {
 }
 
 func TestToolMiddlewareShortCircuit(t *testing.T) {
-	tool, err := New(stubLLM{execute: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+	tool, err := New(stubLLM{execute: func(_ context.Context, _ []llm.Message, _ []llm.CallOption) (*llm.Result, error) {
 		return nil, errors.New("should not be called")
 	}})
 	if err != nil {

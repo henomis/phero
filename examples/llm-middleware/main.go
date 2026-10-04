@@ -94,7 +94,7 @@ func main() {
 
 			messages := []llm.Message{llm.UserMessage(llm.Text(prompt))}
 
-			result, err := client.Execute(context.Background(), messages, nil)
+			result, err := client.Execute(context.Background(), messages)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "[%d] error: %v\n", i, err)
 				return

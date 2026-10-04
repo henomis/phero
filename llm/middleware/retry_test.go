@@ -42,7 +42,7 @@ func TestNewRetry_SuccessOnFirstAttempt(t *testing.T) {
 
 	client := llm.Use(okLLM("ok"), mw)
 
-	result, err := client.Execute(context.Background(), nil, nil)
+	result, err := client.Execute(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestNewRetry_RetriesAndSucceeds(t *testing.T) {
 	callCount := 0
 	transient := errors.New("transient")
 
-	inner := &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+	inner := &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []llm.CallOption) (*llm.Result, error) {
 		callCount++
 		if callCount < 3 {
 			return nil, transient
@@ -74,7 +74,7 @@ func TestNewRetry_RetriesAndSucceeds(t *testing.T) {
 
 	client := llm.Use(inner, mw)
 
-	result, execErr := client.Execute(context.Background(), nil, nil)
+	result, execErr := client.Execute(context.Background(), nil)
 	if execErr != nil {
 		t.Fatalf("Execute: %v", execErr)
 	}
@@ -99,7 +99,7 @@ func TestNewRetry_ExhaustsAttempts(t *testing.T) {
 	}
 
 	client := llm.Use(errLLM(sentinel), mw)
-	_, execErr := client.Execute(context.Background(), nil, nil)
+	_, execErr := client.Execute(context.Background(), nil)
 
 	var maxErr *MaxAttemptsExceededError
 	if !errors.As(execErr, &maxErr) {
@@ -121,7 +121,7 @@ func TestNewRetry_ShouldRetryFalse(t *testing.T) {
 	callCount := 0
 	fatal := errors.New("fatal")
 
-	inner := &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+	inner := &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []llm.CallOption) (*llm.Result, error) {
 		callCount++
 		return nil, fatal
 	}}
@@ -136,7 +136,7 @@ func TestNewRetry_ShouldRetryFalse(t *testing.T) {
 
 	client := llm.Use(inner, mw)
 
-	_, execErr := client.Execute(context.Background(), nil, nil)
+	_, execErr := client.Execute(context.Background(), nil)
 	if !errors.Is(execErr, fatal) {
 		t.Fatalf("got %v, want fatal error", execErr)
 	}
@@ -152,7 +152,7 @@ func TestNewRetry_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	callCount := 0
-	inner := &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []*llm.Tool) (*llm.Result, error) {
+	inner := &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []llm.CallOption) (*llm.Result, error) {
 		callCount++
 
 		cancel() // cancel after first attempt
@@ -167,7 +167,7 @@ func TestNewRetry_ContextCancellation(t *testing.T) {
 
 	client := llm.Use(inner, mw)
 
-	_, execErr := client.Execute(ctx, nil, nil)
+	_, execErr := client.Execute(ctx, nil)
 	if !errors.Is(execErr, context.Canceled) {
 		t.Fatalf("got %v, want context.Canceled", execErr)
 	}

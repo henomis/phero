@@ -16,7 +16,6 @@ package nats
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"sync"
 	"time"
@@ -77,8 +76,8 @@ func NewHeartbeatTracker(nc *natsclient.Conn) (*HeartbeatTracker, error) {
 	}
 
 	sub, err := nc.Subscribe("agents.hb.*.*.*", func(msg *natsclient.Msg) {
-		var p heartbeatPayload
-		if err := json.Unmarshal(msg.Data, &p); err != nil || p.InstanceID == "" {
+		p, err := decodeHeartbeat(msg.Data)
+		if err != nil || p.InstanceID == "" {
 			return
 		}
 
@@ -134,6 +133,23 @@ func (t *HeartbeatTracker) Stop() error {
 	return t.sub.Unsubscribe()
 }
 
+// heartbeat builds the §8.3 payload this server publishes and returns from
+// its status endpoint (§8.7), which share one schema.
+func (s *Server) heartbeat(instanceID string) heartbeatPayload {
+	return heartbeatPayload{
+		Agent:           s.cfg.agentID,
+		Owner:           s.owner,
+		Session:         s.cfg.session,
+		InstanceID:      instanceID,
+		TS:              time.Now().UTC().Format(time.RFC3339),
+		IntervalS:       heartbeatIntervalSeconds(s.cfg.heartbeatInterval),
+		ProtocolVersion: protocolVersion,
+		Endpoints: map[string]heartbeatEndpoint{
+			endpointPrompt: {Subject: s.promptSubject(), Metadata: s.promptMetadata()},
+		},
+	}
+}
+
 // heartbeatIntervalSeconds renders a cadence for the wire, where §8.1 makes
 // interval_s an integer number of seconds.
 //
@@ -165,26 +181,18 @@ func agentFromHeartbeatSubject(subject string) (owner, name string, ok bool) {
 	return parts[3], parts[4], true
 }
 
-// startHeartbeats publishes heartbeats on agents.hb.{agent}.{owner}.{name}
-// per §8.1.  The first heartbeat is published immediately so that subscribers
-// who connect after the server does not need to wait a full interval (§8.5).
-//
-// The goroutine exits when ctx is done; callers must call wg.Done() when
-// this returns.
-func (s *Server) startHeartbeats(ctx context.Context, subject, instanceID string) {
-	publish := func() {
-		p := heartbeatPayload{
-			Agent:      s.cfg.agentID,
-			Owner:      s.owner,
-			Session:    s.cfg.session,
-			InstanceID: instanceID,
-			TS:         time.Now().UTC().Format(time.RFC3339),
-			IntervalS:  heartbeatIntervalSeconds(s.cfg.heartbeatInterval),
-		}
-		_ = s.nc.Publish(subject, encodeHeartbeat(p))
-	}
+// publishHeartbeat publishes one heartbeat on agents.hb.{agent}.{owner}.{name}
+// (§8.1). A failed publish is not retried: the next tick is the retry.
+func (s *Server) publishHeartbeat(subject, instanceID string) {
+	_ = s.nc.Publish(subject, encodeHeartbeat(s.heartbeat(instanceID)))
+}
 
-	publish()
+// startHeartbeats publishes a heartbeat every interval until ctx is done. The
+// first one is published by register, before this starts, so that subscribers
+// who connect after the server do not wait a full interval (§8.5) and so that
+// readiness covers it.
+func (s *Server) startHeartbeats(ctx context.Context, subject, instanceID string) {
+	publish := func() { s.publishHeartbeat(subject, instanceID) }
 
 	ticker := time.NewTicker(s.cfg.heartbeatInterval)
 	defer ticker.Stop()

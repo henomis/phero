@@ -1,6 +1,6 @@
 # NATS Agent Example
 
-Registers a Phero agent on NATS and interacts with it over an interactive client, using the [NATS Agent Protocol v0.3](https://github.com/synadia-ai/nats-agent-sdk-docs/blob/main/core-protocol.md).
+Registers a Phero agent on NATS and interacts with it over an interactive client, using the [NATS Agent Protocol v0.3](https://github.com/synadia-ai/synadia-agent-sdk-docs/blob/main/core-protocol.md).
 
 This example shows:
 

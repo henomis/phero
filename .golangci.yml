@@ -137,7 +137,7 @@ formatters:
     # If you want local imports grouped separately, uncomment and set your module path.
     # goimports:
     #   local-prefixes:
-    #     - github.com/cybusio/yourmodule
+    #     - github.com/henomis/yourmodule
 
   exclusions:
     # exclude all *_test.go files everywhere

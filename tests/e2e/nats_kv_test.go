@@ -18,10 +18,17 @@ package e2e_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	natsio "github.com/nats-io/nats.go"
+
+	"github.com/henomis/phero/llm"
 	natsmemory "github.com/henomis/phero/memory/nats"
 	"github.com/henomis/phero/tool/kv"
 )
@@ -138,5 +145,145 @@ func TestNATSMemoryOpenCreatesAndBinds(t *testing.T) {
 		if mem == nil {
 			t.Fatalf("Open (call %d) returned a nil memory", i)
 		}
+	}
+}
+
+// TestNATSMemoryConcurrentSavesKeepEveryMessage is issue #2: two processes
+// sharing a session save at the same time. Each Memory stands for a process,
+// with its own mutex, so only the revision check keeps their writes apart.
+func TestNATSMemoryConcurrentSavesKeepEveryMessage(t *testing.T) {
+	nc := requireNATS(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	const (
+		bucket    = "phero-e2e-memrace"
+		processes = 2
+		writers   = 4 // goroutines per process
+		saves     = 10
+	)
+
+	t.Cleanup(func() {
+		js, jsErr := nc.JetStream()
+		if jsErr == nil {
+			_ = js.DeleteKeyValue(bucket)
+		}
+	})
+
+	session := "race-" + uuid.NewString()
+
+	mems := make([]*natsmemory.Memory, processes)
+	for i := range mems {
+		mem, err := natsmemory.Open(nc, bucket, session)
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+
+		mems[i] = mem
+	}
+
+	var wg sync.WaitGroup
+
+	errs := make(chan error, processes*writers*saves)
+
+	for p, mem := range mems {
+		for w := range writers {
+			wg.Go(func() {
+				for n := range saves {
+					msg := llm.UserMessage(llm.Text(fmt.Sprintf("p%d-w%d-%d", p, w, n)))
+					if err := mem.Save(ctx, []llm.Message{msg}); err != nil {
+						errs <- err
+					}
+				}
+			})
+		}
+	}
+
+	wg.Wait()
+	close(errs)
+
+	failed := 0
+	for err := range errs {
+		failed++
+
+		if !errors.Is(err, natsmemory.ErrConcurrentUpdate) {
+			t.Fatalf("Save: %v", err)
+		}
+	}
+
+	t.Logf("%d of %d saves gave up with ErrConcurrentUpdate", failed, processes*writers*saves)
+
+	got, err := mems[0].Retrieve(ctx, "")
+	if err != nil {
+		t.Fatalf("Retrieve: %v", err)
+	}
+
+	// A Save that gave up stored nothing; every other one must be there.
+	if want := processes*writers*saves - failed; len(got) != want {
+		t.Fatalf("stored %d messages, want %d (%d saves gave up)", len(got), want, failed)
+	}
+
+	seen := make(map[string]bool, len(got))
+	for _, m := range got {
+		if seen[m.TextContent()] {
+			t.Fatalf("message %q stored twice", m.TextContent())
+		}
+
+		seen[m.TextContent()] = true
+	}
+}
+
+// TestNATSMemorySessionTooLarge is issue #8: a session that no longer fits in
+// one NATS message fails with ErrSessionTooLarge, whichever limit it hits — the
+// bucket's MaxValueSize (refused by the server) or the connection's
+// max_payload (refused by nats.go before sending).
+func TestNATSMemorySessionTooLarge(t *testing.T) {
+	nc := requireNATS(t)
+	ctx := context.Background()
+
+	const bucket = "phero-e2e-memsize"
+
+	js, err := nc.JetStream()
+	if err != nil {
+		t.Fatalf("JetStream: %v", err)
+	}
+
+	t.Cleanup(func() { _ = js.DeleteKeyValue(bucket) })
+
+	kvStore, err := js.CreateKeyValue(&natsio.KeyValueConfig{Bucket: bucket, MaxValueSize: 4096})
+	if err != nil {
+		t.Fatalf("CreateKeyValue: %v", err)
+	}
+
+	cases := map[string]int{
+		"bucket MaxValueSize":    8 * 1024,
+		"connection max_payload": int(nc.MaxPayload()) + 1024,
+	}
+
+	for name, size := range cases {
+		t.Run(name, func(t *testing.T) {
+			mem, err := natsmemory.New(kvStore, "big-"+uuid.NewString())
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			if err = mem.Save(ctx, []llm.Message{llm.UserMessage(llm.Text("small"))}); err != nil {
+				t.Fatalf("Save small: %v", err)
+			}
+
+			big := llm.UserMessage(llm.Text(strings.Repeat("x", size)))
+
+			err = mem.Save(ctx, []llm.Message{big})
+			if !errors.Is(err, natsmemory.ErrSessionTooLarge) {
+				t.Fatalf("Save big = %v, want ErrSessionTooLarge", err)
+			}
+
+			// The history before the failed Save is intact.
+			got, err := mem.Retrieve(ctx, "")
+			if err != nil || len(got) != 1 {
+				t.Fatalf("Retrieve = %d messages, %v; want the 1 saved before", len(got), err)
+			}
+		})
 	}
 }

@@ -16,6 +16,7 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/sashabaranov/go-openai"
@@ -41,6 +42,8 @@ type Client struct {
 	apiKey          string
 	temperature     float32
 	reasoningEffort string
+	maxTokens       int64
+	legacyMaxTokens bool
 	config          openai.ClientConfig
 }
 
@@ -71,21 +74,15 @@ func New(apiKey string, opts ...Option) *Client {
 
 // Execute calls the Chat Completions API with the given messages and returns the
 // model's next message.
-func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
-	request := openai.ChatCompletionRequest{
-		Model:           c.model,
-		Messages:        messagesToOpenAI(messages),
-		Temperature:     c.temperature,
-		ReasoningEffort: c.reasoningEffort,
-	}
-
-	if len(tools) > 0 {
-		request.Tools = c.openaiTools(tools)
+func (c *Client) Execute(ctx context.Context, messages []llm.Message, opts ...llm.CallOption) (*llm.Result, error) {
+	request, err := c.buildRequest(messages, opts)
+	if err != nil {
+		return nil, err
 	}
 
 	response, err := c.client.CreateChatCompletion(ctx, request)
 	if err != nil {
-		return nil, err
+		return nil, wrapAPIError(err)
 	}
 
 	if len(response.Choices) == 0 {
@@ -107,6 +104,75 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, tools []*l
 			OutputTokens: response.Usage.CompletionTokens,
 		},
 	}, nil
+}
+
+// buildRequest resolves the call options and converts messages and options
+// into a Chat Completions request. It is shared by Execute and ExecuteStream.
+func (c *Client) buildRequest(messages []llm.Message, opts []llm.CallOption) (openai.ChatCompletionRequest, error) {
+	cfg := llm.NewCallConfig(opts...)
+	if err := cfg.Validate(); err != nil {
+		return openai.ChatCompletionRequest{}, err
+	}
+
+	request := openai.ChatCompletionRequest{
+		Model:           c.model,
+		Messages:        messagesToOpenAI(messages),
+		Temperature:     c.temperature,
+		ReasoningEffort: c.reasoningEffort,
+	}
+
+	if c.maxTokens > 0 {
+		if c.legacyMaxTokens {
+			request.MaxTokens = int(c.maxTokens)
+		} else {
+			request.MaxCompletionTokens = int(c.maxTokens)
+		}
+	}
+
+	// tool_choice goes only with tools: Validate already rejects required and
+	// forced choices without them, and with no tools auto and none hold anyway.
+	if len(cfg.Tools) > 0 {
+		request.Tools = c.openaiTools(cfg.Tools)
+
+		if cfg.ToolChoice != nil {
+			request.ToolChoice = toolChoiceToOpenAI(cfg.ToolChoice)
+		}
+	}
+
+	if f := cfg.ResponseFormat; f != nil {
+		request.ResponseFormat = &openai.ChatCompletionResponseFormat{
+			Type: openai.ChatCompletionResponseFormatTypeJSONSchema,
+			JSONSchema: &openai.ChatCompletionResponseFormatJSONSchema{
+				Name:        f.Name(),
+				Description: f.Description(),
+				Schema:      jsonSchema(f.Schema()),
+				Strict:      true,
+			},
+		}
+	}
+
+	return request, nil
+}
+
+// toolChoiceToOpenAI maps a tool choice to the tool_choice field: a bare mode
+// string, or a function object naming the forced tool.
+func toolChoiceToOpenAI(tc *llm.ToolChoice) any {
+	if tc.Mode == llm.ToolChoiceTool {
+		return openai.ToolChoice{
+			Type:     openai.ToolTypeFunction,
+			Function: openai.ToolFunction{Name: tc.Name},
+		}
+	}
+
+	return string(tc.Mode)
+}
+
+// jsonSchema adapts a schema map to the json.Marshaler go-openai expects.
+type jsonSchema map[string]any
+
+// MarshalJSON encodes the schema as a plain JSON object.
+func (s jsonSchema) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any(s))
 }
 
 // messagesToOpenAI converts Phero messages to go-openai wire types.
@@ -295,5 +361,37 @@ func WithTemperature(temp float32) Option {
 func WithReasoningEffort(effort string) Option {
 	return func(c *Client) {
 		c.reasoningEffort = effort
+	}
+}
+
+// WithMaxTokens caps the number of tokens the model may generate, sent as the
+// max_completion_tokens request field. The cap includes reasoning tokens on
+// reasoning models.
+//
+// Non-positive values are ignored. When unset, the field is omitted and the
+// provider default applies. WithMaxTokens and WithLegacyMaxTokens set the same
+// cap; whichever is applied last wins.
+func WithMaxTokens(maxTokens int64) Option {
+	return func(c *Client) {
+		if maxTokens > 0 {
+			c.maxTokens = maxTokens
+			c.legacyMaxTokens = false
+		}
+	}
+}
+
+// WithLegacyMaxTokens caps the number of tokens the model may generate, sent as
+// the deprecated max_tokens request field.
+//
+// Use it for OpenAI-compatible endpoints that do not implement
+// max_completion_tokens; OpenAI itself rejects max_tokens on reasoning models.
+// Non-positive values are ignored. WithMaxTokens and WithLegacyMaxTokens set the
+// same cap; whichever is applied last wins.
+func WithLegacyMaxTokens(maxTokens int64) Option {
+	return func(c *Client) {
+		if maxTokens > 0 {
+			c.maxTokens = maxTokens
+			c.legacyMaxTokens = true
+		}
 	}
 }

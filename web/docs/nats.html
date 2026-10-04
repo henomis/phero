@@ -39,7 +39,7 @@
       <h2>What it is</h2>
       <p>
         The <code>nats</code> package implements the
-        <a href="https://github.com/synadia-ai/nats-agent-sdk-docs/blob/main/core-protocol.md">NATS Agent Protocol v0.3</a>
+        <a href="https://github.com/synadia-ai/synadia-agent-sdk-docs/blob/main/core-protocol.md">NATS Agent Protocol v0.3</a>
         for Phero agents. It provides two top-level types:
       </p>
       <ul>
@@ -126,7 +126,9 @@ func main() {
       <ol>
         <li>The prompt endpoint is unsubscribed, so NATS sends new prompts to another replica in the
           <code>agents</code> queue group. A prompt already buffered on this instance gets a
-          <code>503 server is draining</code> reply instead of being served.</li>
+          <code>500</code> reply with error code <code>server_draining</code> instead of being served. It is a 500
+          rather than a 503 because the protocol only allows the status codes listed in its §9.2 table. Callers
+          retry 5xx errors, so the prompt goes to another replica.</li>
         <li>Heartbeats stop, so this instance no longer shows as live.</li>
         <li>Handlers that are already running keep their own context and finish their LLM call.</li>
         <li>If they are still running when most of the drain budget is used up, their context is cancelled. The
@@ -164,6 +166,36 @@ go func() {
 _ = srv.Start(context.Background())</code></pre>
     </section>
 
+    <section id="readiness">
+      <h2>Readiness</h2>
+      <p>
+        <code>Start</code> blocks for the server's whole life. To know when the agent can take prompts, wait on
+        <code>srv.Ready()</code>. The channel closes once the service is registered, the first heartbeat is
+        published, and the broker has acknowledged both with a flush. From then on, any connection can discover
+        and prompt the agent.
+      </p>
+      <p>
+        <code>Ready()</code> never closes if <code>Start</code> fails or the server drains first, so wait on it
+        together with <code>Start</code>'s result:
+      </p>
+
+      <pre><code class="language-go">errc := make(chan error, 1)
+go func() { errc &lt;- srv.Start(ctx) }()
+
+select {
+case &lt;-srv.Ready():
+    // registered and reachable
+case err := &lt;-errc:
+    return err
+}</code></pre>
+
+      <p>
+        It is a one-time startup signal, not a health check: it stays closed after a lost connection and after a
+        drain. A <code>Resolver</code> in the same process still needs to receive a heartbeat of its own before it
+        reports the agent online; <code>WaitReady</code> covers that.
+      </p>
+    </section>
+
     <section>
       <h2>Identifiers, sessions and payload limits</h2>
       <p>
@@ -198,6 +230,14 @@ agents, _ := c.Discover(ctx,
         before publishing. Without that check, the failure would be the less clear
         <code>nats: maximum payload exceeded</code> error.
       </p>
+
+      <p>
+        The limit applies to each prompt, not to the answer. An answer larger than the server connection's
+        <code>max_payload</code> is sent as several <code>response</code> chunks, each small enough to publish,
+        and <code>stream.Text</code> joins them back together. If a chunk still cannot be published, the
+        caller gets a <code>500</code> service error with code <code>response_too_large</code> (or
+        <code>response_failed</code>) instead of an empty answer.
+      </p>
     </section>
 
     <section>
@@ -218,7 +258,7 @@ if err != nil {
 }
 
 // Stream a prompt to the first discovered agent
-stream, err := c.Prompt(ctx, agents[0], "What is NATS?")
+stream, err := agents[0].Prompt(ctx, "What is NATS?")
 if err != nil {
     panic(err)
 }
@@ -238,6 +278,46 @@ fmt.Println(text)</code></pre>
         timeout, <code>Discover</code> stops at that deadline. A cancelled <code>ctx</code> returns its own error
         instead of <code>ErrNoAgentsFound</code>. <code>Prompt</code> returns immediately if <code>ctx</code> has
         already ended, so no agent starts a prompt that nobody will read.
+      </p>
+    </section>
+
+    <section>
+      <h2>Sending attachments and headers</h2>
+      <p>
+        <code>Prompt</code> sends text only. <code>Send</code> takes a <code>*nats.Request</code> with
+        attachments (raw bytes; the base64 encoding is done for you) and extra NATS headers:
+      </p>
+
+      <pre><code class="language-go">stream, err := agents[0].Send(ctx, &amp;natsagent.Request{
+    Prompt:      "Summarise this report",
+    Attachments: []natsagent.Attachment{{Filename: "report.pdf", Content: pdfBytes}},
+    Header:      nats.Header{"X-Tenant": []string{"acme"}},
+})</code></pre>
+
+      <p>
+        <code>Send</code> checks the request before publishing: an empty prompt, attachments sent to an agent that
+        does not advertise <code>attachments_ok</code>, an attachment without a filename, or a request larger than
+        the agent's or the connection's <code>max_payload</code>. Headers count toward that limit, as they do for
+        NATS itself. Header names starting with <code>Nats-</code> are reserved by NATS.
+      </p>
+      <p>
+        On the server, a handler reads the request it is serving with <code>nats.RequestFrom(ctx)</code>: the
+        prompt, the headers, and every attachment's bytes. That includes attachments that are not images, which
+        the LLM only sees as an <code>[attachment: report.pdf]</code> placeholder. The context reaches an agent's
+        tools too, so a tool can read, say, a tenant header. The headers are a copy.
+      </p>
+
+      <pre><code class="language-go">func (h *handler) Run(ctx context.Context, parts ...llm.ContentPart) (*agent.Result, error) {
+    if req, ok := natsagent.RequestFrom(ctx); ok {
+        tenant := req.Header.Get("X-Tenant")
+        // ...
+    }
+    // ...
+}</code></pre>
+
+      <p>
+        A header is whatever the caller chose to send. It identifies nobody, so do not use it for
+        authorization; restrict who may publish to the prompt subject with NATS permissions instead.
       </p>
     </section>
 
@@ -320,16 +400,126 @@ orchestrator.AddTool(tool)</code></pre>
       <p>
         <code>nats.Permanent(err)</code> reports whether retrying cannot fix an error. It returns true for
         requests the agent will always reject: an empty or oversized prompt, attachments the agent does not
-        accept, a malformed envelope, or a 4xx <code>ServiceError</code>. It also returns true for configuration
+        accept, a malformed envelope, a 4xx <code>ServiceError</code> other than 429, or a question the client
+        cannot answer (see below). It also returns true for configuration
         errors, such as a nil dependency or an empty or invalid identifier. It returns false for everything else,
-        including <code>ErrNoAgentsFound</code>, <code>ErrStreamTimeout</code> and context errors. Use it instead
-        of listing error kinds yourself, so new error kinds are classified correctly without changes on your side.
+        including <code>ErrNoAgentsFound</code>, <code>ErrStreamTimeout</code>, a 429 rate limit and context
+        errors. Use it instead of listing error kinds yourself, so new error kinds are classified correctly without
+        changes on your side.
+      </p>
+      <p>
+        A <code>*ServiceError</code> carries the status <code>Code</code> and <code>Description</code> from the
+        headers, plus the optional JSON body: <code>ErrCode</code> (e.g. <code>"rate_limited"</code>),
+        <code>Message</code> (falls back to <code>Description</code>) and <code>RetryAfter</code>, how long the
+        agent asks you to wait. The client does not retry on its own; <code>RetryAfter</code> is there for your
+        retry logic.
       </p>
 
       <pre><code class="language-go">text, err := stream.Text(ctx)
 if err != nil &amp;&amp; !natsagent.Permanent(err) {
+    var se *natsagent.ServiceError
+    if errors.As(err, &amp;se) &amp;&amp; se.RetryAfter &gt; 0 {
+        time.Sleep(se.RetryAfter) // the agent said when to come back
+    }
     // worth retrying, perhaps against another replica
 }</code></pre>
+    </section>
+
+    <section>
+      <h2>Agents that ask questions</h2>
+      <p>
+        The protocol lets an agent pause and ask the caller a question mid-stream, for example a confirmation
+        before deleting files. The Go client cannot answer. When a question arrives, <code>stream.Text</code>
+        stops at once and returns a <code>*QueryError</code> (matching <code>ErrQueryNotSupported</code>) with
+        the question in <code>Prompt</code>. Any text received before it is discarded, and
+        <code>Permanent</code> reports the error as permanent, because sending the same prompt gets the same
+        question. Through <code>AsTool</code>, the question reaches the calling LLM, which can try again with a
+        prompt that already answers it.
+      </p>
+      <p>
+        The remote agent is not told that nobody will answer. It waits until its own timeout and then either
+        fails or <strong>continues with a default of its own choosing</strong>, which may mean the action goes
+        ahead anyway. Check what the agents you call do in that case.
+      </p>
+    </section>
+
+    <section>
+      <h2>What doesn't cross the wire</h2>
+      <p>
+        The server sends the caller the text of the agent's <code>Result</code>. The protocol has no field for the
+        rest, so some of what works locally is lost when an agent is served over NATS:
+      </p>
+      <ul>
+        <li>
+          <strong>Handoffs.</strong> Locally, whoever calls <code>Run</code> runs the agents listed in
+          <code>Result.Handoffs</code>. Over NATS the caller is another process, possibly another SDK, and
+          never sees them, so the handoff does nothing. The caller receives the text the model wrote alongside the
+          handoff, or, when it wrote none, a note naming each target and its context (for example
+          <code>handed off to writer: draft the bio</code>; see <code>Result.ReplyText</code>). The server logs a
+          warning naming the dropped targets (see <code>WithLogger</code>). To route across NATS, have the agent return its
+          decision in its answer instead, for example with structured output
+          (<code>SetResponseFormat</code>) and a <code>next_agent</code> field the caller reads.
+        </li>
+        <li>
+          <strong>Token usage and timings</strong> (<code>Result.Summary</code>). Collect them where the agent
+          runs, for example with the <a href="trace.html">OpenTelemetry tracer</a> on the server.
+        </li>
+        <li>
+          <strong>Attachments that are not images.</strong> The LLM only sees an
+          <code>[attachment: name]</code> placeholder. The handler can still read their bytes with
+          <code>RequestFrom</code>.
+        </li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Choosing the error a caller receives</h2>
+      <p>
+        When the handler fails, the server sends the caller a service error with a code from the protocol's
+        table (400, 401, 403, 404, 409, 429, 500). To choose it, return a <code>*nats.CodedError</code> from
+        <code>Run</code>, directly or wrapped:
+      </p>
+
+      <pre><code class="language-go">return nil, &amp;natsagent.CodedError{
+    Code:       429,
+    ErrCode:    "quota_exceeded",
+    Message:    "daily quota used up",
+    RetryAfter: 30 * time.Second, // sent as retry_after_s
+}</code></pre>
+
+      <p>
+        Any other code is sent as 500, an empty <code>ErrCode</code> is filled in from the code
+        (<code>"rate_limited"</code> for 429), and an empty <code>Message</code> from the wrapped
+        <code>Err</code>. A tool's error does not fail an agent's run, so a <code>CodedError</code> returned by a
+        tool never reaches the caller.
+      </p>
+      <p>
+        Without a <code>CodedError</code>, errors from the LLM are mapped from the provider's
+        <code>llm.ProviderError</code>. Only a rate limit keeps its code: a rejected API key is the agent's
+        configuration, not the caller's credentials, and a rejected request may be the agent's own fault, so
+        both are reported as server errors.
+      </p>
+      <ul>
+        <li>Provider 429 → 429 <code>rate_limited</code>, with the provider's wait in <code>retry_after_s</code></li>
+        <li>Provider 401 or 403 → 500 <code>llm_auth_failed</code></li>
+        <li>Provider 400, 413 or 422 → 500 <code>llm_rejected</code></li>
+        <li>Any other provider status → 500 <code>llm_error</code></li>
+      </ul>
+      <p>
+        A run cut short by a shutdown is reported as 500 <code>server_draining</code>, and any other error as
+        500 <code>internal_error</code>. To decide yourself, pass <code>WithErrorMapper</code>: it sees every
+        error first, and returning <code>nil</code> falls back to the rules above. It is also the place to keep
+        internal detail away from callers, since by default the error's text is sent as the message:
+      </p>
+
+      <pre><code class="language-go">srv, _ := natsagent.New(nc, a, "alice", "my-agent",
+    natsagent.WithErrorMapper(func(err error) *natsagent.CodedError {
+        if errors.Is(err, ErrInvoiceNotFound) {
+            return &amp;natsagent.CodedError{Code: 404, Message: "no such invoice"}
+        }
+        return nil // use the defaults
+    }),
+)</code></pre>
     </section>
 
     <section>
@@ -365,6 +555,7 @@ OPENAI_API_KEY=&lt;key&gt; go run ./examples/nats-agent/multi-agent/orchestrator
       <ul>
         <li><code>nats.New(nc, handler, owner, name, opts...) (*Server, error)</code> — create a server; <code>handler</code> is any <code>Handler</code>, e.g. <code>*agent.Agent</code></li>
         <li><code>srv.Start(ctx) error</code> — serve until ctx is cancelled, then drain; returns <code>ErrServerStopped</code> if the server has already drained</li>
+        <li><code>srv.Ready() &lt;-chan struct{}</code> — closed once the service is registered and the broker has acknowledged it and the first heartbeat; never closed if <code>Start</code> fails or the server drains first</li>
         <li><code>srv.Drain(ctx) error</code> — stop accepting prompts and wait for in-flight ones; safe to call concurrently and more than once</li>
       </ul>
 
@@ -378,6 +569,8 @@ OPENAI_API_KEY=&lt;key&gt; go run ./examples/nats-agent/multi-agent/orchestrator
         <li><code>WithHeartbeatInterval(d time.Duration)</code> — how often to publish a heartbeat (default: 30 s)</li>
         <li><code>WithKeepaliveInterval(d time.Duration)</code> — how often to send a keepalive chunk during a long response (default: 30 s)</li>
         <li><code>WithDrainTimeout(d time.Duration)</code> — total shutdown budget for in-flight prompts (default: 30 s)</li>
+        <li><code>WithLogger(logger *slog.Logger)</code> — where the server logs what it cannot tell the caller, such as dropped handoffs (default: <code>slog.Default()</code>)</li>
+        <li><code>WithErrorMapper(fn func(error) *CodedError)</code> — choose the error sent when the handler fails (default: <code>CodedError</code> in the chain, then the LLM provider mapping, then 500)</li>
       </ul>
 
       <h3>Client</h3>
@@ -385,6 +578,7 @@ OPENAI_API_KEY=&lt;key&gt; go run ./examples/nats-agent/multi-agent/orchestrator
         <li><code>nats.NewClient(nc, opts...) *Client</code> — create a client</li>
         <li><code>client.Discover(ctx, opts...) ([]*AgentHandle, error)</code> — discover agents on the bus</li>
         <li><code>client.Prompt(ctx, info, text) (*Stream, error)</code> — send a prompt and get a stream</li>
+        <li><code>client.Send(ctx, info, req *Request) (*Stream, error)</code> — send a prompt with attachments and headers</li>
         <li><code>client.AsTool(info, toolName, toolDesc) (*llm.Tool, error)</code> — wrap a remote agent as a tool</li>
       </ul>
 
@@ -405,6 +599,8 @@ OPENAI_API_KEY=&lt;key&gt; go run ./examples/nats-agent/multi-agent/orchestrator
       <h3>AgentHandle</h3>
       <ul>
         <li><code>handle.Prompt(ctx, text) (*Stream, error)</code> — shorthand for <code>Client.Prompt</code></li>
+        <li><code>handle.Send(ctx, req *Request) (*Stream, error)</code> — shorthand for <code>Client.Send</code></li>
+        <li><code>nats.RequestFrom(ctx) (*Request, bool)</code> — in a handler or tool, the request being served</li>
         <li><code>handle.AsTool(toolName, toolDesc) (*llm.Tool, error)</code> — shorthand for <code>Client.AsTool</code></li>
         <li><code>handle.AgentInfo</code> — embedded <code>AgentInfo</code> with name, owner, session, subjects, etc.</li>
       </ul>
@@ -449,10 +645,12 @@ OPENAI_API_KEY=&lt;key&gt; go run ./examples/nats-agent/multi-agent/orchestrator
         <li><code>ErrEmptyPrompt</code> — empty prompt passed to <code>Prompt</code></li>
         <li><code>ErrPayloadTooLarge</code> — prompt exceeds the agent's advertised or the connection's max payload</li>
         <li><code>ErrAttachmentsNotAllowed</code> — the agent does not accept attachments</li>
+        <li><code>ErrInvalidAttachment</code> — an attachment has no filename</li>
         <li><code>ErrMalformedEnvelope</code> — the request payload is not a valid envelope</li>
         <li><code>ErrNoAgentsFound</code> — <code>Discover</code> found no matching agents</li>
         <li><code>ErrStreamTimeout</code> — no chunk arrived within the inactivity timeout</li>
-        <li><code>ErrServiceError</code> — the agent returned an error; use <code>errors.As</code> with <code>*ServiceError</code> to read <code>Code</code> and <code>Description</code></li>
+        <li><code>ErrServiceError</code> — the agent returned an error; use <code>errors.As</code> with <code>*ServiceError</code> to read <code>Code</code>, <code>Description</code>, <code>ErrCode</code>, <code>Message</code> and <code>RetryAfter</code></li>
+        <li><code>ErrQueryNotSupported</code> — the agent asked a question mid-stream; use <code>errors.As</code> with <code>*QueryError</code> to read it</li>
         <li><code>ErrDrainIncomplete</code> — handlers were still running when the drain budget ran out</li>
         <li><code>ErrServerStopped</code> — <code>Start</code> called on a server that has already drained</li>
       </ul>
@@ -477,6 +675,24 @@ go run ./examples/nats-agent/client</code></pre>
         <a href="https://github.com/synadia-ai/synadia-agents">synadia-agents</a>.
         Any client speaking the NATS Agent Protocol can discover and prompt a Phero agent.
       </p>
+      <ul>
+        <li><strong>Protocol version.</strong> Phero agents advertise <code>protocol_version: "0.3"</code>.
+          <code>Discover</code> only returns agents whose version starts with <code>0.3</code>; qualifiers such as
+          <code>0.3.1</code> are accepted. While the protocol is at 0.x, a new MINOR version can change the wire
+          format (0.2 used different subjects), so agents on any other version are skipped like any other
+          non-compliant reply.</li>
+        <li><strong>Heartbeats and status replies</strong> include the optional <code>protocol_version</code> and an
+          <code>endpoints.prompt</code> declaration: the prompt subject and its <code>max_payload</code> /
+          <code>attachments_ok</code> metadata, copied from the registration. <code>HeartbeatTracker</code> ignores a
+          malformed declaration and still counts the heartbeat, so liveness never depends on the optional
+          fields.</li>
+        <li><strong>Error codes</strong> come only from the protocol's status-code table. A prompt refused during a
+          drain gets <code>500</code> with error code <code>server_draining</code>.</li>
+        <li><strong>Not implemented:</strong> the optional sender-identity extension (§13: signed
+          <code>Agent-Sender</code> headers, <code>min_sender_trust</code>). Phero agents behave like endpoints with
+          <code>min_sender_trust: any</code>. They accept every request and ignore any <code>Agent-Sender</code>
+          header, as the protocol requires of agents that don't implement §13.</li>
+      </ul>
       <pre><code class="language-bash"># Discover the running Phero agent with the Python SDK
 uv run python examples/01-discover.py --url nats://127.0.0.1:4222
 

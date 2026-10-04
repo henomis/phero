@@ -94,7 +94,7 @@ type retryLLM struct {
 
 // Execute calls inner.Execute up to maxAttempts times, sleeping with
 // exponential back-off and +/-25% jitter between each attempt.
-func (r *retryLLM) Execute(ctx context.Context, messages []llm.Message, tools []*llm.Tool) (*llm.Result, error) {
+func (r *retryLLM) Execute(ctx context.Context, messages []llm.Message, opts ...llm.CallOption) (*llm.Result, error) {
 	var lastErr error
 
 	backoff := r.cfg.initialBackoff
@@ -104,7 +104,7 @@ func (r *retryLLM) Execute(ctx context.Context, messages []llm.Message, tools []
 			return nil, err
 		}
 
-		result, err := r.inner.Execute(ctx, messages, tools)
+		result, err := r.inner.Execute(ctx, messages, opts...)
 		if err == nil {
 			return result, nil
 		}
