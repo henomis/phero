@@ -43,7 +43,7 @@
 //
 //		"github.com/nats-io/nats.go"
 //
-//		natsmemory "github.com/henomis/phero/memory/nats"
+//		natsmemory "github.com/henomis/phero/v2/memory/nats"
 //	)
 //
 //	nc, _ := nats.Connect(os.Getenv("NATS_URL"))

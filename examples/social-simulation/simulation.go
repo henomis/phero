@@ -20,8 +20,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // FeedEntry is a single post written by a persona agent during a simulation round.

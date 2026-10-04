@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/henomis/phero/trace"
-	"github.com/henomis/phero/trace/text"
+	"github.com/henomis/phero/v2/trace"
+	"github.com/henomis/phero/v2/trace/text"
 )
 
 func TestTextTracer_AgentStart(t *testing.T) {

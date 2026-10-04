@@ -76,7 +76,7 @@
         The tool creates an agent, runs it, and returns the text result.
       </p>
 
-      <pre><code class="language-go">import agenttool "github.com/henomis/phero/tool/agent"
+      <pre><code class="language-go">import agenttool "github.com/henomis/phero/v2/tool/agent"
 
 // Pass the same LLM client used by the orchestrator.
 agentTool, err := agenttool.New(llmClient)
@@ -115,7 +115,7 @@ if err != nil {
         All constructors accept shared <code>Option</code> values.
       </p>
 
-      <pre><code class="language-go">import "github.com/henomis/phero/tool/file"
+      <pre><code class="language-go">import "github.com/henomis/phero/v2/tool/file"
 
 readTool, err  := file.NewReadTool(file.WithWorkingDirectory("/workspace"))
 writeTool, err := file.NewWriteTool(file.WithWorkingDirectory("/workspace"))
@@ -177,7 +177,7 @@ if err := a.AddTool(writeTool.Tool()); err != nil {
       <pre><code class="language-go">import (
     "time"
 
-    "github.com/henomis/phero/tool/bash"
+    "github.com/henomis/phero/v2/tool/bash"
 )
 
 bashTool, err := bash.New(
@@ -219,7 +219,7 @@ if err := a.AddTool(bashTool.KillTool());   err != nil { panic(err) }</code></pr
         <code>WithInteractor</code>. This keeps the tool backend-agnostic (terminal, web UI, etc.).
       </p>
 
-      <pre><code class="language-go">import "github.com/henomis/phero/tool/human"
+      <pre><code class="language-go">import "github.com/henomis/phero/v2/tool/human"
 
 humanTool, err := human.New(
     human.WithInteractor(consoleInteractor),
@@ -274,7 +274,7 @@ if err := a.AddTool(humanTool.Tool()); err != nil {
         and a base path into the current conversation, keeping the agent toolset compact.
       </p>
 
-      <pre><code class="language-go">import skilltool "github.com/henomis/phero/tool/skill"
+      <pre><code class="language-go">import skilltool "github.com/henomis/phero/v2/tool/skill"
 
 dispatcher, err := skilltool.New("./skills")
 if err != nil {

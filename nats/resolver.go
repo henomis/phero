@@ -22,7 +22,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 const (

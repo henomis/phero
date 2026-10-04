@@ -1,4 +1,4 @@
-module github.com/henomis/phero
+module github.com/henomis/phero/v2
 
 go 1.26.4
 

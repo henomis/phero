@@ -25,9 +25,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/henomis/phero/embedding"
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/vectorstore"
+	"github.com/henomis/phero/v2/embedding"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/vectorstore"
 )
 
 const (

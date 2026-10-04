@@ -22,11 +22,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
-	simplemem "github.com/henomis/phero/memory/simple"
-	"github.com/henomis/phero/trace"
-	tracejsonfile "github.com/henomis/phero/trace/jsonfile"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
+	simplemem "github.com/henomis/phero/v2/memory/simple"
+	"github.com/henomis/phero/v2/trace"
+	tracejsonfile "github.com/henomis/phero/v2/trace/jsonfile"
 )
 
 // TestAgent_SimpleTextResponse verifies that an agent can execute a single

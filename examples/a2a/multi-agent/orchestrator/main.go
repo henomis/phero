@@ -44,11 +44,11 @@ import (
 
 	sdka2a "github.com/a2aproject/a2a-go/v2/a2a"
 
-	"github.com/henomis/phero/a2a"
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/llm/openai"
-	"github.com/henomis/phero/trace/text"
+	"github.com/henomis/phero/v2/a2a"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/llm/openai"
+	"github.com/henomis/phero/v2/trace/text"
 )
 
 func main() {

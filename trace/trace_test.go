@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/henomis/phero/trace"
+	"github.com/henomis/phero/v2/trace"
 )
 
 // --- Event interface compliance ---

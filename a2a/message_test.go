@@ -21,9 +21,9 @@ import (
 
 	sdka2a "github.com/a2aproject/a2a-go/v2/a2a"
 
-	pheroA2A "github.com/henomis/phero/a2a"
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
+	pheroA2A "github.com/henomis/phero/v2/a2a"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // --- result builders --------------------------------------------------------

@@ -24,12 +24,12 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	oteltrace "go.opentelemetry.io/otel/trace"
 
-	"github.com/henomis/phero/trace"
+	"github.com/henomis/phero/v2/trace"
 )
 
 // instrumentationName is the OpenTelemetry instrumentation scope name used when
 // obtaining a tracer from the global provider.
-const instrumentationName = "github.com/henomis/phero/trace/otel"
+const instrumentationName = "github.com/henomis/phero/v2/trace/otel"
 
 // maxAttrLen bounds the length of free-text span attributes (inputs, outputs,
 // tool arguments) so spans stay a reasonable size.

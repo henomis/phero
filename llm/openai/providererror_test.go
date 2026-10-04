@@ -21,8 +21,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/llm/openai"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/llm/openai"
 )
 
 // failingServer answers every request with status and an OpenAI error body.

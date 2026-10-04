@@ -32,9 +32,9 @@ import (
 	qdrantapi "github.com/qdrant/go-client/qdrant"
 	weaviateclient "github.com/weaviate/weaviate-go-client/v4/weaviate"
 
-	embeddingOpenAI "github.com/henomis/phero/embedding/openai"
-	llmanthropic "github.com/henomis/phero/llm/anthropic"
-	llmopenai "github.com/henomis/phero/llm/openai"
+	embeddingOpenAI "github.com/henomis/phero/v2/embedding/openai"
+	llmanthropic "github.com/henomis/phero/v2/llm/anthropic"
+	llmopenai "github.com/henomis/phero/v2/llm/openai"
 )
 
 // ---- default constants -------------------------------------------------

@@ -23,8 +23,8 @@ import (
 
 	sdka2a "github.com/a2aproject/a2a-go/v2/a2a"
 
-	pheroA2A "github.com/henomis/phero/a2a"
-	"github.com/henomis/phero/agent"
+	pheroA2A "github.com/henomis/phero/v2/a2a"
+	"github.com/henomis/phero/v2/agent"
 )
 
 func TestNew_Validation(t *testing.T) {

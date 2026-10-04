@@ -24,12 +24,12 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/rag"
-	textsplitterrecursive "github.com/henomis/phero/textsplitter/recursive"
-	"github.com/henomis/phero/vectorstore"
-	vsqdrant "github.com/henomis/phero/vectorstore/qdrant"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/rag"
+	textsplitterrecursive "github.com/henomis/phero/v2/textsplitter/recursive"
+	"github.com/henomis/phero/v2/vectorstore"
+	vsqdrant "github.com/henomis/phero/v2/vectorstore/qdrant"
 )
 
 // TestRAG_IngestAndQuery verifies the full RAG pipeline:

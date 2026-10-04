@@ -6,7 +6,7 @@
 
 Phero is a modern Go framework for building multi-agent AI systems. Like ants in a colony, agents in Phero cooperate, communicate, and coordinate toward shared goals, each with specialized roles, working together through a clean, composable architecture.
 
-[![Build Status](https://github.com/henomis/phero/actions/workflows/checks.yml/badge.svg)](https://github.com/henomis/phero/actions/workflows/checks.yml) [![GoDoc](https://godoc.org/github.com/henomis/phero?status.svg)](https://godoc.org/github.com/henomis/phero) [![Go Report Card](https://goreportcard.com/badge/github.com/henomis/phero)](https://goreportcard.com/report/github.com/henomis/phero) [![GitHub release](https://img.shields.io/github/release/henomis/phero.svg)](https://github.com/henomis/phero/releases)
+[![Build Status](https://github.com/henomis/phero/actions/workflows/checks.yml/badge.svg)](https://github.com/henomis/phero/actions/workflows/checks.yml) [![GoDoc](https://godoc.org/github.com/henomis/phero/v2?status.svg)](https://godoc.org/github.com/henomis/phero/v2) [![Go Report Card](https://goreportcard.com/badge/github.com/henomis/phero)](https://goreportcard.com/report/github.com/henomis/phero) [![GitHub release](https://img.shields.io/github/release/henomis/phero.svg)](https://github.com/henomis/phero/releases)
 
 
 
@@ -188,6 +188,6 @@ Inspired by the collaborative intelligence of ant colonies where independent age
 
 ## Links
 
-- **Documentation**: [pkg.go.dev/github.com/henomis/phero](https://pkg.go.dev/github.com/henomis/phero)
+- **Documentation**: [pkg.go.dev/github.com/henomis/phero/v2](https://pkg.go.dev/github.com/henomis/phero/v2)
 - **Issues**: [github.com/henomis/phero/issues](https://github.com/henomis/phero/issues)
 - **Discussions**: [github.com/henomis/phero/discussions](https://github.com/henomis/phero/discussions)

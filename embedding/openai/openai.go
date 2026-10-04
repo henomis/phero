@@ -20,7 +20,7 @@ import (
 
 	openaiapi "github.com/sashabaranov/go-openai"
 
-	"github.com/henomis/phero/embedding"
+	"github.com/henomis/phero/v2/embedding"
 )
 
 // Client implements embedding.Embedder using the OpenAI Embeddings API.

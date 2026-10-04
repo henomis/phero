@@ -22,8 +22,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // textHandler answers every prompt with a fixed text, without an LLM.

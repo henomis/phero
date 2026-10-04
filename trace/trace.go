@@ -17,7 +17,7 @@ package trace
 import (
 	"time"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // UsageSummary aggregates token consumption across a full agent run.

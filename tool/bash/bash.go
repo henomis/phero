@@ -28,7 +28,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // Input represents the input for the bash_tool.

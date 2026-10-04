@@ -18,7 +18,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 type mockSummaryLLM struct {

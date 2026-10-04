@@ -21,7 +21,7 @@ import (
 
 	"github.com/sashabaranov/go-openai"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // Client implements the llm.LLM interface using the OpenAI API.

@@ -24,9 +24,9 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-	"github.com/henomis/phero/llm"
-	phtrace "github.com/henomis/phero/trace"
-	otelbackend "github.com/henomis/phero/trace/otel"
+	"github.com/henomis/phero/v2/llm"
+	phtrace "github.com/henomis/phero/v2/trace"
+	otelbackend "github.com/henomis/phero/v2/trace/otel"
 )
 
 func newTestTracer(t *testing.T) (*otelbackend.Tracer, *tracetest.InMemoryExporter) {

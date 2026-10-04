@@ -24,10 +24,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/henomis/phero/llm"
-	memoryjsonfile "github.com/henomis/phero/memory/jsonfile"
-	memorypsql "github.com/henomis/phero/memory/psql"
-	memorysimple "github.com/henomis/phero/memory/simple"
+	"github.com/henomis/phero/v2/llm"
+	memoryjsonfile "github.com/henomis/phero/v2/memory/jsonfile"
+	memorypsql "github.com/henomis/phero/v2/memory/psql"
+	memorysimple "github.com/henomis/phero/v2/memory/simple"
 )
 
 // TestMemorySimple_SaveRetrieveClear exercises the full lifecycle of the

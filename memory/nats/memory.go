@@ -27,9 +27,9 @@ import (
 
 	"github.com/nats-io/nats.go"
 
-	"github.com/henomis/phero/internal/natskv"
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/memory"
+	"github.com/henomis/phero/v2/internal/natskv"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/memory"
 )
 
 var _ memory.Memory = (*Memory)(nil)

@@ -23,8 +23,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/henomis/phero/trace"
-	"github.com/henomis/phero/trace/jsonfile"
+	"github.com/henomis/phero/v2/trace"
+	"github.com/henomis/phero/v2/trace/jsonfile"
 )
 
 func TestNew_EmptyPath_ReturnsError(t *testing.T) {

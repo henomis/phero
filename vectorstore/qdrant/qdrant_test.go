@@ -21,8 +21,8 @@ import (
 
 	qdrantapi "github.com/qdrant/go-client/qdrant"
 
-	"github.com/henomis/phero/vectorstore"
-	"github.com/henomis/phero/vectorstore/qdrant"
+	"github.com/henomis/phero/v2/vectorstore"
+	"github.com/henomis/phero/v2/vectorstore/qdrant"
 )
 
 // fakeClient returns a *qdrantapi.Client configured to point at a

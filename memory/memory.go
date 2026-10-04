@@ -18,7 +18,7 @@ package memory
 import (
 	"context"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // Memory defines the interface for storing and retrieving conversation history or other

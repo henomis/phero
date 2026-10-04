@@ -26,8 +26,8 @@ import (
 	natsclient "github.com/nats-io/nats.go"
 	natsio "github.com/nats-io/nats.go/micro"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
 )
 
 const protocolVersion = "0.3"

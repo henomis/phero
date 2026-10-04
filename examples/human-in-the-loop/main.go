@@ -26,10 +26,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/llm/openai"
-	"github.com/henomis/phero/tool/human"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/llm/openai"
+	"github.com/henomis/phero/v2/tool/human"
 )
 
 // ActionInput is the input for the simulate_action tool.

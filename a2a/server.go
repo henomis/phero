@@ -26,7 +26,7 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2asrv/push"
 	"github.com/a2aproject/a2a-go/v2/a2asrv/taskstore"
 
-	"github.com/henomis/phero/agent"
+	"github.com/henomis/phero/v2/agent"
 )
 
 // restPathPrefix is the URL path segment used for the HTTP+JSON/SSE transport.

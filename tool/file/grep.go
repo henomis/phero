@@ -24,7 +24,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 const (

@@ -20,8 +20,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // streamingStub implements llm.StreamingLLM, emitting the configured text deltas

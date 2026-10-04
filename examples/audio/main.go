@@ -21,8 +21,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/henomis/phero/llm"
-	llmopenai "github.com/henomis/phero/llm/openai"
+	"github.com/henomis/phero/v2/llm"
+	llmopenai "github.com/henomis/phero/v2/llm/openai"
 )
 
 func main() {

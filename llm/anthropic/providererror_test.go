@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // failingServer answers every request with status, headers and an Anthropic

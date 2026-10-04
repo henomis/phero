@@ -20,7 +20,7 @@ import (
 
 	qdrantapi "github.com/qdrant/go-client/qdrant"
 
-	"github.com/henomis/phero/vectorstore"
+	"github.com/henomis/phero/v2/vectorstore"
 )
 
 var _ vectorstore.Store = (*Store)(nil)

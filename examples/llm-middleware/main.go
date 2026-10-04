@@ -25,9 +25,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/llm/middleware"
-	"github.com/henomis/phero/llm/openai"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/llm/middleware"
+	"github.com/henomis/phero/v2/llm/openai"
 )
 
 func main() {

@@ -21,9 +21,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/henomis/phero/document"
-	"github.com/henomis/phero/embedding"
-	"github.com/henomis/phero/vectorstore"
+	"github.com/henomis/phero/v2/document"
+	"github.com/henomis/phero/v2/embedding"
+	"github.com/henomis/phero/v2/vectorstore"
 )
 
 type stubEmbedder struct{}

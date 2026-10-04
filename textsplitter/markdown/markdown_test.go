@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/henomis/phero/textsplitter"
+	"github.com/henomis/phero/v2/textsplitter"
 )
 
 func TestSplitter_ImplementsSplitter(_ *testing.T) {

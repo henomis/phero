@@ -24,7 +24,7 @@ import (
 
 	natsclient "github.com/nats-io/nats.go"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // natsSubjectParts is the number of dot-separated tokens in a verb-first NATS subject:

@@ -23,10 +23,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/henomis/phero/vectorstore"
-	vspsql "github.com/henomis/phero/vectorstore/psql"
-	vsqdrant "github.com/henomis/phero/vectorstore/qdrant"
-	vsweaviate "github.com/henomis/phero/vectorstore/weaviate"
+	"github.com/henomis/phero/v2/vectorstore"
+	vspsql "github.com/henomis/phero/v2/vectorstore/psql"
+	vsqdrant "github.com/henomis/phero/v2/vectorstore/qdrant"
+	vsweaviate "github.com/henomis/phero/v2/vectorstore/weaviate"
 )
 
 // ---- Qdrant ----------------------------------------------------------------

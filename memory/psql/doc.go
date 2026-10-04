@@ -30,7 +30,7 @@
 //
 //		_ "github.com/jackc/pgx/v5/stdlib"
 //
-//		"github.com/henomis/phero/memory/psql"
+//		"github.com/henomis/phero/v2/memory/psql"
 //	)
 //
 //	db, _ := sql.Open("pgx", os.Getenv("DATABASE_URL"))

@@ -28,9 +28,9 @@ import (
 	"github.com/google/uuid"
 	natsio "github.com/nats-io/nats.go"
 
-	"github.com/henomis/phero/llm"
-	natsmemory "github.com/henomis/phero/memory/nats"
-	"github.com/henomis/phero/tool/kv"
+	"github.com/henomis/phero/v2/llm"
+	natsmemory "github.com/henomis/phero/v2/memory/nats"
+	"github.com/henomis/phero/v2/tool/kv"
 )
 
 // TestKVToolsReadWrite drives the tools the way an agent would: write a note,

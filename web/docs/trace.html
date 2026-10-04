@@ -52,7 +52,7 @@
         <li><code>jsonfile.New(filePath)</code>: appends one JSON record per line (NDJSON) to a file; call <code>Close()</code> when done</li>
         <li><code>otel.New(tracer)</code> / <code>otel.NewDefault()</code>: maps events to OpenTelemetry spans for export to any OTLP backend (Jaeger, Tempo, Honeycomb, …)</li>
       </ul>
-      <p>Import paths: <code>github.com/henomis/phero/trace/text</code>, <code>github.com/henomis/phero/trace/jsonfile</code>, and <code>github.com/henomis/phero/trace/otel</code>.</p>
+      <p>Import paths: <code>github.com/henomis/phero/v2/trace/text</code>, <code>github.com/henomis/phero/v2/trace/jsonfile</code>, and <code>github.com/henomis/phero/v2/trace/otel</code>.</p>
     </section>
 
     <section>
@@ -72,7 +72,7 @@
     "go.opentelemetry.io/otel"
     "go.opentelemetry.io/otel/sdk/trace"
 
-    pherotel "github.com/henomis/phero/trace/otel"
+    pherotel "github.com/henomis/phero/v2/trace/otel"
 )
 
 // Application wires the SDK + exporter (done once at startup).
@@ -100,10 +100,10 @@ a.SetTracer(pherotel.NewDefault())</code></pre>
     "fmt"
     "os"
 
-    "github.com/henomis/phero/agent"
-    "github.com/henomis/phero/llm"
-    "github.com/henomis/phero/llm/openai"
-    "github.com/henomis/phero/trace/text"
+    "github.com/henomis/phero/v2/agent"
+    "github.com/henomis/phero/v2/llm"
+    "github.com/henomis/phero/v2/llm/openai"
+    "github.com/henomis/phero/v2/trace/text"
 )
 
 func main() {
@@ -152,7 +152,7 @@ result, err := tracedClient.Execute(ctx, messages, llm.WithTools(tools...))</cod
         Each line is a self-contained JSON record with a <code>type</code>, <code>timestamp</code>, and <code>data</code> field.
       </p>
 
-      <pre><code class="language-go">import "github.com/henomis/phero/trace/jsonfile"
+      <pre><code class="language-go">import "github.com/henomis/phero/v2/trace/jsonfile"
 
 t, err := jsonfile.New("trace.ndjson")
 if err != nil {

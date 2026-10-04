@@ -22,10 +22,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/llm/openai"
-	"github.com/henomis/phero/trace"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/llm/openai"
+	"github.com/henomis/phero/v2/trace"
 )
 
 // CalculatorInput defines the parameters for the calculator tool.

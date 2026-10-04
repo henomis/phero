@@ -23,8 +23,8 @@ import (
 	"strconv"
 	"strings"
 
-	sqlutil "github.com/henomis/phero/internal/sql"
-	"github.com/henomis/phero/vectorstore"
+	sqlutil "github.com/henomis/phero/v2/internal/sql"
+	"github.com/henomis/phero/v2/vectorstore"
 )
 
 var _ vectorstore.Store = (*Store)(nil)

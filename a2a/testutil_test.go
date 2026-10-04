@@ -20,9 +20,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	pheroA2A "github.com/henomis/phero/a2a"
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
+	pheroA2A "github.com/henomis/phero/v2/a2a"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // stubLLM returns responses in the order they are given. The last element

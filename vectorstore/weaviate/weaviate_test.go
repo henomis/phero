@@ -21,8 +21,8 @@ import (
 
 	weaviateclient "github.com/weaviate/weaviate-go-client/v4/weaviate"
 
-	"github.com/henomis/phero/vectorstore"
-	"github.com/henomis/phero/vectorstore/weaviate"
+	"github.com/henomis/phero/v2/vectorstore"
+	"github.com/henomis/phero/v2/vectorstore/weaviate"
 )
 
 // fakeClient returns a *weaviateclient.Client pointing at a non-listening

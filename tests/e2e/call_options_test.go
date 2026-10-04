@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 type cityFacts struct {

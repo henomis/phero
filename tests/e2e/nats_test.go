@@ -24,10 +24,10 @@ import (
 
 	natsio "github.com/nats-io/nats.go"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
-	natsmemory "github.com/henomis/phero/memory/nats"
-	natsagent "github.com/henomis/phero/nats"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
+	natsmemory "github.com/henomis/phero/v2/memory/nats"
+	natsagent "github.com/henomis/phero/v2/nats"
 )
 
 // startNATSAgent creates a greeter agent wrapped as a NATS server and starts it

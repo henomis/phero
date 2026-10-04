@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // TestOpenAILLM_TextGeneration verifies that the OpenAI-compatible client

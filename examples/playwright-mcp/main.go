@@ -23,10 +23,10 @@ import (
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
-	"github.com/henomis/phero/llm/openai"
-	pheromcp "github.com/henomis/phero/mcp"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/llm/openai"
+	pheromcp "github.com/henomis/phero/v2/mcp"
 )
 
 const mcpEndpoint = "http://localhost:8931/mcp"

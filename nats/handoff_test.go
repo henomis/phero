@@ -22,8 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/henomis/phero/agent"
-	"github.com/henomis/phero/llm"
+	"github.com/henomis/phero/v2/agent"
+	"github.com/henomis/phero/v2/llm"
 )
 
 // resultHandler answers every prompt with a fixed result.

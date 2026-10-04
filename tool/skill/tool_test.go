@@ -21,8 +21,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/henomis/phero/llm"
-	skillpkg "github.com/henomis/phero/skill"
+	"github.com/henomis/phero/v2/llm"
+	skillpkg "github.com/henomis/phero/v2/skill"
 )
 
 type stubParser struct {
