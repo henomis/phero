@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -427,9 +428,15 @@ func (a *Agent) saveSession(ctx context.Context, messages []llm.Message, session
 		return nil
 	}
 
+	// An empty answer is not saved: replayed, it would break later runs.
+	turn := replayable(messages[sessionIndex:])
+	if len(turn) == 0 {
+		return nil
+	}
+
 	start := time.Now()
-	count := len(messages) - sessionIndex
-	err := a.memory.Save(ctx, messages[sessionIndex:])
+	count := len(turn)
+	err := a.memory.Save(ctx, turn)
 
 	duration := time.Since(start)
 	if err == nil {
@@ -642,6 +649,9 @@ func (a *Agent) prepareSession(
 			return nil, 0, err
 		}
 
+		// A memory may hold empty answers saved before they were filtered out.
+		memoryMessages = replayable(memoryMessages)
+
 		stats.recordMemoryRetrieve(len(memoryMessages), duration)
 
 		a.tracer.Trace(trace.MemoryRetrieveEvent{
@@ -664,6 +674,61 @@ func (a *Agent) prepareSession(
 	}
 
 	return messages, sessionIndex, nil
+}
+
+// replayable returns messages without the assistant messages that carry
+// nothing: no tool call, and no text, image or reasoning text. A model
+// sometimes answers with nothing at all; kept in memory, that turn is replayed
+// on every later run, and OpenAI-compatible providers receive an assistant
+// message without content, which some reject (Ollama: 400 "invalid message
+// content type: <nil>"), so the agent could never run again. messages is
+// returned as is when it holds no such message.
+func replayable(messages []llm.Message) []llm.Message {
+	if !slices.ContainsFunc(messages, isEmptyAnswer) {
+		return messages
+	}
+
+	out := make([]llm.Message, 0, len(messages))
+
+	for _, m := range messages {
+		if !isEmptyAnswer(m) {
+			out = append(out, m)
+		}
+	}
+
+	return out
+}
+
+// isEmptyAnswer reports whether m is an assistant message with nothing to
+// replay. A reasoning part counts only for its text: a part that holds a
+// provider signature alone gives the model nothing to read.
+func isEmptyAnswer(m llm.Message) bool {
+	if m.Role != llm.RoleAssistant || len(m.ToolCalls) > 0 {
+		return false
+	}
+
+	for _, p := range m.Parts {
+		switch p.Type {
+		case llm.ContentTypeText, llm.ContentTypeReasoning:
+			if strings.TrimSpace(p.Text) != "" {
+				return false
+			}
+		case llm.ContentTypeRedactedReasoning:
+			if p.Text != "" {
+				return false
+			}
+		case llm.ContentTypeImageURL:
+			if p.ImageURL != "" {
+				return false
+			}
+		case llm.ContentTypeImageBase64:
+			if p.ImageBase64 != "" {
+				return false
+			}
+		}
+	}
+
+	return true
 }
 
 // nonBlankParts returns parts without its whitespace-only text parts.
