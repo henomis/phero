@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Phero — the chemical language of AI agents</title>
-<meta name="description" content="Phero is a Go framework for building multi-agent AI systems. Composable primitives for agent orchestration, tools, RAG, memory, MCP, A2A and NATS — provider-agnostic across OpenAI-compatible and Anthropic models." />
+<meta name="description" content="Phero is a Go framework for building multi-agent AI systems. Composable primitives for agent orchestration, tools, RAG, memory, MCP, A2A and NATS — provider-agnostic across OpenAI-compatible, Anthropic and Google Gemini models." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -145,7 +145,7 @@
     <article class="card reveal">
       <div class="card__ico">🎨</div>
       <h3>Developer-friendly</h3>
-      <p>Clean APIs, opt-in tracing, and OpenAI-compatible plus Anthropic support out of the box.</p>
+      <p>Clean APIs, opt-in tracing, and OpenAI-compatible, Anthropic and Google Gemini support out of the box.</p>
     </article>
     <article class="card reveal">
       <div class="card__ico">🪶</div>
@@ -170,7 +170,7 @@
     <article class="feature reveal"><h3><span class="feature__ico">🤝</span>Agent orchestration</h3><p>Multi-agent workflows with role specialization, coordination and runtime handoffs.</p></article>
     <article class="feature reveal"><h3><span class="feature__ico">🌐</span>A2A protocol</h3><p>Expose any agent as an HTTP A2A server, or call remote A2A agents as local tools.</p></article>
     <article class="feature reveal"><h3><span class="feature__ico">🔀</span>NATS Agent Protocol</h3><p>Register agents as NATS micro services over pub/sub — wire-compatible with the TS and Python SDKs.</p></article>
-    <article class="feature reveal"><h3><span class="feature__ico">🧩</span>LLM abstraction</h3><p>One interface over OpenAI-compatible endpoints (OpenAI, Ollama, …) and Anthropic.</p></article>
+    <article class="feature reveal"><h3><span class="feature__ico">🧩</span>LLM abstraction</h3><p>One interface over OpenAI-compatible endpoints (OpenAI, Ollama, …), Anthropic and Google Gemini.</p></article>
     <article class="feature reveal"><h3><span class="feature__ico">🛠️</span>Function tools</h3><p>Expose Go functions as callable tools with automatic JSON Schema generation.</p></article>
     <article class="feature reveal"><h3><span class="feature__ico">📚</span>RAG</h3><p>Built-in retrieval-augmented generation with vector storage and semantic search.</p></article>
     <article class="feature reveal"><h3><span class="feature__ico">🧠</span>Skills system</h3><p>Define reusable agent capabilities in <code>SKILL.md</code> files.</p></article>
@@ -207,6 +207,7 @@
         <span class="pkg"><strong>llm</strong> · typed messages, tools, middleware</span>
         <span class="pkg"><strong>llm/openai</strong> · OpenAI-compatible</span>
         <span class="pkg"><strong>llm/anthropic</strong> · Anthropic</span>
+        <span class="pkg"><strong>llm/google</strong> · Google Gemini</span>
       </div>
     </div>
     <div class="layer reveal">

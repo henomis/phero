@@ -15,7 +15,7 @@ Phero is a modern Go framework for building multi-agent AI systems. Like ants in
 - **🤝 Agent orchestration** Multi-agent workflows with role specialization, coordination, and agent handoffs
 - **🧩 Composable primitives** Small, focused packages that solve specific problems
 - **🔧 Tool-first design** Built-in support for function tools, skills, RAG, and MCP
-- **🎨 Developer-friendly** Clean APIs, opt-in tracing, OpenAI-compatible + Anthropic support
+- **🎨 Developer-friendly** Clean APIs, opt-in tracing, OpenAI-compatible, Anthropic and Google Gemini support
 - **🪶 Lightweight** No heavy dependencies; just Go and your choice of LLM provider
 
 
@@ -28,7 +28,7 @@ Phero is a modern Go framework for building multi-agent AI systems. Like ants in
 - **🔀 Agent handoffs** Transfer control between agents at runtime; `Result.Handoffs` tells you where to route next and with what context (more than one means fan-out)
 - **🌐 A2A protocol** Expose any agent as an HTTP A2A server, or call remote A2A agents as local tools
 - **🔀 NATS Agent Protocol** Register agents as NATS micro services and discover/call them over pub/sub; wire-compatible with TypeScript and Python SDKs
-- **🧩 LLM abstraction** Work with OpenAI-compatible endpoints (OpenAI, Ollama, etc.) and Anthropic
+- **🧩 LLM abstraction** Work with OpenAI-compatible endpoints (OpenAI, Ollama, etc.), Anthropic and Google Gemini
 - **🖼️ Multimodal input** Mix text and images with typed content parts (`llm.Text`, `llm.ImageURL`, `llm.ImageFile`)
 - **🔊 Audio I/O** OpenAI backend supports speech-to-text and text-to-speech via `llm.Transcriber` and `llm.SpeechSynthesizer`
 - **🧱 LLM middleware** Compose reusable cross-cutting behaviors around any backend with `llm.Use(...)` (retry, rate-limit, guardrails, and semantic response caching)
@@ -48,7 +48,7 @@ Phero is a modern Go framework for building multi-agent AI systems. Like ants in
 ### Requirements
 
 - Go 1.25.5 or later
-- An LLM provider (OpenAI / Ollama / OpenAI-compatible endpoint, or Anthropic)
+- An LLM provider (OpenAI / Ollama / OpenAI-compatible endpoint, Anthropic, or Google Gemini)
 
 
 
@@ -85,6 +85,7 @@ Phero is organized into focused packages, each solving a specific problem:
 - **`llm`** Provider-agnostic chat interface with typed messages/content parts, function tools, JSON Schema utilities, audio interfaces, and LLM middleware composition
 - **`llm/openai`** OpenAI-compatible client (works with OpenAI, Ollama, and compatible endpoints)
 - **`llm/anthropic`** Anthropic API client
+- **`llm/google`** Google Gemini API client (official `google.golang.org/genai` SDK)
 
 ### 🧠 Knowledge Layer
 
