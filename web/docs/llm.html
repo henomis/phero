@@ -50,11 +50,11 @@
       <h2>Using an LLM backend</h2>
       <p>
         Any backend that implements <code>llm.LLM</code> can power agents and tools.
-        Phero includes an OpenAI-compatible client at <code>llm/openai</code> and an Anthropic Messages API client at <code>llm/anthropic</code>.
+        Phero includes an OpenAI-compatible client at <code>llm/openai</code> and an Anthropic Messages API client at <code>llm/anthropic</code> and a Gemini API client at <code>llm/google</code>.
       </p>
 
       <ul>
-        <li>Choose a backend (e.g. <code>llm/openai</code>, <code>llm/anthropic</code>, or your own implementation)</li>
+        <li>Choose a backend (e.g. <code>llm/openai</code>, <code>llm/anthropic</code>, <code>llm/google</code>, or your own implementation)</li>
         <li>Pass that client into <a href="agent.html">agent.New</a></li>
         <li>Optionally attach tools created via <code>llm.NewTool</code></li>
       </ul>
@@ -196,6 +196,56 @@ fmt.Println("answer:", result.Message.TextContent())</code></pre>
     anthropic.WithAdaptiveThinking(),
     anthropic.WithEffort(anthropic.EffortXHigh),
 )</code></pre>
+    </section>
+
+    <section>
+      <h2>Google backend</h2>
+      <p>
+        <code>llm/google</code> implements <code>llm.LLM</code> and <code>llm.StreamingLLM</code> using the Gemini API,
+        through Google's official Go SDK (<code>google.golang.org/genai</code>). Tools, tool choice, structured output
+        and streaming work as with the other backends.
+      </p>
+
+      <pre><code class="language-go">import (
+    "os"
+
+    "github.com/henomis/phero/v2/llm/google"
+)
+
+llmClient := google.New(
+    os.Getenv("GEMINI_API_KEY"),
+    google.WithModel("gemini-3.5-flash"),
+)</code></pre>
+
+      <p>
+        If you pass an empty API key, the SDK falls back to the <code>GOOGLE_API_KEY</code> or
+        <code>GEMINI_API_KEY</code> environment variable.
+      </p>
+      <p>
+        Gemini 3 models attach a <em>thought signature</em> to function calls and reject a conversation that does not
+        send it back on the same call. The client keeps each signature in a reasoning part of the assistant message
+        (with empty text, so it never shows in <code>ReasoningContent()</code> or <code>TextContent()</code>) and puts
+        it back on the next request, so agents keep working across tool turns without any extra code.
+      </p>
+      <p>Available options:</p>
+      <ul>
+        <li><code>WithModel(m)</code>: Gemini model name (default <code>"gemini-3.5-flash"</code>)</li>
+        <li><code>WithTemperature(t)</code>: sampling temperature; when unset the field is omitted and the model
+          default applies, as Google recommends for Gemini 3</li>
+        <li><code>WithMaxTokens(n)</code>: maximum output tokens</li>
+        <li><code>WithThinkingLevel(l)</code>: how much a Gemini 3 model thinks: <code>ThinkingMinimal</code>,
+          <code>ThinkingLow</code>, <code>ThinkingMedium</code> or <code>ThinkingHigh</code></li>
+        <li><code>WithThinkingBudget(n)</code>: thinking budget in tokens, for models that take a budget</li>
+        <li><code>WithIncludeThoughts()</code>: return thought summaries as reasoning parts (and
+          <code>ReasoningDelta</code> when streaming)</li>
+        <li><code>WithBaseURL(url)</code>: override the API endpoint (useful for proxies or tests)</li>
+      </ul>
+      <p>
+        Token usage maps cached prompt tokens to <code>CacheReadTokens</code> and counts thinking tokens as output.
+        API errors are wrapped in <code>*llm.ProviderError</code>, with <code>RetryAfter</code> read from Gemini's
+        <code>RetryInfo</code>. Images must be inline (<code>llm.ImageBase64</code> / <code>llm.ImageFile</code>):
+        the Gemini API does not fetch image URLs.
+      </p>
     </section>
 
     <section>

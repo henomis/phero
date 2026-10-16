@@ -1045,3 +1045,85 @@ func TestRun_BlankInputContinuesFromMemory(t *testing.T) {
 		})
 	}
 }
+
+// emptyAnswer is an assistant turn with nothing in it, as a model sometimes
+// returns.
+func emptyAnswer(parts ...llm.ContentPart) *llm.Message {
+	return &llm.Message{Role: llm.RoleAssistant, Parts: parts}
+}
+
+func TestRun_Memory_EmptyAnswerNotSaved(t *testing.T) {
+	mem := &stubMemory{}
+
+	a := mustNew(t, makeStub(&llm.Result{Message: emptyAnswer()}, nil), "agent", "desc")
+	a.SetMemory(mem)
+
+	if _, err := a.Run(context.Background(), llm.Text("hello")); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(mem.saved) != 1 || mem.saved[0].Role != llm.RoleUser {
+		t.Fatalf("saved = %+v, want the user turn only", mem.saved)
+	}
+}
+
+func TestRun_Memory_NothingLeftToSave(t *testing.T) {
+	mem := &stubMemory{retrieved: []llm.Message{llm.UserMessage(llm.Text("earlier"))}}
+
+	a := mustNew(t, makeStub(&llm.Result{Message: emptyAnswer(llm.Text("  "))}, nil), "agent", "desc")
+	a.SetMemory(mem)
+
+	// Blank input continues from memory: the run's only message is the empty answer.
+	if _, err := a.Run(context.Background(), llm.Text("")); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if mem.saved != nil {
+		t.Fatalf("saved = %+v, want no Save", mem.saved)
+	}
+}
+
+// Empty answers saved before they were filtered are dropped on the way back
+// in; every assistant turn that carries something is kept, in order.
+func TestRun_Memory_EmptyAnswerNotReplayed(t *testing.T) {
+	call := llm.ToolCall{ID: "c1", Type: llm.ToolTypeFunction, Function: llm.FunctionCall{Name: "f", Arguments: "{}"}}
+	kept := []llm.Message{
+		llm.UserMessage(llm.Text("q1")),
+		llm.AssistantMessage(nil, call),
+		llm.ToolResultMessage("c1", llm.Text("r1")),
+		llm.AssistantMessage([]llm.ContentPart{llm.Reasoning("thinking", "sig")}),
+		llm.AssistantMessage([]llm.ContentPart{llm.ImageBase64("image/png", "aGk=")}),
+		llm.UserMessage(llm.Text("q2")),
+		llm.AssistantMessage([]llm.ContentPart{llm.Text("a2")}),
+	}
+
+	stored := []llm.Message{
+		kept[0], *emptyAnswer(), kept[1], kept[2], kept[3], kept[4],
+		kept[5], *emptyAnswer(llm.Text(" \n")), *emptyAnswer(llm.Reasoning("", "signature-only")), kept[6],
+	}
+
+	var got []llm.Message
+
+	client := llm.Func(func(_ context.Context, msgs []llm.Message, _ ...llm.CallOption) (*llm.Result, error) {
+		got = msgs
+		return textResult("a3"), nil
+	})
+
+	a := mustNew(t, client, "agent", "desc")
+	a.SetMemory(&stubMemory{retrieved: stored})
+
+	if _, err := a.Run(context.Background(), llm.Text("q3")); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// system prompt, the kept history, the new question
+	if len(got) != len(kept)+2 {
+		t.Fatalf("sent %d messages, want %d: %+v", len(got), len(kept)+2, got)
+	}
+
+	for i, want := range kept {
+		if m := got[i+1]; m.Role != want.Role || len(m.Parts) != len(want.Parts) || len(m.ToolCalls) != len(want.ToolCalls) {
+			t.Errorf("message %d = %+v, want %+v", i, m, want)
+		}
+	}
+}

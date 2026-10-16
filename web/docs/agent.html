@@ -310,6 +310,12 @@ a.SetTracer(text.New(os.Stderr))</code></pre>
         If you attach a <code>memory.Memory</code>, the agent will retrieve messages before each run and will save the
         conversation at the end of the call.
       </p>
+      <p>
+        An empty answer (an assistant message with no text, image, reasoning or tool call, which some models return
+        now and then) is neither saved nor replayed: sent back, it would reach OpenAI-compatible providers as an
+        assistant message without content, which some reject, and every later run would fail. Empty answers already
+        in a memory are dropped when it is read.
+      </p>
 
       <pre><code class="language-go">// From examples/conversational-agent (edited for brevity)
 
