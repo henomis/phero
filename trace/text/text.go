@@ -15,262 +15,288 @@
 package text
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/trace"
 )
 
-const noTools = "none"
-
 // ANSI colour/style escape codes.
 const (
-	ansiReset     = "\033[0m"
-	ansiBold      = "\033[1m"
-	ansiDim       = "\033[2m"
-	ansiRed       = "\033[31m"
-	ansiGreen     = "\033[32m"
-	ansiYellow    = "\033[33m"
-	ansiBlue      = "\033[34m"
-	ansiMagenta   = "\033[35m"
-	ansiCyan      = "\033[36m"
-	ansiWhite     = "\033[37m"
-	ansiBoldWhite = "\033[1;37m"
-	ansiBoldRed   = "\033[1;31m"
-
-	truncateShortLen = 120
-	truncateLongLen  = 200
+	ansiReset   = "\033[0m"
+	ansiBold    = "\033[1m"
+	ansiDim     = "\033[2m"
+	ansiRed     = "\033[31m"
+	ansiGreen   = "\033[32m"
+	ansiYellow  = "\033[33m"
+	ansiBlue    = "\033[34m"
+	ansiMagenta = "\033[35m"
+	ansiCyan    = "\033[36m"
 )
 
-// Tracer writes human-readable, colour-coded trace lines to an io.Writer.
-//
-// Each line has the format:
-//
-//	HH:MM:SS.mmm [agent] ICON  detail
-//
-// Tracer is safe for concurrent use.
-type Tracer struct {
-	mu sync.Mutex
-	w  io.Writer
+const (
+	indentUnit = "  "
+	timeLayout = "15:04:05.000"
+)
+
+// Processor prints spans as an indented tree. It is safe for concurrent use.
+type Processor struct {
+	mu      sync.Mutex
+	w       io.Writer
+	verbose bool
+	maxLen  int
+	depth   map[trace.SpanID]int
 }
 
-// New returns a Tracer that writes to w.
-//
-// Pass os.Stderr (or os.Stdout) for terminal output.
-func New(w io.Writer) *Tracer {
-	return &Tracer{w: w}
+var _ trace.Processor = (*Processor)(nil)
+
+// Option configures a Processor.
+type Option func(*Processor)
+
+// WithVerbose prints a line when every span starts, not only agent runs.
+func WithVerbose() Option {
+	return func(p *Processor) { p.verbose = true }
 }
 
-// NewDefault returns a Tracer that writes to os.Stderr.
-func NewDefault() *Tracer {
-	return New(os.Stderr)
+// WithMaxLen truncates printed content to n runes. Zero (the default) prints
+// everything.
+func WithMaxLen(n int) Option {
+	return func(p *Processor) { p.maxLen = n }
 }
 
-// Trace handles a single event and writes a formatted line to the writer.
-func (t *Tracer) Trace(event trace.Event) {
-	line := t.format(event)
-	if line == "" {
+// New returns a Processor that writes to w.
+func New(w io.Writer, opts ...Option) *Processor {
+	p := &Processor{w: w, depth: make(map[trace.SpanID]int)}
+	for _, opt := range opts {
+		opt(p)
+	}
+
+	return p
+}
+
+// NewDefault returns a Processor that writes to os.Stderr.
+func NewDefault(opts ...Option) *Processor {
+	return New(os.Stderr, opts...)
+}
+
+// OnStart records the span depth and prints a start line for agent runs, or
+// for every span in verbose mode.
+func (p *Processor) OnStart(_ context.Context, s *trace.SpanData) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	depth := 0
+	if d, ok := p.depth[s.Parent.SpanID]; ok {
+		depth = d + 1
+	}
+
+	p.depth[s.Context.SpanID] = depth
+
+	if s.Kind != trace.KindRun && !p.verbose {
 		return
 	}
 
-	t.mu.Lock()
-	_, _ = fmt.Fprintln(t.w, line)
-	t.mu.Unlock()
+	p.writeLine(s.Start, depth, ansiBlue+"▶"+ansiReset, ansiBold+s.Name+ansiReset, p.startDetail(s))
 }
 
-//nolint:gocognit,funlen
-func (t *Tracer) format(event trace.Event) string {
-	switch e := event.(type) {
-	case trace.AgentStartEvent:
-		ts := e.Timestamp.Format("15:04:05.000")
+// OnEnd prints the span's end line and its events.
+func (p *Processor) OnEnd(s *trace.SpanData) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
-		return fmt.Sprintf("%s%s %s[%s]%s %s▶  AgentStart%s  input=%q",
-			ansiBoldWhite, ts, ansiDim, e.AgentName, ansiReset,
-			ansiBoldWhite, ansiReset,
-			truncate(e.Input, truncateShortLen))
+	depth := p.depth[s.Context.SpanID]
+	delete(p.depth, s.Context.SpanID)
 
-	case trace.AgentEndEvent:
-		ts := e.Timestamp.Format("15:04:05.000")
-		if e.Err != nil {
-			return fmt.Sprintf("%s%s %s[%s]%s %s■  AgentEnd%s  iterations=%d error=%v",
-				ansiBoldRed, ts, ansiDim, e.AgentName, ansiReset,
-				ansiBoldRed, ansiReset,
-				e.Iterations, e.Err)
-		}
+	icon := ansiGreen + "✔" + ansiReset
+	if s.Err != nil {
+		icon = ansiRed + "✖" + ansiReset
+	}
 
-		return fmt.Sprintf("%s%s %s[%s]%s %s■  AgentEnd%s  iterations=%d output=%q",
-			ansiBoldWhite, ts, ansiDim, e.AgentName, ansiReset,
-			ansiBoldWhite, ansiReset,
-			e.Iterations, truncate(e.Output, truncateShortLen))
+	detail := p.endDetail(s)
+	if s.Err != nil {
+		detail = strings.TrimSpace(detail + " " + ansiRed + "err=" + p.cut(s.Err.Error()) + ansiReset)
+	}
 
-	case trace.AgentIterationEvent:
-		ts := e.Timestamp.Format("15:04:05.000")
+	head := fmt.Sprintf("%s%s%s %s(%s)%s",
+		ansiBold, s.Name, ansiReset, ansiDim, s.Duration().Round(time.Microsecond), ansiReset)
+	p.writeLine(s.End, depth, icon, head, detail)
 
-		return fmt.Sprintf("%s%s %s[%s] ↻  iteration=%d%s",
-			ansiDim, ts, ansiDim, e.AgentName,
-			e.Iteration, ansiReset)
+	for _, e := range s.Events {
+		p.writeLine(e.Time, depth+1, ansiYellow+"•"+ansiReset, e.Name, formatAttrs(e.Attrs))
+	}
+}
 
-	case trace.AgentRunSummaryEvent:
-		ts := e.Timestamp.Format("15:04:05.000")
-		summary := e.Summary
-		tools := noTools
+// Shutdown does nothing; output is written synchronously.
+func (*Processor) Shutdown(context.Context) error { return nil }
 
-		if len(summary.Tools) > 0 {
-			parts := make([]string, 0, len(summary.Tools))
-			for _, tool := range summary.Tools {
-				parts = append(parts, fmt.Sprintf("%s=%d/%d", tool.ToolName, tool.Calls, tool.Errors))
-			}
+func (p *Processor) writeLine(t time.Time, depth int, icon, head, detail string) {
+	line := fmt.Sprintf("%s%s%s %s%s %s",
+		ansiDim, t.Format(timeLayout), ansiReset, strings.Repeat(indentUnit, depth), icon, head)
+	if detail != "" {
+		line += " " + detail
+	}
 
-			tools = strings.Join(parts, ", ")
-		}
+	_, _ = fmt.Fprintln(p.w, line)
+}
 
-		handoff := ""
-		if len(summary.HandoffAgents) > 0 {
-			handoff = fmt.Sprintf(" handoff=%s", strings.Join(summary.HandoffAgents, ","))
-		}
-
-		errText := ""
-		if summary.Error != "" {
-			errText = fmt.Sprintf(" error=%q", truncate(summary.Error, truncateShortLen))
-		}
-
-		cost := ""
-		if summary.Usage.CostUSD > 0 {
-			cost = fmt.Sprintf(" cost=$%.4f", summary.Usage.CostUSD)
-		}
-
-		return fmt.Sprintf(
-			"%s%s %s[%s]%s %s≡  RunSummary%s  iterations=%d llm_calls=%d"+
-				" tool_calls=%d tool_errors=%d memory=%d/%d tokens=%d/%d%s"+
-				" latency(total=%s llm=%s tool=%s memory=%s) tools=[%s]%s%s",
-			ansiBoldWhite, ts, ansiDim, summary.AgentName, ansiReset,
-			ansiBoldWhite, ansiReset,
-			summary.Iterations, summary.LLMCalls, summary.ToolCalls, summary.ToolErrors,
-			summary.MemoryRetrieved, summary.MemorySaved,
-			summary.Usage.InputTokens, summary.Usage.OutputTokens, cost,
-			summary.Latency.Total, summary.Latency.LLM, summary.Latency.Tool, summary.Latency.Memory,
-			tools, handoff, errText)
-
-	case trace.LLMRequestEvent:
-		ts := e.Timestamp.Format("15:04:05.000")
-		agent := agentLabel(e.AgentName)
-		iter := iterLabel(e.Iteration)
-
-		tools := noTools
-		if len(e.ToolNames) > 0 {
-			tools = strings.Join(e.ToolNames, ", ")
-		}
-
-		return fmt.Sprintf("%s%s%s %s→  LLMRequest%s%s  messages=%d tools=[%s]",
-			ansiBlue, ts, agent,
-			ansiBold, ansiReset, iter,
-			e.MessageCount, tools)
-
-	case trace.LLMResponseEvent:
-		ts := e.Timestamp.Format("15:04:05.000")
-		agent := agentLabel(e.AgentName)
-		iter := iterLabel(e.Iteration)
-		content := ""
-		toolCalls := 0
-
-		if e.Message != nil {
-			content = truncate(e.Message.TextContent(), truncateShortLen)
-			toolCalls = len(e.Message.ToolCalls)
-		}
-
-		tokens := ""
-		if e.Usage != nil {
-			tokens = fmt.Sprintf(" in=%d out=%d", e.Usage.InputTokens, e.Usage.OutputTokens)
-		}
-
-		return fmt.Sprintf("%s%s%s %s←  LLMResponse%s%s%s  tool_calls=%d content=%q",
-			ansiCyan, ts, agent,
-			ansiBold, ansiReset, iter, tokens,
-			toolCalls, content)
-
-	case trace.ReasoningEvent:
-		ts := e.Timestamp.Format("15:04:05.000")
-		agent := agentLabel(e.AgentName)
-		iter := iterLabel(e.Iteration)
-
-		return fmt.Sprintf("%s%s%s %s🧠 Reasoning%s%s  %q",
-			ansiMagenta, ts, agent,
-			ansiBold, ansiReset, iter,
-			truncate(e.Content, truncateLongLen))
-
-	case trace.ToolCallEvent:
-		ts := e.Timestamp.Format("15:04:05.000")
-
-		return fmt.Sprintf("%s%s %s[%s]%s %s⚙  ToolCall%s  iter=%d tool=%s args=%s",
-			ansiYellow, ts, ansiDim, e.AgentName, ansiReset,
-			ansiYellow, ansiReset,
-			e.Iteration, e.ToolName, truncate(e.Arguments, truncateLongLen))
-
-	case trace.ToolResultEvent:
-		ts := e.Timestamp.Format("15:04:05.000")
-		if e.Err != nil {
-			return fmt.Sprintf("%s%s %s[%s]%s %s✗  ToolResult%s  iter=%d tool=%s error=%v",
-				ansiRed, ts, ansiDim, e.AgentName, ansiReset,
-				ansiRed, ansiReset,
-				e.Iteration, e.ToolName, e.Err)
-		}
-
-		return fmt.Sprintf("%s%s %s[%s]%s %s✓  ToolResult%s  iter=%d tool=%s result=%s",
-			ansiGreen, ts, ansiDim, e.AgentName, ansiReset,
-			ansiGreen, ansiReset,
-			e.Iteration, e.ToolName, truncate(e.Result, truncateLongLen))
-
-	case trace.MemorySaveEvent:
-		ts := e.Timestamp.Format("15:04:05.000")
-
-		return fmt.Sprintf("%s%s %s[%s]%s %s⟣  MemorySave%s  count=%d",
-			ansiMagenta, ts, ansiDim, e.AgentName, ansiReset,
-			ansiMagenta, ansiReset,
-			e.Count)
-
-	case trace.MemoryRetrieveEvent:
-		ts := e.Timestamp.Format("15:04:05.000")
-
-		return fmt.Sprintf("%s%s %s[%s]%s %s⟤  MemoryRetrieve%s  count=%d",
-			ansiMagenta, ts, ansiDim, e.AgentName, ansiReset,
-			ansiMagenta, ansiReset,
-			e.Count)
-
+func (p *Processor) startDetail(s *trace.SpanData) string {
+	switch pl := s.Payload.(type) {
+	case *trace.Run:
+		return kv("input", p.cut(llm.TextContent(pl.Input...)))
+	case *trace.ToolCall:
+		return kv("args", p.cut(pl.Arguments))
 	default:
 		return ""
 	}
 }
 
-// agentLabel returns " [name]" when name is non-empty, or "" for standalone usage.
-func agentLabel(name string) string {
-	if name == "" {
+func (p *Processor) endDetail(s *trace.SpanData) string {
+	switch pl := s.Payload.(type) {
+	case *trace.Run:
+		return p.runDetail(pl, &s.Totals)
+	case *trace.LLMCall:
+		return p.llmDetail(pl)
+	case *trace.ToolCall:
+		return join(kv("args", p.cut(pl.Arguments)), kv("result", p.cut(pl.Result)))
+	case *trace.Handoff:
+		return join(pl.From+" → "+pl.To, kv("context", p.cut(pl.Context)))
+	case *trace.Memory:
+		return join(kv("op", string(pl.Op)), fmt.Sprintf("count=%d", pl.Count), kv("query", p.cut(pl.Query)))
+	case *trace.Retrieval:
+		return join(kv("query", p.cut(pl.Query)), fmt.Sprintf("top_k=%d hits=%d", pl.TopK, len(pl.Hits)))
+	case *trace.Embedding:
+		return join(kv("model", pl.Model), fmt.Sprintf("inputs=%d", pl.Inputs))
+	case *trace.Middleware:
+		return p.middlewareDetail(pl)
+	case *trace.Custom:
+		return kv("type", pl.Type)
+	default:
 		return ""
 	}
-
-	return fmt.Sprintf(" %s[%s]%s", ansiDim, name, ansiReset)
 }
 
-// iterLabel returns " iter=N" when n > 0, or "" for standalone usage.
-func iterLabel(n int) string {
-	if n == 0 {
-		return ""
+func (p *Processor) runDetail(r *trace.Run, t *trace.Totals) string {
+	parts := []string{
+		ansiCyan + "stop=" + string(r.StopReason) + ansiReset,
+		fmt.Sprintf("iterations=%d llm_calls=%d tool_calls=%d tool_errors=%d",
+			r.Iterations, t.LLMCalls, t.ToolCalls, t.ToolErrors),
+		fmt.Sprintf("tokens=%d/%d", t.Usage.InputTokens, t.Usage.OutputTokens),
 	}
 
-	return fmt.Sprintf(" %siter=%d%s", ansiDim, n, ansiReset)
+	if t.Usage.CostUSD > 0 {
+		parts = append(parts, fmt.Sprintf("cost=$%.6f", t.Usage.CostUSD))
+	}
+
+	if r.TimeToFirstToken > 0 {
+		parts = append(parts, "ttft="+r.TimeToFirstToken.Round(time.Millisecond).String())
+	}
+
+	if len(r.Handoffs) > 0 {
+		parts = append(parts, "handoff="+strings.Join(r.Handoffs, ","))
+	}
+
+	parts = append(parts, kv("output", p.cut(llm.TextContent(r.Output...))))
+
+	return join(parts...)
 }
 
-// truncate shortens s to at most n runes, appending "…" if it was longer.
-func truncate(s string, n int) string {
-	runes := []rune(s)
-	if len(runes) <= n {
+func (p *Processor) llmDetail(c *trace.LLMCall) string {
+	model := c.ResponseModel
+	if model == "" {
+		model = c.RequestModel
+	}
+
+	parts := []string{
+		kv("model", model),
+		fmt.Sprintf("tokens=%d/%d", c.Usage.InputTokens, c.Usage.OutputTokens),
+		kv("finish", string(c.FinishReason)),
+	}
+
+	if c.CacheHit {
+		parts = append(parts, ansiMagenta+"cache_hit"+ansiReset)
+	}
+
+	if c.Response != nil {
+		names := make([]string, 0, len(c.Response.ToolCalls))
+		for _, tc := range c.Response.ToolCalls {
+			names = append(names, tc.Function.Name)
+		}
+
+		if len(names) > 0 {
+			parts = append(parts, "tool_calls="+strings.Join(names, ","))
+		}
+
+		parts = append(parts,
+			kv("reasoning", p.cut(c.Response.ReasoningContent())),
+			kv("text", p.cut(c.Response.TextContent())),
+		)
+	}
+
+	return join(parts...)
+}
+
+func (p *Processor) middlewareDetail(m *trace.Middleware) string {
+	parts := []string{kv("outcome", m.Outcome)}
+	if m.Attempt > 0 {
+		parts = append(parts, fmt.Sprintf("attempt=%d", m.Attempt))
+	}
+
+	if m.Wait > 0 {
+		parts = append(parts, "wait="+m.Wait.Round(time.Millisecond).String())
+	}
+
+	return join(append(parts, kv("rule", m.Rule), kv("reason", p.cut(m.Reason)))...)
+}
+
+func (p *Processor) cut(s string) string {
+	if p.maxLen <= 0 {
 		return s
 	}
 
-	return string(runes[:n]) + "…"
+	runes := []rune(s)
+	if len(runes) <= p.maxLen {
+		return s
+	}
+
+	return string(runes[:p.maxLen]) + "…"
 }
 
-// Ensure Tracer implements trace.Tracer at compile time.
-var _ trace.Tracer = (*Tracer)(nil)
+// kv formats key=value, or "" when value is empty.
+func kv(key, value string) string {
+	if value == "" {
+		return ""
+	}
+
+	if strings.ContainsAny(value, " \n\t") {
+		value = fmt.Sprintf("%q", value)
+	}
+
+	return key + "=" + value
+}
+
+func join(parts ...string) string {
+	out := parts[:0]
+
+	for _, s := range parts {
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+
+	return strings.Join(out, " ")
+}
+
+func formatAttrs(attrs []trace.Attr) string {
+	parts := make([]string, 0, len(attrs))
+	for _, a := range attrs {
+		parts = append(parts, kv(a.Key, fmt.Sprint(a.Value)))
+	}
+
+	return join(parts...)
+}

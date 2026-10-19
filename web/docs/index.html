@@ -80,7 +80,7 @@
         </li>
         <li><strong>Observability</strong>
           <ul>
-            <li><code>trace</code>: Typed lifecycle events; human-readable text tracer (<code>trace/text</code>) and NDJSON file tracer (<code>trace/jsonfile</code>); also wraps raw LLM calls</li>
+            <li><code>trace</code>: Span-based tracing of runs, model calls, tools, memory and retrieval; text tree (<code>trace/text</code>), NDJSON (<code>trace/jsonfile</code>) and OpenTelemetry GenAI export (<code>trace/otel</code>)</li>
           </ul>
         </li>
         <li><strong>Knowledge Layer</strong>
@@ -143,7 +143,8 @@
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/mcp">MCP Integration</a></td><td>Run an MCP server as a subprocess and expose its tools to agents</td></tr>
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/playwright-mcp">Playwright MCP</a></td><td>Connect browser automation tools through MCP and orchestrate them from an agent</td></tr>
           <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/supervisor-blackboard">Supervisor Blackboard</a></td><td>Supervisor-worker pattern with a shared blackboard for coordination</td></tr>
-          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/tracing">Tracing</a></td><td>Attach a colorized tracer to an agent and inspect LLM requests, tool calls, and memory events in real time</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/tracing">Tracing</a></td><td>Print the span tree of an agent run: model calls, tool calls, usage and stop reason</td></tr>
+          <tr><td><a href="https://github.com/henomis/phero/tree/main/examples/tracing-otel">Tracing (OpenTelemetry)</a></td><td>Export agent spans to OpenTelemetry with GenAI semantic-convention attributes, nested under the caller's span</td></tr>
         </tbody>
       </table>
     </section>
@@ -151,15 +152,15 @@
     <section>
       <h2>Tracing</h2>
       <p>
-        Tracing is opt-in. Attach a tracer to an agent with <code>SetTracer</code> to observe typed events for agent lifecycle,
-        LLM requests and responses, tool calls and results, and memory operations.
+        Every agent run is recorded as a tree of spans (run, model calls, tools, handoffs, memory). Attach a provider to export
+        them; <code>Result.Summary</code> is computed from the spans either way.
       </p>
 
-      <pre><code class="language-go">a.SetTracer(text.New(os.Stderr))</code></pre>
+      <pre><code class="language-go">a.SetTracing(trace.NewProvider(trace.WithProcessor(text.New(os.Stderr))))</code></pre>
 
       <p>
-        The built-in text tracer writes colorized, human-readable lines to the terminal.
-        An NDJSON file tracer (<code>jsonfile.New</code>) is also available for structured log ingestion.
+        The text processor prints a colorized span tree to the terminal. <code>jsonfile.New</code> writes one NDJSON line per
+        span, and <code>trace/otel</code> exports OpenTelemetry spans following the GenAI semantic conventions.
         See <a href="trace.html">Trace</a> for the full package overview and usage examples.
       </p>
     </section>

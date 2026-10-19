@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/trace"
 )
 
 // limiterLLM enforces both a per-second rate limit and a maximum concurrency
@@ -34,26 +35,75 @@ type limiterLLM struct {
 // Execute acquires a rate-limit token and a concurrency slot before forwarding
 // the call to the inner LLM. Both acquisitions respect ctx cancellation and
 // middleware shutdown.
+//
+// When a call has to wait, the wait is recorded as a trace span with a
+// *trace.Middleware payload named "limiter".
 func (l *limiterLLM) Execute(ctx context.Context, messages []llm.Message, opts ...llm.CallOption) (*llm.Result, error) {
-	select {
-	case <-l.tokens:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-l.stopCh:
-		return nil, ErrStopped
-	}
-
-	select {
-	case l.semaphore <- struct{}{}:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-l.stopCh:
-		return nil, ErrStopped
+	if err := l.acquire(ctx); err != nil {
+		return nil, err
 	}
 
 	defer func() { <-l.semaphore }()
 
 	return l.inner.Execute(ctx, messages, opts...)
+}
+
+// acquire takes a rate-limit token and a concurrency slot. If either is not
+// immediately available it records the wait as a span.
+func (l *limiterLLM) acquire(ctx context.Context) error {
+	select {
+	case <-l.tokens:
+		select {
+		case l.semaphore <- struct{}{}:
+			return nil
+		default:
+		}
+
+		return l.wait(ctx, false)
+	default:
+	}
+
+	return l.wait(ctx, true)
+}
+
+// wait blocks for a token (when needToken) and then a slot, inside a span.
+func (l *limiterLLM) wait(ctx context.Context, needToken bool) error {
+	payload := &trace.Middleware{Name: middlewareLimiter}
+	start := time.Now()
+	_, span := trace.Start(ctx, middlewareLimiter, payload, trace.WithStartTime(start))
+
+	err := l.block(ctx, needToken)
+	payload.Wait = time.Since(start)
+
+	payload.Outcome = outcomeOK
+	if err != nil {
+		payload.Outcome = outcomeError
+	}
+
+	span.End(err)
+
+	return err
+}
+
+func (l *limiterLLM) block(ctx context.Context, needToken bool) error {
+	if needToken {
+		select {
+		case <-l.tokens:
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-l.stopCh:
+			return ErrStopped
+		}
+	}
+
+	select {
+	case l.semaphore <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-l.stopCh:
+		return ErrStopped
+	}
 }
 
 // runLimiterTokenProducer adds one token to the bucket on each ticker

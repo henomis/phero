@@ -114,11 +114,55 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, opts ...ll
 		return nil, err
 	}
 
+	msg := messageFromParts(parts)
+	raw := string(res.Candidates[0].FinishReason)
+
 	return &llm.Result{
-		Message: messageFromParts(parts),
-		Model:   c.modelName(res.ModelVersion),
-		Usage:   usageFromGenai(res.UsageMetadata),
+		Message:         msg,
+		Model:           c.modelName(res.ModelVersion),
+		Usage:           usageFromGenai(res.UsageMetadata),
+		FinishReason:    finishReasonFromGenai(raw, msg),
+		RawFinishReason: raw,
 	}, nil
+}
+
+// Provider returns "google".
+func (c *Client) Provider() string { return providerName }
+
+// Model returns the configured model.
+func (c *Client) Model() string { return c.model }
+
+// genaiFinishReasons maps Gemini finish reasons to the common set. Reasons
+// missing from the map map to llm.FinishError.
+var genaiFinishReasons = map[genai.FinishReason]llm.FinishReason{ //nolint:gochecknoglobals // read-only table
+	"":                                       "",
+	genai.FinishReasonUnspecified:            "",
+	genai.FinishReasonStop:                   llm.FinishStop,
+	genai.FinishReasonMaxTokens:              llm.FinishLength,
+	genai.FinishReasonSafety:                 llm.FinishContentFilter,
+	genai.FinishReasonRecitation:             llm.FinishContentFilter,
+	genai.FinishReasonBlocklist:              llm.FinishContentFilter,
+	genai.FinishReasonProhibitedContent:      llm.FinishContentFilter,
+	genai.FinishReasonSPII:                   llm.FinishContentFilter,
+	genai.FinishReasonImageSafety:            llm.FinishContentFilter,
+	genai.FinishReasonImageProhibitedContent: llm.FinishContentFilter,
+	genai.FinishReasonImageRecitation:        llm.FinishContentFilter,
+}
+
+// finishReasonFromGenai maps a Gemini finish reason to the common set. Gemini
+// reports STOP when it calls tools, so a message with tool calls maps to
+// llm.FinishToolCalls.
+func finishReasonFromGenai(raw string, msg *llm.Message) llm.FinishReason {
+	r, ok := genaiFinishReasons[genai.FinishReason(raw)]
+	if !ok {
+		return llm.FinishError
+	}
+
+	if r == llm.FinishStop && msg != nil && len(msg.ToolCalls) > 0 {
+		return llm.FinishToolCalls
+	}
+
+	return r
 }
 
 // buildRequest converts phero messages and call options into Gemini contents
@@ -225,6 +269,7 @@ func usageFromGenai(u *genai.GenerateContentResponseUsageMetadata) *llm.Usage {
 		InputTokens:     max(int(u.PromptTokenCount)-cached, 0),
 		OutputTokens:    int(u.CandidatesTokenCount) + int(u.ThoughtsTokenCount),
 		CacheReadTokens: cached,
+		ReasoningTokens: int(u.ThoughtsTokenCount),
 	}
 }
 

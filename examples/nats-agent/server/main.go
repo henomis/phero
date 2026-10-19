@@ -37,6 +37,7 @@ import (
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/llm/openai"
 	natsagent "github.com/henomis/phero/v2/nats"
+	"github.com/henomis/phero/v2/trace"
 	"github.com/henomis/phero/v2/trace/text"
 )
 
@@ -64,7 +65,7 @@ func main() {
 		log.Fatalf("create agent: %v", err)
 	}
 
-	a.SetTracer(text.New(os.Stderr))
+	a.SetTracing(trace.NewProvider(trace.WithProcessor(text.New(os.Stderr))))
 
 	srv, err := natsagent.New(nc, a, *owner, *name,
 		natsagent.WithAgentID("phero"),

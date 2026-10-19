@@ -26,6 +26,7 @@ import (
 	"github.com/henomis/phero/v2/agent"
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/trace"
+	"github.com/henomis/phero/v2/trace/tracetest"
 )
 
 // -- mocks -------------------------------------------------------------------
@@ -145,14 +146,6 @@ func (m *stubMemory) Save(ctx context.Context, msgs []llm.Message) error {
 	m.saved = msgs
 
 	return m.saveErr
-}
-
-type recordingTracer struct {
-	events []trace.Event
-}
-
-func (t *recordingTracer) Trace(event trace.Event) {
-	t.events = append(t.events, event)
 }
 
 // -- helpers -----------------------------------------------------------------
@@ -568,11 +561,11 @@ func TestRun_PopulatesRunSummary(t *testing.T) {
 		errs:  []error{nil, nil},
 		delay: time.Millisecond,
 	}
-	tracer := &recordingTracer{}
+	rec := tracetest.NewRecorder()
 
 	a := mustNew(t, stub, "agent", "desc")
 	a.SetMemory(mem)
-	a.SetTracer(tracer)
+	a.SetTracing(trace.NewProvider(trace.WithProcessor(rec)))
 
 	if err := a.AddTool(mustTool(t, "echo_tool", func(_ context.Context, _ *struct{}) (string, error) {
 		time.Sleep(time.Millisecond)
@@ -639,23 +632,17 @@ func TestRun_PopulatesRunSummary(t *testing.T) {
 		t.Fatalf("expected positive latency metrics, got %+v", summary.Latency)
 	}
 
-	var eventSummary *trace.RunSummary
-
-	for _, event := range tracer.events {
-		runSummaryEvent, ok := event.(trace.AgentRunSummaryEvent)
-		if ok {
-			eventSummary = &runSummaryEvent.Summary
-			break
-		}
+	if summary.StopReason != trace.StopFinal {
+		t.Fatalf("summary.StopReason = %q, want final", summary.StopReason)
 	}
 
-	if eventSummary == nil {
-		t.Fatal("expected AgentRunSummaryEvent to be emitted")
-		return
+	runs := rec.ByKind(trace.KindRun)
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run span, got %d", len(runs))
 	}
 
-	if eventSummary.ToolCalls != summary.ToolCalls {
-		t.Fatalf("event summary tool calls = %d, want %d", eventSummary.ToolCalls, summary.ToolCalls)
+	if runs[0].Totals.ToolCalls != summary.ToolCalls || runs[0].Context.SpanID.String() != summary.SpanID {
+		t.Fatalf("run span totals %+v do not match summary %+v", runs[0].Totals, summary)
 	}
 }
 

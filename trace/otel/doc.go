@@ -12,25 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package otel provides an OpenTelemetry-backed trace.Tracer that maps phero
-// agent, LLM, and tool events onto OpenTelemetry spans.
+// Package otel exports phero trace spans as OpenTelemetry spans that follow
+// the OpenTelemetry GenAI semantic conventions.
 //
-// The package depends only on the OpenTelemetry API. The application is
-// responsible for configuring the SDK (a TracerProvider and an exporter) and
-// passing a tracer in, or for installing a global TracerProvider and using
-// NewDefault. This keeps phero free of any exporter or SDK dependency.
+// The package depends only on the OpenTelemetry API: the application
+// configures the SDK (a TracerProvider and an exporter) and passes the
+// provider in.
 //
-//	// application wiring (SDK + exporter) is done by the caller, then:
-//	tracer := otel.NewDefault() // uses the global TracerProvider
-//	agent.SetTracer(tracer)
+//	exp := otel.New(tp) // tp is an OpenTelemetry TracerProvider
+//	p := trace.NewProvider(
+//		trace.WithIDSource(exp.IDSource()),
+//		trace.WithProcessor(exp),
+//	)
+//	a.SetTracing(p)
 //
-// Span model: an agent run becomes a root span; each LLM call and each tool
-// call become child spans of that root. Token usage, cost, model name, and
-// tool arguments are attached as span attributes following the OpenTelemetry
-// GenAI semantic-convention attribute names where applicable.
+// With the IDSource the OpenTelemetry span is started together with the phero
+// span, so both share trace and span IDs, and a run started under an
+// OpenTelemetry span in ctx becomes its child. Without it the exporter still
+// builds the same tree, with its own IDs.
 //
-// A single Tracer instance correlates events by agent name (and iteration or
-// tool call ID). It therefore assumes that runs of a given agent name do not
-// overlap concurrently on the same Tracer; sequential runs and handoffs to
-// differently named agents are fully supported.
+// Span model: invoke_agent {agent} for runs, chat {model} for model calls,
+// execute_tool {name} for tools, embeddings {model}, retrieval, and spans with
+// phero.* attributes for handoffs, memory and middleware. Sub-agents nest
+// under the tool call that ran them, and concurrent runs never share spans.
+//
+// Content (prompts, responses, tool arguments and results, retrieval
+// documents) is not recorded unless WithContent(true) is set, as the
+// conventions require. When enabled, gen_ai.input.messages holds the full
+// prompt of each call and every content attribute is truncated to
+// WithMaxAttrBytes bytes (64 KiB by default). Inline images are replaced by
+// their type, size and sha256.
+//
+// Semantic conventions: OpenTelemetry semconv v1.41.0 (GenAI conventions in
+// Development status). OTEL_SEMCONV_STABILITY_OPT_IN is not consulted.
 package otel

@@ -98,12 +98,10 @@ func (c *Client) ExecuteStream(
 			Done:    true,
 			Message: msg,
 			Model:   model,
-			Usage: &llm.Usage{
-				InputTokens:      int(acc.Usage.InputTokens),
-				OutputTokens:     int(acc.Usage.OutputTokens),
-				CacheReadTokens:  int(acc.Usage.CacheReadInputTokens),
-				CacheWriteTokens: int(acc.Usage.CacheCreationInputTokens),
-			},
+			Usage:   usageFromAnthropic(acc.Usage),
+
+			FinishReason:    finishReasonFromAnthropic(acc.StopReason),
+			RawFinishReason: string(acc.StopReason),
 		}, nil)
 	}
 }
@@ -134,7 +132,10 @@ func (c *Client) executeStreaming(
 			continue
 		}
 
-		return &llm.Result{Message: chunk.Message, Model: chunk.Model, Usage: chunk.Usage}, nil
+		return &llm.Result{
+			Message: chunk.Message, Model: chunk.Model, Usage: chunk.Usage,
+			FinishReason: chunk.FinishReason, RawFinishReason: chunk.RawFinishReason,
+		}, nil
 	}
 
 	// The stream ended without its terminal chunk: no message was assembled, so

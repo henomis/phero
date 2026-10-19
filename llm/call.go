@@ -45,9 +45,9 @@ const (
 // ToolChoice is the resolved tool-choice setting of a call.
 type ToolChoice struct {
 	// Mode is how the model may use tools.
-	Mode ToolChoiceMode
+	Mode ToolChoiceMode `json:"mode"`
 	// Name is the forced tool when Mode is ToolChoiceTool; empty otherwise.
-	Name string
+	Name string `json:"name,omitempty"`
 }
 
 // CallConfig is the resolved form of a call's options. Backends and middleware

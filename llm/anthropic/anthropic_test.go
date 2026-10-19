@@ -136,6 +136,10 @@ func TestExecute_TextResponse(t *testing.T) {
 	if result.Usage.InputTokens != 12 || result.Usage.OutputTokens != 6 {
 		t.Fatalf("usage mismatch: input=%d output=%d", result.Usage.InputTokens, result.Usage.OutputTokens)
 	}
+
+	if result.FinishReason != llm.FinishStop || result.RawFinishReason != "end_turn" {
+		t.Fatalf("finish = %q (%q), want stop", result.FinishReason, result.RawFinishReason)
+	}
 }
 
 func TestExecute_WithToolUse(t *testing.T) {
@@ -178,6 +182,10 @@ func TestExecute_WithToolUse(t *testing.T) {
 
 	if len(result.Message.ToolCalls) != 1 {
 		t.Fatalf("expected 1 tool call, got %d", len(result.Message.ToolCalls))
+	}
+
+	if result.FinishReason != llm.FinishToolCalls {
+		t.Fatalf("finish = %q, want tool_calls", result.FinishReason)
 	}
 
 	if result.Message.ToolCalls[0].Function.Name != "get_weather" {

@@ -37,6 +37,7 @@ import (
 	"github.com/henomis/phero/v2/agent"
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/llm/openai"
+	"github.com/henomis/phero/v2/trace"
 	"github.com/henomis/phero/v2/trace/text"
 )
 
@@ -55,7 +56,7 @@ func main() {
 		log.Fatalf("create agent: %v", err)
 	}
 
-	greeter.SetTracer(text.New(os.Stderr))
+	greeter.SetTracing(trace.NewProvider(trace.WithProcessor(text.New(os.Stderr))))
 
 	srv, err := a2a.New(greeter, "http://localhost:8080")
 	if err != nil {

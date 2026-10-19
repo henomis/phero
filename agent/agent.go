@@ -22,7 +22,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/memory"
@@ -44,7 +43,7 @@ type Agent struct {
 	tools          []*llm.Tool
 	responseFormat *llm.ResponseFormat
 	memory         memory.Memory
-	tracer         trace.Tracer
+	tracing        *trace.Provider
 	handoffs       map[string]*Agent
 }
 
@@ -68,6 +67,10 @@ type Handoff struct {
 	Agent *Agent
 	// Context is what the model passed to Agent in HandoffInput.Context.
 	Context string
+	// Span identifies the handoff span. Run Agent with
+	// trace.WithLinks(ctx, h.Span) to link its run back to the handoff when it
+	// does not run under the same span.
+	Span trace.SpanContext
 }
 
 // TextContent returns the concatenation of all text parts in the result.
@@ -135,7 +138,6 @@ func New(client llm.LLM, name, description string) (*Agent, error) {
 		description:   description,
 		maxIterations: DefaultMaxIterations,
 		tools:         make([]*llm.Tool, 0),
-		tracer:        trace.Noop,
 		handoffs:      make(map[string]*Agent),
 	}, nil
 }
@@ -220,11 +222,13 @@ func (a *Agent) SetMaxIterations(maxIterations int) {
 	a.maxIterations = maxIterations
 }
 
-// SetTracer configures the Tracer used to observe agent lifecycle events.
+// SetTracing sets the trace provider that receives the agent's spans.
 //
-// If not set, all events are discarded (trace.Noop is the default).
-func (a *Agent) SetTracer(t trace.Tracer) {
-	a.tracer = t
+// When not set, the provider carried by the run context (trace.WithProvider)
+// is used, so sub-agents inherit their parent's provider. Without any
+// provider, spans are still recorded for Result.Summary but not exported.
+func (a *Agent) SetTracing(p *trace.Provider) {
+	a.tracing = p
 }
 
 // SetResponseFormat constrains the agent's final answer to a JSON schema
@@ -253,14 +257,17 @@ func (a *Agent) callOptions() []llm.CallOption {
 // The agent calls the LLM, executes any requested tool calls, and repeats until
 // the model returns a message without tool calls.
 //
-// If the maximum iterations limit is reached, the function returns
-// ErrMaxIterationsReached together with a non-nil result holding any partial
-// text the model produced and the run's Summary (use errors.Is to distinguish).
-//
-// ctx is checked before every iteration, so cancelling it (for example from
-// inside a tool) stops the run even when the LLM ignores ctx. A cancelled run
-// returns a non-nil partial result, like ErrMaxIterationsReached, and an error
-// matching ctx.Err() and, when set, the cause given to context.WithCancelCause.
+// A run that fails still returns a non-nil result, holding any partial text
+// the model produced and the run's Summary (whose StopReason says why it
+// ended), together with the error; use errors.Is to tell the cases apart:
+//   - ErrMaxIterationsReached when the iteration limit is reached;
+//   - ErrStopRun when a tool stopped the run (see StopRun);
+//   - ctx.Err() and, when set, the cause given to context.WithCancelCause when
+//     ctx is cancelled. ctx is checked before every iteration, so cancelling it
+//     (for example from inside a tool) stops the run even when the LLM
+//     ignores ctx;
+//   - the LLM's or memory's error otherwise (llm.ErrGuardrailBlocked when a
+//     guardrail blocked the call).
 //
 // The session is saved to memory even when ctx is cancelled. If saving fails,
 // the result is still returned together with the save error joined via
@@ -269,55 +276,61 @@ func (a *Agent) Run(ctx context.Context, parts ...llm.ContentPart) (*Result, err
 	return a.run(ctx, nil, parts...)
 }
 
+// runState carries per-run tracing state through the loop.
+type runState struct {
+	span *trace.Span
+	run  *trace.Run
+	// promptLen is the prompt length of the previous LLM call, where the next
+	// call's message delta starts.
+	promptLen int
+}
+
 // run executes the agent loop, optionally emitting streaming Events.
 //
 // When emit is nil the agent runs in buffered mode (identical to the original
 // Run). When emit is non-nil, each LLM call is streamed and text/reasoning deltas
 // and tool call/result events are pushed through emit as they happen.
 func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart) (result *Result, err error) {
-	ctx = trace.WithTracer(ctx, a.tracer)
-	ctx = trace.WithAgentName(ctx, a.name)
-	stats := newRunStats(a.name)
-
-	var handoffAgentNames []string
-
-	session, sessionIndex, err := a.prepareSession(ctx, parts, stats)
-	if err != nil {
-		return nil, err
+	if a.tracing != nil {
+		ctx = trace.WithProvider(ctx, a.tracing)
 	}
 
-	inputText := llm.TextContent(parts...)
-	a.tracer.Trace(trace.AgentStartEvent{
-		AgentName: a.name,
-		Input:     inputText,
-		Timestamp: time.Now(),
-	})
+	rs := &runState{run: &trace.Run{
+		Agent:         a.name,
+		Description:   a.description,
+		SessionID:     trace.SessionFrom(ctx),
+		Input:         parts,
+		MaxIterations: max(a.maxIterations, 0),
+	}}
+	ctx, rs.span = trace.Start(ctx, string(trace.KindRun)+" "+a.name, rs.run)
 
-	iteration := 0
+	var (
+		session      []llm.Message
+		sessionIndex int
+		iteration    int
+	)
 
 	defer func() {
-		err = a.finishRun(ctx, session, sessionIndex, stats, iteration, handoffAgentNames, result, err)
+		err = a.finishRun(ctx, rs, session, sessionIndex, iteration, result, err)
 	}()
+
+	session, sessionIndex, err = a.prepareSession(ctx, parts)
+	if err != nil {
+		return &Result{}, err
+	}
 
 	for {
 		if ctx.Err() != nil {
 			return partialResultFromSession(session[sessionIndex:]), cancellationError(ctx)
 		}
 
-		iteration++
-		if a.maxIterations > 0 && iteration > a.maxIterations {
+		if a.maxIterations > 0 && iteration >= a.maxIterations {
 			return partialResultFromSession(session[sessionIndex:]), ErrMaxIterationsReached
 		}
 
-		a.tracer.Trace(trace.AgentIterationEvent{
-			AgentName: a.name,
-			Iteration: iteration,
-			Timestamp: time.Now(),
-		})
+		iteration++
 
-		iterCtx := trace.WithIteration(ctx, iteration)
-
-		iterationResult, iterErr := a.handleAgentIteration(iterCtx, session, iteration, stats, emit)
+		iterationResult, iterErr := a.handleAgentIteration(ctx, session, iteration, rs, emit)
 		if iterErr != nil {
 			// An LLM that honours ctx fails on cancellation: report it as a
 			// cancelled run, with its partial result and Summary.
@@ -325,58 +338,81 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 				return partialResultFromSession(session[sessionIndex:]), cancellationError(ctx)
 			}
 
-			return nil, iterErr
+			return partialResultFromSession(session[sessionIndex:]), iterErr
 		}
 
 		session = iterationResult.session
 
+		if iterationResult.stop != nil {
+			return iterationResult.result, iterationResult.stop
+		}
+
 		// If result is nil, the agent executed tool calls and needs to call the LLM again.
 		if iterationResult.result != nil {
-			for _, h := range iterationResult.result.Handoffs {
-				handoffAgentNames = append(handoffAgentNames, h.Agent.Name())
-			}
-
 			return iterationResult.result, nil
 		}
 	}
 }
 
-// finishRun ends a run: it saves the session to memory, traces the end of the
-// run and attaches its Summary to result. It returns err joined with any save
-// error.
+// finishRun ends a run: it saves the session to memory, ends the run span and
+// attaches its Summary to result. It returns err joined with any save error.
 func (a *Agent) finishRun(
-	ctx context.Context, session []llm.Message, sessionIndex int, stats *runStats,
-	iteration int, handoffAgentNames []string, result *Result, err error,
+	ctx context.Context, rs *runState, session []llm.Message, sessionIndex, iteration int,
+	result *Result, err error,
 ) error {
+	rs.run.StopReason = stopReason(ctx, result, err)
+
+	// A stop a tool asked for is how the run was meant to end, not a failure:
+	// its span ends without an error, unless saving the session fails.
+	var spanErr error
+	if rs.run.StopReason != trace.StopRequested {
+		spanErr = err
+	}
+
 	// A cancelled run still records its turn: saving must not inherit the cancellation.
-	if saveErr := a.saveSession(context.WithoutCancel(ctx), session, sessionIndex, stats); saveErr != nil {
-		err = errors.Join(err, fmt.Errorf("%w: %w", ErrSessionSaveFailed, saveErr))
+	if session != nil {
+		if saveErr := a.saveSession(context.WithoutCancel(ctx), session, sessionIndex); saveErr != nil {
+			saveErr = fmt.Errorf("%w: %w", ErrSessionSaveFailed, saveErr)
+			err = errors.Join(err, saveErr)
+			spanErr = errors.Join(spanErr, saveErr)
+		}
 	}
 
-	output := ""
+	rs.run.Iterations = iteration
 	if result != nil {
-		output = result.TextContent()
+		rs.run.Output = result.Parts
+		for _, h := range result.Handoffs {
+			rs.run.Handoffs = append(rs.run.Handoffs, h.Agent.Name())
+		}
 	}
 
-	a.tracer.Trace(trace.AgentEndEvent{
-		AgentName:  a.name,
-		Output:     output,
-		Err:        err,
-		Iterations: iteration,
-		Timestamp:  time.Now(),
-	})
+	rs.span.End(spanErr)
 
-	summary := stats.summary(iteration, handoffAgentNames, err)
 	if result != nil {
-		result.Summary = summary
+		result.Summary = trace.NewRunSummary(rs.span)
 	}
-
-	a.tracer.Trace(trace.AgentRunSummaryEvent{
-		Summary:   *summary,
-		Timestamp: time.Now(),
-	})
 
 	return err
+}
+
+// stopReason classifies how a run ended, before any session save error.
+func stopReason(ctx context.Context, result *Result, err error) trace.StopReason {
+	switch {
+	case errors.Is(err, ErrMaxIterationsReached):
+		return trace.StopMaxIterations
+	case errors.Is(err, ErrStopRun):
+		return trace.StopRequested
+	case err != nil && (ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)):
+		return trace.StopCancelled
+	case errors.Is(err, llm.ErrGuardrailBlocked):
+		return trace.StopGuardrail
+	case err != nil:
+		return trace.StopError
+	case result != nil && len(result.Handoffs) > 0:
+		return trace.StopHandoff
+	default:
+		return trace.StopFinal
+	}
 }
 
 // partialResultFromSession scans the messages of the current run backwards and
@@ -423,7 +459,7 @@ func textOnly(parts []llm.ContentPart) []llm.ContentPart {
 }
 
 // saveSession saves the conversation messages to memory, if memory is configured.
-func (a *Agent) saveSession(ctx context.Context, messages []llm.Message, sessionIndex int, stats *runStats) error {
+func (a *Agent) saveSession(ctx context.Context, messages []llm.Message, sessionIndex int) error {
 	if a.memory == nil {
 		return nil
 	}
@@ -434,21 +470,15 @@ func (a *Agent) saveSession(ctx context.Context, messages []llm.Message, session
 		return nil
 	}
 
-	start := time.Now()
-	count := len(turn)
-	err := a.memory.Save(ctx, turn)
+	payload := &trace.Memory{Op: trace.MemorySave, Messages: turn}
+	ctx, span := trace.Start(ctx, string(trace.KindMemory)+" save", payload)
 
-	duration := time.Since(start)
+	err := a.memory.Save(ctx, turn)
 	if err == nil {
-		stats.recordMemorySave(count, duration)
-		a.tracer.Trace(trace.MemorySaveEvent{
-			AgentName: a.name,
-			Count:     count,
-			Timestamp: time.Now(),
-		})
-	} else {
-		stats.recordMemorySave(0, duration)
+		payload.Count = len(turn)
 	}
+
+	span.End(err)
 
 	return err
 }
@@ -458,6 +488,8 @@ type agentIteration struct {
 	session []llm.Message
 	// result is the run's final result; nil means the loop must call the LLM again.
 	result *Result
+	// stop is the StopRun error a tool returned: the run ends with result.
+	stop error
 }
 
 // handleAgentIteration executes one iteration of the agent loop: it calls the LLM with the current messages,
@@ -465,7 +497,7 @@ type agentIteration struct {
 //
 // When emit is non-nil the LLM call is streamed and tool call/result events are emitted.
 func (a *Agent) handleAgentIteration(
-	ctx context.Context, session []llm.Message, iteration int, stats *runStats, emit emitFunc,
+	ctx context.Context, session []llm.Message, iteration int, rs *runState, emit emitFunc,
 ) (agentIteration, error) {
 	var (
 		msg *llm.Result
@@ -473,19 +505,20 @@ func (a *Agent) handleAgentIteration(
 	)
 
 	if emit == nil {
-		tracedLLM := trace.NewLLM(a.llm, a.tracer)
-		start := time.Now()
-		msg, err = tracedLLM.Execute(ctx, session, a.callOptions()...)
+		callCtx, span, call := a.startLLMCall(ctx, rs, session, iteration, false)
+		msg, err = a.llm.Execute(callCtx, session, a.callOptions()...)
 
-		duration := time.Since(start)
-		if err != nil {
-			stats.recordLLM(duration, "", nil)
-			return agentIteration{session: session}, err
+		if err == nil && (msg == nil || msg.Message == nil) {
+			err = ErrIncompleteStream
 		}
 
-		stats.recordLLM(duration, msg.Model, msg.Usage)
+		endLLMCall(span, call, msg, err)
+
+		if err != nil {
+			return agentIteration{session: session}, err
+		}
 	} else {
-		msg, err = a.streamIteration(ctx, session, iteration, stats, emit)
+		msg, err = a.streamIteration(ctx, session, iteration, rs, emit)
 		if err != nil {
 			return agentIteration{session: session}, err
 		}
@@ -493,7 +526,7 @@ func (a *Agent) handleAgentIteration(
 
 	session = append(session, *msg.Message)
 
-	return a.processToolCalls(ctx, session, msg.Message, iteration, stats, emit)
+	return a.processToolCalls(ctx, session, msg.Message, iteration, emit)
 }
 
 // processToolCalls executes the tool calls in message (if any) concurrently,
@@ -502,7 +535,7 @@ func (a *Agent) handleAgentIteration(
 // after, both in call order, on the single calling goroutine.
 func (a *Agent) processToolCalls(
 	ctx context.Context, session []llm.Message, message *llm.Message,
-	iteration int, stats *runStats, emit emitFunc,
+	iteration int, emit emitFunc,
 ) (agentIteration, error) {
 	toolCalls := message.ToolCalls
 	if len(toolCalls) == 0 {
@@ -527,11 +560,13 @@ func (a *Agent) processToolCalls(
 	var wg sync.WaitGroup
 	wg.Add(len(toolCalls))
 
+	stops := make([]error, len(toolCalls))
+
 	for i, toolCall := range toolCalls {
 		go func() {
 			defer wg.Done()
 
-			results[i] = a.handleToolCall(ctx, toolCall, iteration, stats)
+			results[i], stops[i] = a.handleToolCall(ctx, toolCall, iteration)
 		}()
 	}
 
@@ -556,8 +591,18 @@ func (a *Agent) processToolCalls(
 	for i, result := range results {
 		session = append(session, *result)
 		if hAgent, ok := a.handoffs[toolCalls[i].Function.Name]; ok {
-			handoffs = append(handoffs, Handoff{Agent: hAgent, Context: handoffContext(toolCalls[i])})
+			handoffs = append(handoffs, a.handoff(ctx, hAgent, handoffContext(toolCalls[i])))
 		}
+	}
+
+	// A stop ends the run after this round: every call of the round ran and
+	// its result is in the session, as for a handoff.
+	if stop := errors.Join(stops...); stop != nil {
+		return agentIteration{
+			session: session,
+			result:  &Result{Parts: nonBlankParts(textOnly(message.Parts))},
+			stop:    stop,
+		}, nil
 	}
 
 	if len(handoffs) > 0 {
@@ -585,80 +630,61 @@ func handoffContext(tc llm.ToolCall) string {
 	return input.Context
 }
 
-// handleToolCall executes a tool call and returns the result as a message to be added to the conversation.
-func (a *Agent) handleToolCall(
-	ctx context.Context, toolCall llm.ToolCall, iteration int, stats *runStats,
-) *llm.Message {
-	a.tracer.Trace(trace.ToolCallEvent{
-		AgentName: a.name,
-		ToolName:  toolCall.Function.Name,
+// handoff records a handoff span and returns the Handoff that refers to it.
+func (a *Agent) handoff(ctx context.Context, target *Agent, handoffCtx string) Handoff {
+	_, span := trace.Start(ctx, string(trace.KindHandoff)+" "+target.Name(), &trace.Handoff{
+		From: a.name, To: target.Name(), Context: handoffCtx,
+	})
+	span.End(nil)
+
+	return Handoff{Agent: target, Context: handoffCtx, Span: span.Context()}
+}
+
+// handleToolCall executes a tool call and returns the result as a message to be added to the conversation,
+// and the tool's error when it asked to stop the run (StopRun).
+func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, iteration int) (*llm.Message, error) {
+	payload := &trace.ToolCall{
+		Name:      toolCall.Function.Name,
+		CallID:    toolCall.ID,
+		Iteration: iteration,
 		Arguments: toolCall.Function.Arguments,
-		CallID:    toolCall.ID,
-		Iteration: iteration,
-		Timestamp: time.Now(),
-	})
-
-	start := time.Now()
-	resultParts, err := a.executeToolCall(ctx, toolCall)
-	stats.recordTool(toolCall.Function.Name, err, time.Since(start))
-
-	// Trace with text representation.
-	traceResult := llm.TextContent(resultParts...)
-	if err != nil {
-		traceResult = err.Error()
 	}
+	ctx, span := trace.Start(ctx, string(trace.KindTool)+" "+toolCall.Function.Name, payload)
 
-	a.tracer.Trace(trace.ToolResultEvent{
-		AgentName: a.name,
-		ToolName:  toolCall.Function.Name,
-		Result:    traceResult,
-		Err:       err,
-		CallID:    toolCall.ID,
-		Iteration: iteration,
-		Timestamp: time.Now(),
-	})
+	resultParts, err := a.executeToolCall(ctx, toolCall)
+
+	// A tool that stops the run did what it was asked: its call is no error.
+	var stop error
+	if errors.Is(err, ErrStopRun) {
+		stop, err = err, nil
+		resultParts = []llm.ContentPart{llm.Text("The run was stopped: " + stop.Error())}
+	}
 
 	if err != nil {
 		resultParts = []llm.ContentPart{llm.Text(fmt.Sprintf("Error executing tool '%s': %v", toolCall.Function.Name, err))}
 	}
+
+	payload.Result = llm.TextContent(resultParts...)
+
+	span.End(err)
 
 	return &llm.Message{
 		Role:       llm.RoleTool,
 		Parts:      resultParts,
 		ToolCallID: toolCall.ID,
 		ToolError:  err != nil,
-	}
+	}, stop
 }
 
 // prepareSession prepares the messages for the LLM call, including the system prompt, memory messages, and user input.
-func (a *Agent) prepareSession(
-	ctx context.Context, parts []llm.ContentPart, stats *runStats,
-) ([]llm.Message, int, error) {
+func (a *Agent) prepareSession(ctx context.Context, parts []llm.ContentPart) ([]llm.Message, int, error) {
 	messages := []llm.Message{llm.SystemMessage(a.description)}
 
-	// Use the text representation of the input parts for the memory query.
-	inputText := llm.TextContent(parts...)
-
 	if a.memory != nil {
-		start := time.Now()
-		memoryMessages, err := a.memory.Retrieve(ctx, inputText)
-
-		duration := time.Since(start)
+		memoryMessages, err := a.retrieveMemory(ctx, parts)
 		if err != nil {
-			stats.recordMemoryRetrieve(0, duration)
 			return nil, 0, err
 		}
-
-		// A memory may hold empty answers saved before they were filtered out.
-		memoryMessages = replayable(memoryMessages)
-
-		stats.recordMemoryRetrieve(len(memoryMessages), duration)
-
-		a.tracer.Trace(trace.MemoryRetrieveEvent{
-			AgentName: a.name,
-			Count:     len(memoryMessages),
-			Timestamp: time.Now(),
-		})
 
 		messages = append(messages, memoryMessages...)
 	}
@@ -674,6 +700,28 @@ func (a *Agent) prepareSession(
 	}
 
 	return messages, sessionIndex, nil
+}
+
+// retrieveMemory loads the replayable messages from memory inside a span.
+func (a *Agent) retrieveMemory(ctx context.Context, parts []llm.ContentPart) ([]llm.Message, error) {
+	// Use the text representation of the input parts for the memory query.
+	payload := &trace.Memory{Op: trace.MemoryRetrieve, Query: llm.TextContent(parts...)}
+	ctx, span := trace.Start(ctx, string(trace.KindMemory)+" retrieve", payload)
+
+	memoryMessages, err := a.memory.Retrieve(ctx, payload.Query)
+	if err != nil {
+		span.End(err)
+		return nil, err
+	}
+
+	// A memory may hold empty answers saved before they were filtered out.
+	memoryMessages = replayable(memoryMessages)
+	payload.Messages = memoryMessages
+	payload.Count = len(memoryMessages)
+
+	span.End(nil)
+
+	return memoryMessages, nil
 }
 
 // replayable returns messages without the assistant messages that carry
@@ -789,8 +837,10 @@ func anyToContentParts(v any) []llm.ContentPart {
 
 // AsTool exports this agent as an OpenAI function tool.
 //
-// The returned handler keeps an internal message history so repeated tool calls
-// act like a continuing conversation with this agent.
+// Each call is a new run; set a memory on the agent to make repeated calls
+// continue one conversation. The run is traced as a child of the parent's
+// tool span, with the parent's provider unless the agent has its own, and its
+// usage rolls up into the parent's Result.Summary.
 //
 // The agent's Description is injected as the system prompt by Run().
 //

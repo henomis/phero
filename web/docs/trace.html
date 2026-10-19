@@ -31,209 +31,163 @@
 
   <header>
     <h1>Trace</h1>
-    <p class="subtitle">Typed observability hooks for agents, LLM calls, tools, and memory.</p>
+    <p class="subtitle">Span-based tracing for agents, model calls, tools, memory and retrieval, with OpenTelemetry export.</p>
   </header>
 
   <main>
     <section>
       <h2>What it does</h2>
       <p>
-        The <code>trace</code> package provides opt-in observability for Phero. A tracer receives typed <code>Event</code> values
-        at each significant lifecycle point: agent start and end, loop iterations, LLM requests and responses, tool calls and
-        results, and memory retrieval and persistence.
+        The <code>trace</code> package records every agent run as a tree of <strong>spans</strong>: the run itself, each model
+        call, each tool call, handoffs, memory access, retrieval, and LLM middleware such as retries. Each span carries a typed
+        payload with the full input and output of the operation, so backends can show the exact prompt, response, tool
+        arguments and results.
+      </p>
+      <p>
+        Spans are parented through the <code>context.Context</code>. Concurrent runs never collide, a sub-agent used as a tool
+        nests under that tool call, and a run started under an existing span (yours, or an OpenTelemetry one) becomes its child.
       </p>
     </section>
 
     <section>
-      <h2>Built-in tracers</h2>
-      <ul>
-        <li><code>trace.Noop</code>: default zero-cost tracer that discards all events (top-level <code>trace</code> package)</li>
-        <li><code>text.New(w)</code> / <code>text.NewDefault()</code>: writes human-readable, colorized trace lines to any <code>io.Writer</code>; <code>NewDefault()</code> targets <code>os.Stderr</code></li>
-        <li><code>jsonfile.New(filePath)</code>: appends one JSON record per line (NDJSON) to a file; call <code>Close()</code> when done</li>
-        <li><code>otel.New(tracer)</code> / <code>otel.NewDefault()</code>: maps events to OpenTelemetry spans for export to any OTLP backend (Jaeger, Tempo, Honeycomb, …)</li>
-      </ul>
-      <p>Import paths: <code>github.com/henomis/phero/v2/trace/text</code>, <code>github.com/henomis/phero/v2/trace/jsonfile</code>, and <code>github.com/henomis/phero/v2/trace/otel</code>.</p>
-    </section>
-
-    <section>
-      <h2>OpenTelemetry tracer</h2>
-      <p>
-        <code>trace/otel</code> turns an agent run into a tree of OpenTelemetry spans: the run is a root span, and each LLM
-        call and tool call become child spans. Token usage, cost, model name, and tool arguments are attached as span
-        attributes (using the OpenTelemetry GenAI semantic-convention names where applicable).
-      </p>
-      <p>
-        The package depends only on the OpenTelemetry <em>API</em>. Your application owns the SDK wiring — a
-        <code>TracerProvider</code> and an exporter — so phero never pulls in a specific exporter. Install a global provider
-        and use <code>otel.NewDefault()</code>, or pass an explicit tracer to <code>otel.New(tracer)</code>.
-      </p>
-
+      <h2>Quick start</h2>
       <pre><code class="language-go">import (
-    "go.opentelemetry.io/otel"
-    "go.opentelemetry.io/otel/sdk/trace"
-
-    pherotel "github.com/henomis/phero/v2/trace/otel"
-)
-
-// Application wires the SDK + exporter (done once at startup).
-tp := trace.NewTracerProvider(trace.WithBatcher(exporter))
-otel.SetTracerProvider(tp)
-defer tp.Shutdown(context.Background())
-
-// Attach the OpenTelemetry tracer to an agent.
-a.SetTracer(pherotel.NewDefault())</code></pre>
-
-      <p>
-        A single tracer instance correlates events by agent name (plus iteration or tool call ID), so sequential runs and
-        handoffs to differently named agents are fully supported.
-      </p>
-    </section>
-
-    <section>
-      <h2>Attach tracing to an agent</h2>
-      <p>
-        Agents expose <code>SetTracer</code>. Once attached, every <code>Run</code> emits lifecycle events automatically.
-      </p>
-
-      <pre><code class="language-go">import (
-    "context"
-    "fmt"
-    "os"
-
-    "github.com/henomis/phero/v2/agent"
-    "github.com/henomis/phero/v2/llm"
-    "github.com/henomis/phero/v2/llm/openai"
+    "github.com/henomis/phero/v2/trace"
     "github.com/henomis/phero/v2/trace/text"
 )
 
-func main() {
-    client := openai.New(os.Getenv("OPENAI_API_KEY"))
+p := trace.NewProvider(trace.WithProcessor(text.New(os.Stderr)))
+a.SetTracing(p)
 
-    a, err := agent.New(
-        client,
-        "math-agent",
-        "You are a helpful math assistant.",
-    )
-    if err != nil {
-        panic(err)
-    }
-
-    a.SetTracer(text.New(os.Stderr))
-
-    result, err := a.Run(context.Background(), llm.Text("What is 12 * 9?"))
-    if err != nil {
-        panic(err)
-    }
-
-    fmt.Println(result.TextContent())
-}</code></pre>
-    </section>
-
-    <section>
-      <h2>Trace raw LLM calls</h2>
+result, err := a.Run(ctx, llm.Text("What is 2+2?"))
+fmt.Println(result.Summary.StopReason, result.Summary.Usage.CostUSD)</code></pre>
       <p>
-        If you want observability around direct <code>llm.LLM.Execute</code> calls, wrap any backend with <code>trace.NewLLM</code>.
-      </p>
-
-      <pre><code class="language-go">tracedClient := trace.NewLLM(client, text.New(os.Stderr))
-
-result, err := tracedClient.Execute(ctx, messages, llm.WithTools(tools...))</code></pre>
-
-      <p>
-        When the wrapper runs inside an agent, request and response events are automatically annotated with the agent name and
-        iteration number via context propagation.
+        An agent without its own provider uses the one in the context (<code>trace.WithProvider(ctx, p)</code>), so sub-agents
+        inherit their parent's provider with no extra wiring. Without any provider, spans are still recorded to build
+        <code>Result.Summary</code>, but nothing is exported.
       </p>
     </section>
 
     <section>
-      <h2>JSON file tracer</h2>
+      <h2>Span kinds</h2>
+      <table>
+        <thead><tr><th>Kind</th><th>Payload</th><th>Records</th></tr></thead>
+        <tbody>
+          <tr><td><code>invoke_agent</code></td><td><code>*trace.Run</code></td><td>agent, input, output, iterations and limit, stop reason, handoffs, session, time to first token</td></tr>
+          <tr><td><code>chat</code></td><td><code>*trace.LLMCall</code></td><td>provider, models, prompt messages (delta since the previous call plus offset), tools, tool choice, response, usage (incl. cache and reasoning tokens), cost, finish reason, first-token time, cache hit</td></tr>
+          <tr><td><code>execute_tool</code></td><td><code>*trace.ToolCall</code></td><td>name, call ID, arguments, result; the span error is the tool error</td></tr>
+          <tr><td><code>handoff</code></td><td><code>*trace.Handoff</code></td><td>from, to, context</td></tr>
+          <tr><td><code>memory</code></td><td><code>*trace.Memory</code></td><td>retrieve or save, query, messages, count</td></tr>
+          <tr><td><code>retrieval</code> / <code>embeddings</code></td><td><code>*trace.Retrieval</code> / <code>*trace.Embedding</code></td><td>RAG query, top-k, filter, hits with scores; embedding inputs</td></tr>
+          <tr><td><code>middleware</code></td><td><code>*trace.Middleware</code></td><td>retry attempts (reason, wait) and rate-limiter waits; cache hits and guardrail blocks are events on the model call span</td></tr>
+          <tr><td><code>custom</code></td><td><code>*trace.Custom</code></td><td>your own spans: <code>trace.Start(ctx, "step", &amp;trace.Custom{Type: "x"})</code></td></tr>
+        </tbody>
+      </table>
       <p>
-        For machine-readable output, use <code>jsonfile.New</code> to write NDJSON to a file.
-        Each line is a self-contained JSON record with a <code>type</code>, <code>timestamp</code>, and <code>data</code> field.
+        Durations are <code>End - Start</code>. A run's stop reason is one of <code>final</code>, <code>max_iterations</code>,
+        <code>handoff</code>, <code>stopped</code> (a tool called <code>agent.StopRun</code>; the span is not marked
+        as failed), <code>cancelled</code>, <code>guardrail</code> or <code>error</code>.
       </p>
+    </section>
 
-      <pre><code class="language-go">import "github.com/henomis/phero/v2/trace/jsonfile"
-
-t, err := jsonfile.New("trace.ndjson")
-if err != nil {
-    panic(err)
-}
-defer t.Close()
-
-a.SetTracer(t)</code></pre>
-
+    <section>
+      <h2>Processors</h2>
+      <ul>
+        <li><code>text.New(w, opts...)</code>: prints the span tree with colours; <code>text.WithVerbose()</code> also prints start lines, <code>text.WithMaxLen(n)</code> truncates content</li>
+        <li><code>jsonfile.New(path)</code>: writes one NDJSON line per span with the full payload and totals; closed by <code>Provider.Shutdown</code></li>
+        <li><code>otel.New(tp, opts...)</code>: exports OpenTelemetry spans following the GenAI semantic conventions</li>
+        <li><code>tracetest.NewRecorder()</code>: in-memory recorder for tests</li>
+      </ul>
       <p>
-        The tracer is goroutine-safe and appends to the file if it already exists.
+        Pass several <code>trace.WithProcessor</code> options to fan out to several backends. Wrap a processor to change what it
+        sees without affecting the others:
       </p>
+      <pre><code class="language-go">p := trace.NewProvider(
+    trace.WithProcessor(text.New(os.Stderr)),
+    trace.WithProcessor(trace.Batch(
+        trace.Content(trace.ContentPolicy{Capture: true, MaxBytes: 4096}, myExporter),
+    )),
+    trace.WithProcessor(trace.Redact(func(d *trace.SpanData) { /* mask PII on a copy */ }, other)),
+)
+defer p.Shutdown(ctx)</code></pre>
+      <p>
+        Processors are called synchronously; wrap exporters that do I/O in <code>trace.Batch</code>.
+        <code>ContentPolicy</code> clears content, truncates it, or replaces inline images with their type, size and sha256.
+      </p>
+    </section>
+
+    <section>
+      <h2>OpenTelemetry</h2>
+      <pre><code class="language-go">import pherootel "github.com/henomis/phero/v2/trace/otel"
+
+exp := pherootel.New(tp) // tp: your OpenTelemetry TracerProvider (SDK + OTLP exporter)
+p := trace.NewProvider(
+    trace.WithIDSource(exp.IDSource()), // phero and OTel share trace/span IDs
+    trace.WithProcessor(exp),
+)
+a.SetTracing(p)</code></pre>
+      <ul>
+        <li>Span names and attributes follow semconv v1.41.0: <code>invoke_agent {agent}</code>, <code>chat {model}</code>, <code>execute_tool {name}</code>, <code>gen_ai.operation.name</code>, <code>gen_ai.provider.name</code>, <code>gen_ai.request.model</code>, <code>gen_ai.usage.*</code>, <code>gen_ai.response.finish_reasons</code>, <code>gen_ai.conversation.id</code>.</li>
+        <li>Content is <strong>off by default</strong>. <code>pherootel.WithContent(true)</code> adds <code>gen_ai.system_instructions</code>, <code>gen_ai.input.messages</code> (the full prompt), <code>gen_ai.output.messages</code>, tool definitions, arguments and results; <code>pherootel.WithMaxAttrBytes(n)</code> sets the size limit (64 KiB by default).</li>
+        <li>Run totals are exported as <code>phero.run.*</code> attributes on the run span.</li>
+      </ul>
     </section>
 
     <section>
       <h2>Run summary</h2>
       <p>
-        After every agent run, a <code>AgentRunSummaryEvent</code> is emitted with a <code>RunSummary</code>
-        containing aggregated metrics. The same summary is also available on the <code>Result</code> returned by <code>Run()</code>.
+        Every <code>Result</code> carries a <code>*trace.RunSummary</code> computed from the run span, including the work of
+        sub-agents run as tools:
       </p>
       <ul>
-        <li><code>RunSummary.Usage</code> &mdash; <code>UsageSummary{InputTokens, OutputTokens, CostUSD}</code> &mdash; <code>CostUSD</code> is the best-effort total cost from per-model pricing (see <code>llm.RegisterPricing</code>)</li>
-        <li><code>RunSummary.Latency</code> &mdash; <code>LatencySummary{Total, LLM, Tool, Memory}</code></li>
-        <li><code>RunSummary.Tools</code> &mdash; <code>[]ToolCallSummary{ToolName, Calls, Errors}</code></li>
-        <li><code>RunSummary.Iterations</code>, <code>LLMCalls</code>, <code>ToolCalls</code>, <code>ToolErrors</code></li>
-        <li><code>RunSummary.HandoffAgents</code> &mdash; names of the agents the run handed work to, empty when there was no handoff; more than one means fan-out</li>
+        <li><code>StopReason</code>, <code>Iterations</code>, <code>MaxIterations</code>, <code>TraceID</code>, <code>SpanID</code>, <code>SessionID</code></li>
+        <li><code>LLMCalls</code>, <code>ToolCalls</code>, <code>ToolErrors</code>, <code>MemoryRetrieved</code>, <code>MemorySaved</code></li>
+        <li><code>Usage</code>: input, output, cache read/write and reasoning tokens, cost in USD</li>
+        <li><code>Latency</code>: total, LLM, tool, memory and time to first token (streaming)</li>
+        <li><code>Tools</code> (calls, errors, duration per tool), <code>ByModel</code>, <code>ByAgent</code>, <code>HandoffAgents</code>, <code>Error</code></li>
       </ul>
-
-      <pre><code class="language-go">result, err := a.Run(ctx, llm.Text(input))
-if err != nil {
-    panic(err)
-}
-if s := result.Summary; s != nil {
-    fmt.Printf("iterations=%d llmCalls=%d tokens=%d+%d cost=$%.4f\n",
-        s.Iterations, s.LLMCalls,
-        s.Usage.InputTokens, s.Usage.OutputTokens, s.Usage.CostUSD)
-    fmt.Printf("total=%s  llm=%s  tool=%s\n",
-        s.Latency.Total, s.Latency.LLM, s.Latency.Tool)
-}</code></pre>
     </section>
 
     <section>
-      <h2>Event types</h2>
-      <ul>
-        <li><code>AgentStartEvent</code> and <code>AgentEndEvent</code></li>
-        <li><code>AgentIterationEvent</code></li>
-        <li><code>AgentRunSummaryEvent</code> &mdash; emitted once per run with a full <code>RunSummary</code></li>
-        <li><code>LLMRequestEvent</code> and <code>LLMResponseEvent</code></li>
-        <li><code>ReasoningEvent</code> &mdash; emitted after a response that contains extended-thinking content</li>
-        <li><code>ToolCallEvent</code> and <code>ToolResultEvent</code></li>
-        <li><code>MemoryRetrieveEvent</code> and <code>MemorySaveEvent</code></li>
-      </ul>
+      <h2>Context: sessions, attributes, propagation</h2>
+      <pre><code class="language-go">ctx = trace.WithSession(ctx, "conversation-42")              // copied to every span
+ctx = trace.WithAttributes(ctx, trace.String("tenant", "acme")) // added to every span
+
+// Across processes (W3C trace context):
+header := trace.Inject(ctx)                // traceparent of the current span
+ctx = trace.Extract(ctx, incomingHeader)   // later spans become its children
+
+// Correlate logs with traces:
+slog.InfoContext(ctx, "step done", slog.Any("trace", trace.LogAttrs(ctx)))</code></pre>
       <p>
-        Implement the <code>trace.Tracer</code> interface if you want to send these events somewhere other than the terminal.
+        A handoff records a span referenced by <code>Handoff.Span</code>. When you run the target agent outside the same span,
+        link it back with <code>trace.WithLinks(ctx, h.Span)</code>.
       </p>
     </section>
 
     <section>
-      <h2>Context propagation</h2>
+      <h2>Trace raw LLM calls</h2>
       <p>
-        The tracer is carried through the request context with <code>trace.WithTracer</code> and read back with <code>trace.FromContext</code>.
-        This lets tool handlers and lower-level helpers emit their own trace events without depending directly on the agent type.
+        Outside an agent, wrap a client with <code>trace.InstrumentLLM</code> to record a <code>chat</code> span for each call.
+        Inside an agent the wrapper adds nothing, since the agent already records the call.
       </p>
+      <pre><code class="language-go">client := trace.InstrumentLLM(openai.New(apiKey))
+res, err := client.Execute(trace.WithProvider(ctx, p), messages)</code></pre>
     </section>
 
     <section>
       <h2>Try it</h2>
-      <p>
-        The tracing example shows a calculator tool plus a traced agent run from the terminal.
-      </p>
-
       <pre><code class="language-bash"># from repo root
-go run ./examples/tracing</code></pre>
+go run ./examples/tracing        # text span tree
+go run ./examples/tracing-otel   # OpenTelemetry spans with GenAI attributes</code></pre>
     </section>
 
     <section>
       <h2>Related packages</h2>
       <ul>
-        <li><a href="agent.html">agent</a>: emits trace events during orchestration</li>
-        <li><a href="llm.html">llm</a>: backends can be wrapped with <code>trace.NewLLM</code></li>
-        <li><a href="memory.html">memory</a>: memory retrieval and save operations are traced when used through agents</li>
+        <li><a href="agent.html">agent</a>: records run, model call, tool, handoff and memory spans</li>
+        <li><a href="llm.html">llm</a>: finish reasons, reasoning tokens and the <code>Describer</code> interface feed the spans; middleware records retry, limiter, cache and guardrail activity</li>
+        <li><a href="rag.html">rag</a>: records retrieval and embedding spans</li>
       </ul>
     </section>
   </main>

@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/henomis/phero/v2/llm"
-	"github.com/henomis/phero/v2/trace"
 )
 
 // EventType identifies the kind of an Event emitted by RunStream.
@@ -59,7 +58,8 @@ type Event struct {
 	ToolError bool
 	// Iteration is the 1-based agent loop iteration this event belongs to.
 	Iteration int
-	// Result holds the final agent result (EventDone only).
+	// Result holds the final agent result (EventDone), or the partial result
+	// of a failed run, with its Summary, alongside the error.
 	Result *Result
 }
 
@@ -73,12 +73,12 @@ type emitFunc func(Event) bool
 // It yields text and reasoning deltas as the model produces them, a ToolCall and
 // ToolResult event around each tool invocation, and finally a single
 // EventDone whose Result mirrors what Run would have returned. If the run
-// fails, the iterator yields the error and stops.
+// fails, the iterator yields the error, with an Event whose Result is the
+// partial result Run would have returned (Type is empty), and stops.
 //
 // Streaming uses the underlying LLM's incremental API when it implements
 // llm.StreamingLLM; otherwise it transparently falls back to a single buffered
-// response (see llm.StreamOrBuffer). The trace.Tracer continues to receive the
-// usual lifecycle events.
+// response (see llm.StreamOrBuffer). Tracing records the same spans as Run.
 func (a *Agent) RunStream(ctx context.Context, parts ...llm.ContentPart) iter.Seq2[Event, error] {
 	return func(yield func(Event, error) bool) {
 		stopped := false
@@ -102,7 +102,7 @@ func (a *Agent) RunStream(ctx context.Context, parts ...llm.ContentPart) iter.Se
 		}
 
 		if err != nil {
-			yield(Event{}, err)
+			yield(Event{Result: result}, err)
 			return
 		}
 
@@ -111,24 +111,12 @@ func (a *Agent) RunStream(ctx context.Context, parts ...llm.ContentPart) iter.Se
 }
 
 // streamIteration performs a single streaming LLM call, emitting text and
-// reasoning deltas, and returns the assembled result. It fires the same
-// LLMRequest/LLMResponse/Reasoning trace events as the buffered path.
+// reasoning deltas, and returns the assembled result. It records the same
+// LLM call span as the buffered path, plus the time to first token.
 func (a *Agent) streamIteration(
-	ctx context.Context, session []llm.Message, iteration int, stats *runStats, emit emitFunc,
+	ctx context.Context, session []llm.Message, iteration int, rs *runState, emit emitFunc,
 ) (*llm.Result, error) {
-	toolNames := make([]string, len(a.tools))
-	for i, t := range a.tools {
-		toolNames[i] = t.Name()
-	}
-
-	a.tracer.Trace(trace.LLMRequestEvent{
-		AgentName:    a.name,
-		MessageCount: len(session),
-		ToolNames:    toolNames,
-		Iteration:    iteration,
-		Timestamp:    time.Now(),
-	})
-
+	callCtx, span, call := a.startLLMCall(ctx, rs, session, iteration, true)
 	start := time.Now()
 
 	var (
@@ -136,10 +124,17 @@ func (a *Agent) streamIteration(
 		gotFinal bool
 	)
 
-	for chunk, err := range llm.StreamOrBuffer(ctx, a.llm, session, a.callOptions()...) {
+	for chunk, err := range llm.StreamOrBuffer(callCtx, a.llm, session, a.callOptions()...) {
 		if err != nil {
-			stats.recordLLM(time.Since(start), "", nil)
+			endLLMCall(span, call, nil, err)
 			return nil, err
+		}
+
+		if call.FirstTokenAt.IsZero() && (chunk.TextDelta != "" || chunk.ReasoningDelta != "" || chunk.ToolCall != nil) {
+			call.FirstTokenAt = time.Now()
+			if rs.run.TimeToFirstToken == 0 {
+				rs.run.TimeToFirstToken = call.FirstTokenAt.Sub(start)
+			}
 		}
 
 		if chunk.TextDelta != "" {
@@ -156,31 +151,19 @@ func (a *Agent) streamIteration(
 		}
 	}
 
-	duration := time.Since(start)
 	if !gotFinal || final.Message == nil {
-		stats.recordLLM(duration, "", nil)
+		endLLMCall(span, call, nil, ErrIncompleteStream)
 		return nil, ErrIncompleteStream
 	}
 
-	stats.recordLLM(duration, final.Model, final.Usage)
-
-	a.tracer.Trace(trace.LLMResponseEvent{
-		AgentName: a.name,
-		Message:   final.Message,
-		Usage:     final.Usage,
-		Model:     final.Model,
-		Iteration: iteration,
-		Timestamp: time.Now(),
-	})
-
-	if reasoning := final.Message.ReasoningContent(); reasoning != "" {
-		a.tracer.Trace(trace.ReasoningEvent{
-			AgentName: a.name,
-			Content:   reasoning,
-			Iteration: iteration,
-			Timestamp: time.Now(),
-		})
+	result := &llm.Result{
+		Message:         final.Message,
+		Usage:           final.Usage,
+		Model:           final.Model,
+		FinishReason:    final.FinishReason,
+		RawFinishReason: final.RawFinishReason,
 	}
+	endLLMCall(span, call, result, nil)
 
-	return &llm.Result{Message: final.Message, Usage: final.Usage, Model: final.Model}, nil
+	return result, nil
 }

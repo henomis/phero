@@ -62,10 +62,12 @@ func (c *Client) ExecuteStream(
 		}
 
 		yieldFinal(yield, llm.StreamChunk{
-			Done:    true,
-			Message: msg,
-			Model:   c.modelName(col.version),
-			Usage:   usageFromGenai(col.usage),
+			Done:            true,
+			Message:         msg,
+			Model:           c.modelName(col.version),
+			Usage:           usageFromGenai(col.usage),
+			FinishReason:    finishReasonFromGenai(col.finish, msg),
+			RawFinishReason: col.finish,
 		})
 	}
 }
@@ -87,6 +89,7 @@ type collector struct {
 	parts   []*genai.Part
 	usage   *genai.GenerateContentResponseUsageMetadata
 	version string
+	finish  string
 	last    *genai.GenerateContentResponse
 }
 
@@ -100,6 +103,10 @@ func (c *collector) add(res *genai.GenerateContentResponse) []*genai.Part {
 
 	if res.ModelVersion != "" {
 		c.version = res.ModelVersion
+	}
+
+	if len(res.Candidates) > 0 && res.Candidates[0] != nil && res.Candidates[0].FinishReason != "" {
+		c.finish = string(res.Candidates[0].FinishReason)
 	}
 
 	if len(res.Candidates) == 0 || res.Candidates[0] == nil || res.Candidates[0].Content == nil {

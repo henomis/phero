@@ -16,289 +16,271 @@ package otel
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"sync"
+	"time"
+	"unicode/utf8"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	oteltrace "go.opentelemetry.io/otel/trace"
 
+	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/trace"
 )
 
-// instrumentationName is the OpenTelemetry instrumentation scope name used when
-// obtaining a tracer from the global provider.
 const instrumentationName = "github.com/henomis/phero/v2/trace/otel"
 
-// maxAttrLen bounds the length of free-text span attributes (inputs, outputs,
-// tool arguments) so spans stay a reasonable size.
-const maxAttrLen = 1024
+// DefaultMaxAttrBytes is the default size limit of a content attribute.
+const DefaultMaxAttrBytes = 64 * 1024
 
-// Tracer is a trace.Tracer that records phero events as OpenTelemetry spans.
-//
-// It is safe for concurrent use. See the package documentation for the span
-// model and correlation assumptions.
-type Tracer struct {
-	tracer oteltrace.Tracer
+// Exporter is a trace.Processor that exports phero spans as OpenTelemetry
+// spans. It is safe for concurrent use.
+type Exporter struct {
+	tracer       oteltrace.Tracer
+	capture      bool
+	maxAttrBytes int
+	content      trace.Processor
 
-	mu    sync.Mutex
-	roots map[string]rootSpan       // keyed by agent name
-	llms  map[string]oteltrace.Span // keyed by agent name + iteration
-	tools map[string]oteltrace.Span // keyed by agent name + tool call ID
+	// spans holds the live OpenTelemetry span of each phero span.
+	spans sync.Map // trace.SpanID -> oteltrace.Span
+	// runs holds the live run spans. Only their model calls send a message
+	// delta, so only they need an entry in prompts.
+	runs sync.Map // trace.SpanID -> struct{}
+	// prompts holds, per run span, the prompt of its latest model call, so
+	// that each call can export its full input.
+	prompts sync.Map // trace.SpanID -> []llm.Message
 }
 
-// rootSpan holds an agent run's root span together with the context that
-// carries it, so child spans can be parented correctly.
-//
-//nolint:containedctx // intentionally stores context to preserve span parentage
-type rootSpan struct {
-	ctx  context.Context
-	span oteltrace.Span
+var _ trace.Processor = (*Exporter)(nil)
+
+// Option configures an Exporter.
+type Option func(*Exporter)
+
+// WithContent enables recording of content attributes: system instructions,
+// input and output messages, tool definitions, arguments and results, and
+// retrieval queries and documents. Default false.
+func WithContent(capture bool) Option {
+	return func(e *Exporter) { e.capture = capture }
 }
 
-// New returns a Tracer that records spans using the provided OpenTelemetry
-// tracer. A nil tracer falls back to the global TracerProvider.
-func New(tracer oteltrace.Tracer) *Tracer {
-	if tracer == nil {
-		tracer = otel.Tracer(instrumentationName)
+// WithMaxAttrBytes sets the size limit of each content attribute. Zero or a
+// negative value means unlimited. Default DefaultMaxAttrBytes.
+func WithMaxAttrBytes(n int) Option {
+	return func(e *Exporter) { e.maxAttrBytes = n }
+}
+
+// New returns an Exporter that creates spans with tp. A nil tp uses the
+// global TracerProvider.
+func New(tp oteltrace.TracerProvider, opts ...Option) *Exporter {
+	if tp == nil {
+		tp = otel.GetTracerProvider()
 	}
 
-	return &Tracer{
-		tracer: tracer,
-		roots:  make(map[string]rootSpan),
-		llms:   make(map[string]oteltrace.Span),
-		tools:  make(map[string]oteltrace.Span),
+	e := &Exporter{
+		tracer:       tp.Tracer(instrumentationName),
+		maxAttrBytes: DefaultMaxAttrBytes,
 	}
-}
 
-// NewDefault returns a Tracer backed by the global OpenTelemetry TracerProvider.
-//
-// The application is expected to have installed an SDK TracerProvider (with an
-// exporter) via otel.SetTracerProvider before spans are recorded.
-func NewDefault() *Tracer {
-	return New(otel.Tracer(instrumentationName))
-}
-
-// Ensure Tracer implements trace.Tracer at compile time.
-var _ trace.Tracer = (*Tracer)(nil)
-
-// Trace records a single phero event as OpenTelemetry span activity.
-func (t *Tracer) Trace(event trace.Event) {
-	switch e := event.(type) {
-	case trace.AgentStartEvent:
-		t.startAgent(e)
-	case trace.AgentEndEvent:
-		t.endAgent(e)
-	case trace.AgentRunSummaryEvent:
-		t.finishAgent(e)
-	case trace.LLMRequestEvent:
-		t.startLLM(e)
-	case trace.LLMResponseEvent:
-		t.endLLM(e)
-	case trace.ReasoningEvent:
-		t.recordReasoning(e)
-	case trace.ToolCallEvent:
-		t.startTool(e)
-	case trace.ToolResultEvent:
-		t.endTool(e)
+	for _, opt := range opts {
+		opt(e)
 	}
+
+	e.content = trace.Content(trace.ContentPolicy{Capture: e.capture}, sink{e})
+
+	return e
 }
 
-func (t *Tracer) startAgent(e trace.AgentStartEvent) {
-	ctx, span := t.tracer.Start(context.Background(), "agent "+e.AgentName)
-	span.SetAttributes(
-		attribute.String("phero.agent.name", e.AgentName),
-		attribute.String("phero.agent.input", truncate(e.Input)),
-	)
-	t.mu.Lock()
-	t.roots[e.AgentName] = rootSpan{ctx: ctx, span: span}
-	t.mu.Unlock()
-}
+// IDSource returns a trace.IDSource that starts the OpenTelemetry span when
+// the phero span starts, so that both share identifiers.
+func (e *Exporter) IDSource() trace.IDSource { return idSource{e} }
 
-// endAgent records the run outcome on the root span. The span itself is ended
-// by finishAgent on the subsequent run-summary event, which is emitted last.
-func (t *Tracer) endAgent(e trace.AgentEndEvent) {
-	t.mu.Lock()
-	root, ok := t.roots[e.AgentName]
-	t.mu.Unlock()
+// OnStart starts the OpenTelemetry span when the IDSource has not already.
+func (e *Exporter) OnStart(ctx context.Context, s *trace.SpanData) {
+	if s.Kind == trace.KindRun {
+		e.runs.Store(s.Context.SpanID, struct{}{})
+	}
 
-	if !ok {
+	if _, ok := e.spans.Load(s.Context.SpanID); ok {
 		return
 	}
 
-	root.span.SetAttributes(attribute.Int("phero.agent.iterations", e.Iterations))
-
-	if e.Err != nil {
-		root.span.RecordError(e.Err)
-		root.span.SetStatus(codes.Error, e.Err.Error())
-	} else {
-		root.span.SetAttributes(attribute.String("phero.agent.output", truncate(e.Output)))
-		root.span.SetStatus(codes.Ok, "")
-	}
+	_, span := e.tracer.Start(e.parentContext(ctx, s.Parent), s.Name,
+		oteltrace.WithTimestamp(s.Start), oteltrace.WithSpanKind(spanKind(s.Kind)))
+	e.spans.Store(s.Context.SpanID, span)
 }
 
-// finishAgent attaches the aggregated run summary and ends the root span.
-func (t *Tracer) finishAgent(e trace.AgentRunSummaryEvent) {
-	t.mu.Lock()
-	root, ok := t.roots[e.Summary.AgentName]
-	delete(t.roots, e.Summary.AgentName)
-	t.mu.Unlock()
-
-	if !ok {
-		return
-	}
-
-	s := e.Summary
-	root.span.SetAttributes(
-		attribute.Int("phero.run.llm_calls", s.LLMCalls),
-		attribute.Int("phero.run.tool_calls", s.ToolCalls),
-		attribute.Int("phero.run.tool_errors", s.ToolErrors),
-		attribute.Int("gen_ai.usage.input_tokens", s.Usage.InputTokens),
-		attribute.Int("gen_ai.usage.output_tokens", s.Usage.OutputTokens),
-		attribute.Float64("phero.run.cost_usd", s.Usage.CostUSD),
-		attribute.Int64("phero.run.latency_ms", s.Latency.Total.Milliseconds()),
-	)
-	root.span.End()
+// OnEnd finishes the OpenTelemetry span of s.
+func (e *Exporter) OnEnd(s *trace.SpanData) {
+	e.content.OnEnd(s)
 }
 
-func (t *Tracer) startLLM(e trace.LLMRequestEvent) {
-	parent := t.parentCtx(e.AgentName)
-	_, span := t.tracer.Start(parent, "llm.request")
-	span.SetAttributes(
-		attribute.Int("phero.llm.message_count", e.MessageCount),
-		attribute.Int("phero.agent.iteration", e.Iteration),
-	)
+// Shutdown does nothing; shut the OpenTelemetry TracerProvider down to flush.
+func (*Exporter) Shutdown(context.Context) error { return nil }
 
-	if len(e.ToolNames) > 0 {
-		span.SetAttributes(attribute.StringSlice("phero.llm.tools", e.ToolNames))
+// parentContext returns ctx carrying the OpenTelemetry parent of a span whose
+// phero parent is parent. Without a phero parent, the OpenTelemetry span
+// already in ctx (if any) is the parent.
+func (e *Exporter) parentContext(ctx context.Context, parent trace.SpanContext) context.Context {
+	if !parent.IsValid() {
+		return ctx
 	}
 
-	t.mu.Lock()
-	t.llms[llmKey(e.AgentName, e.Iteration)] = span
-	t.mu.Unlock()
-}
-
-func (t *Tracer) endLLM(e trace.LLMResponseEvent) {
-	key := llmKey(e.AgentName, e.Iteration)
-
-	t.mu.Lock()
-	span, ok := t.llms[key]
-	delete(t.llms, key)
-	t.mu.Unlock()
-
-	if !ok {
-		return
-	}
-
-	if e.Model != "" {
-		span.SetAttributes(attribute.String("gen_ai.response.model", e.Model))
-	}
-
-	if e.Usage != nil {
-		span.SetAttributes(
-			attribute.Int("gen_ai.usage.input_tokens", e.Usage.InputTokens),
-			attribute.Int("gen_ai.usage.output_tokens", e.Usage.OutputTokens),
-		)
-
-		if e.Usage.CacheReadTokens > 0 {
-			span.SetAttributes(attribute.Int("phero.llm.cache_read_tokens", e.Usage.CacheReadTokens))
-		}
-
-		if e.Usage.CacheWriteTokens > 0 {
-			span.SetAttributes(attribute.Int("phero.llm.cache_write_tokens", e.Usage.CacheWriteTokens))
+	if sp, ok := e.spans.Load(parent.SpanID); ok {
+		if span, isSpan := sp.(oteltrace.Span); isSpan {
+			return oteltrace.ContextWithSpan(ctx, span)
 		}
 	}
 
-	if e.Message != nil {
-		span.SetAttributes(attribute.Int("phero.llm.tool_calls", len(e.Message.ToolCalls)))
-	}
-
-	span.End()
+	return oteltrace.ContextWithSpanContext(ctx, toOTel(parent))
 }
 
-// recordReasoning attaches the model's extended-thinking text as an event on the
-// agent's root span. The LLM span for the iteration has already ended by the
-// time this event arrives.
-func (t *Tracer) recordReasoning(e trace.ReasoningEvent) {
-	t.mu.Lock()
-	root, ok := t.roots[e.AgentName]
-	t.mu.Unlock()
-
+func (e *Exporter) end(s *trace.SpanData) {
+	sp, ok := e.spans.LoadAndDelete(s.Context.SpanID)
 	if !ok {
 		return
 	}
 
-	root.span.AddEvent("reasoning", oteltrace.WithAttributes(
-		attribute.Int("phero.agent.iteration", e.Iteration),
-		attribute.String("phero.llm.reasoning", truncate(e.Content)),
-	))
-}
-
-func (t *Tracer) startTool(e trace.ToolCallEvent) {
-	parent := t.parentCtx(e.AgentName)
-	_, span := t.tracer.Start(parent, "tool "+e.ToolName)
-	span.SetAttributes(
-		attribute.String("phero.tool.name", e.ToolName),
-		attribute.String("phero.tool.arguments", truncate(e.Arguments)),
-		attribute.Int("phero.agent.iteration", e.Iteration),
-	)
-	t.mu.Lock()
-	t.tools[toolKey(e.AgentName, e.CallID)] = span
-	t.mu.Unlock()
-}
-
-func (t *Tracer) endTool(e trace.ToolResultEvent) {
-	key := toolKey(e.AgentName, e.CallID)
-
-	t.mu.Lock()
-	span, ok := t.tools[key]
-	delete(t.tools, key)
-	t.mu.Unlock()
-
+	span, ok := sp.(oteltrace.Span)
 	if !ok {
 		return
 	}
 
-	if e.Err != nil {
-		span.RecordError(e.Err)
-		span.SetStatus(codes.Error, e.Err.Error())
+	span.SetName(spanName(s))
+	span.SetAttributes(e.attributes(s)...)
+
+	for _, ev := range s.Events {
+		span.AddEvent(ev.Name, oteltrace.WithTimestamp(ev.Time), oteltrace.WithAttributes(convertAttrs(ev.Attrs)...))
+	}
+
+	for _, l := range s.Links {
+		span.AddLink(oteltrace.Link{SpanContext: toOTel(l)})
+	}
+
+	if s.Err != nil {
+		span.RecordError(s.Err)
+		span.SetStatus(codes.Error, s.Err.Error())
 	} else {
-		span.SetAttributes(attribute.String("phero.tool.result", truncate(e.Result)))
 		span.SetStatus(codes.Ok, "")
 	}
 
-	span.End()
+	span.End(oteltrace.WithTimestamp(s.End))
+
+	if s.Kind == trace.KindRun {
+		e.runs.Delete(s.Context.SpanID)
+		e.prompts.Delete(s.Context.SpanID)
+	}
 }
 
-// parentCtx returns the context carrying the agent's root span, or a background
-// context when no root span is active.
-func (t *Tracer) parentCtx(agentName string) context.Context {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if root, ok := t.roots[agentName]; ok {
-		return root.ctx
+// fullPrompt returns the full prompt of a model call by joining the previous
+// prompt of the same run with the call's message delta. A call outside a run
+// carries its whole prompt and is not remembered.
+func (e *Exporter) fullPrompt(s *trace.SpanData, call *trace.LLMCall) []llm.Message {
+	if _, ok := e.runs.Load(s.Parent.SpanID); !ok {
+		return call.Messages
 	}
 
-	return context.Background()
-}
-
-func llmKey(agentName string, iteration int) string {
-	return fmt.Sprintf("%s#%d", agentName, iteration)
-}
-
-func toolKey(agentName, callID string) string {
-	return agentName + "#" + callID
-}
-
-// truncate shortens s to at most maxAttrLen runes, appending an ellipsis when
-// it was longer.
-func truncate(s string) string {
-	runes := []rune(s)
-	if len(runes) <= maxAttrLen {
-		return s
+	var prev []llm.Message
+	if v, ok := e.prompts.Load(s.Parent.SpanID); ok {
+		prev, _ = v.([]llm.Message)
 	}
 
-	return string(runes[:maxAttrLen]) + "…"
+	offset := min(call.MessageOffset, len(prev))
+	full := make([]llm.Message, 0, offset+len(call.Messages))
+	full = append(full, prev[:offset]...)
+	full = append(full, call.Messages...)
+
+	e.prompts.Store(s.Parent.SpanID, full)
+
+	return full
+}
+
+// jsonAttr marshals v as a string attribute truncated to the size limit.
+func (e *Exporter) jsonAttr(key attribute.Key, v any) attribute.KeyValue {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return key.String("")
+	}
+
+	return e.strAttr(key, string(b))
+}
+
+// strAttr returns a string attribute truncated to the size limit.
+func (e *Exporter) strAttr(key attribute.Key, s string) attribute.KeyValue {
+	if e.maxAttrBytes > 0 && len(s) > e.maxAttrBytes {
+		cut := e.maxAttrBytes
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+
+		s = s[:cut] + "…"
+	}
+
+	return key.String(s)
+}
+
+// sink receives spans after the content policy has been applied.
+type sink struct{ e *Exporter }
+
+func (sink) OnStart(context.Context, *trace.SpanData) {}
+func (s sink) OnEnd(d *trace.SpanData)                { s.e.end(d) }
+func (sink) Shutdown(context.Context) error           { return nil }
+
+type idSource struct{ e *Exporter }
+
+func (src idSource) NewSpanContext(
+	ctx context.Context, parent trace.SpanContext, kind trace.Kind, name string, start time.Time,
+) trace.SpanContext {
+	_, span := src.e.tracer.Start(src.e.parentContext(ctx, parent), name,
+		oteltrace.WithTimestamp(start), oteltrace.WithSpanKind(spanKind(kind)))
+
+	sc := fromOTel(span.SpanContext())
+	if !sc.IsValid() {
+		return trace.SpanContext{}
+	}
+
+	src.e.spans.Store(sc.SpanID, span)
+
+	return sc
+}
+
+func spanKind(k trace.Kind) oteltrace.SpanKind {
+	switch k {
+	case trace.KindLLM, trace.KindEmbedding:
+		return oteltrace.SpanKindClient
+	case trace.KindRun, trace.KindTool, trace.KindHandoff, trace.KindMemory,
+		trace.KindRetrieval, trace.KindMiddleware, trace.KindCustom:
+		return oteltrace.SpanKindInternal
+	default:
+		return oteltrace.SpanKindInternal
+	}
+}
+
+func toOTel(sc trace.SpanContext) oteltrace.SpanContext {
+	cfg := oteltrace.SpanContextConfig{
+		TraceID: oteltrace.TraceID(sc.TraceID),
+		SpanID:  oteltrace.SpanID(sc.SpanID),
+		Remote:  sc.Remote,
+	}
+
+	if sc.Sampled {
+		cfg.TraceFlags = oteltrace.FlagsSampled
+	}
+
+	if ts, err := oteltrace.ParseTraceState(sc.TraceState); err == nil {
+		cfg.TraceState = ts
+	}
+
+	return oteltrace.NewSpanContext(cfg)
+}
+
+func fromOTel(sc oteltrace.SpanContext) trace.SpanContext {
+	return trace.SpanContext{
+		TraceID:    trace.TraceID(sc.TraceID()),
+		SpanID:     trace.SpanID(sc.SpanID()),
+		Sampled:    sc.IsSampled(),
+		Remote:     sc.IsRemote(),
+		TraceState: sc.TraceState().String(),
+	}
 }

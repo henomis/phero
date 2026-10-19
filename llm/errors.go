@@ -176,3 +176,8 @@ func (e *ProviderError) Error() string {
 func (e *ProviderError) Unwrap() error {
 	return e.Err
 }
+
+// ErrGuardrailBlocked is matched with errors.Is by errors that report a
+// guardrail blocking a model call, such as middleware.GuardrailError. Agents
+// use it to report the guardrail stop reason.
+var ErrGuardrailBlocked = errors.New("guardrail blocked the call")

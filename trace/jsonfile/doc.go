@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package jsonfile provides a file-backed Tracer that persists trace events as
-// newline-delimited JSON (NDJSON).
+// Package jsonfile provides a trace.Processor that writes every ended span as
+// one line of newline-delimited JSON (NDJSON) to a file.
 //
-// Each call to Trace appends one JSON object to the file; the file is opened in
-// append mode so multiple processes or restarts accumulate into the same file
-// without overwriting previous entries.
+// Each line holds the span identity and parent, name, kind, timing, error,
+// attributes, events, links, totals and the full typed payload (prompts,
+// responses, tool arguments and results). The file is opened in append mode,
+// so restarts accumulate into the same file.
 //
-// The caller is responsible for closing the Tracer via Close when it is no
-// longer needed.
+//	proc, err := jsonfile.New("trace.ndjson")
+//	if err != nil { ... }
+//	p := trace.NewProvider(trace.WithProcessor(proc))
+//	defer p.Shutdown(ctx) // closes the file
 package jsonfile

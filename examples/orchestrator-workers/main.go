@@ -26,6 +26,7 @@ import (
 	"github.com/henomis/phero/v2/agent"
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/llm/openai"
+	"github.com/henomis/phero/v2/trace"
 	"github.com/henomis/phero/v2/trace/text"
 )
 
@@ -98,7 +99,7 @@ func buildLLMFromEnv() (llm.LLM, string) {
 }
 
 func buildOrchestrator(llmClient llm.LLM) (*agent.Agent, error) {
-	textTracer := text.New(os.Stdout)
+	tracing := trace.NewProvider(trace.WithProcessor(text.New(os.Stdout)))
 
 	researcher, err := agent.New(llmClient, "Researcher", strings.TrimSpace(`You are a research specialist agent.
 
@@ -110,7 +111,7 @@ You receive a focused research question or subtask. Produce a concise, factual s
 		return nil, err
 	}
 
-	researcher.SetTracer(textTracer)
+	researcher.SetTracing(tracing)
 
 	writer, err := agent.New(llmClient, "Writer", strings.TrimSpace(`You are a technical writing specialist agent.
 
@@ -123,7 +124,7 @@ Produce a clear, engaging, well-structured narrative.
 		return nil, err
 	}
 
-	writer.SetTracer(textTracer)
+	writer.SetTracing(tracing)
 
 	critic, err := agent.New(llmClient, "Critic", strings.TrimSpace(`You are a critical review specialist agent.
 
@@ -137,7 +138,7 @@ Keep feedback direct and actionable.`))
 		return nil, err
 	}
 
-	critic.SetTracer(textTracer)
+	critic.SetTracing(tracing)
 
 	researchTool, err := researcher.AsTool(
 		"research",
@@ -197,7 +198,7 @@ Important:
 	}
 
 	orchestrator.SetMaxIterations(20)
-	orchestrator.SetTracer(textTracer)
+	orchestrator.SetTracing(tracing)
 
 	return orchestrator, nil
 }

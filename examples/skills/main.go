@@ -101,7 +101,7 @@ func main() {
 		panic(err)
 	}
 
-	// a.SetTracer(text.New(os.Stderr))
+	// a.SetTracing(trace.NewProvider(trace.WithProcessor(text.New(os.Stderr))))
 
 	res, err := a.Run(ctx, llm.Text(`Your task:
 1. Check if the file "/tmp/quote.html" exists.

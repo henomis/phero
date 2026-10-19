@@ -16,12 +16,10 @@ package agent
 
 import (
 	"context"
-	"os"
 	"strings"
 
 	"github.com/henomis/phero/v2/agent"
 	"github.com/henomis/phero/v2/llm"
-	"github.com/henomis/phero/v2/trace/text"
 )
 
 const (
@@ -109,8 +107,7 @@ func (t *Tool) handle(ctx context.Context, input *Input) (*Output, error) {
 		}
 	}
 
-	subAgent.SetTracer(text.New(os.Stdout))
-
+	// The sub-agent inherits the parent's trace provider from ctx.
 	result, err := subAgent.Run(ctx, llm.Text(instructions))
 	if err != nil {
 		return nil, err

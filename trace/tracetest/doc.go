@@ -12,14 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package trace
-
-// NoopTracer discards every event. It is the zero-cost default used when no
-// tracer is configured.
-type NoopTracer struct{}
-
-// Trace discards the event.
-func (NoopTracer) Trace(_ Event) {}
-
-// Noop is a ready-to-use NoopTracer.
-var Noop Tracer = NoopTracer{}
+// Package tracetest provides an in-memory trace.Processor for tests.
+//
+//	rec := tracetest.NewRecorder()
+//	p := trace.NewProvider(trace.WithProcessor(rec))
+//	a.SetTracing(p)
+//	_, _ = a.Run(ctx, llm.Text("hi"))
+//	runs := rec.ByKind(trace.KindRun)
+package tracetest

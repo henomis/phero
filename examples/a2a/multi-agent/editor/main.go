@@ -42,6 +42,7 @@ import (
 	"github.com/henomis/phero/v2/agent"
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/llm/openai"
+	"github.com/henomis/phero/v2/trace"
 	"github.com/henomis/phero/v2/trace/text"
 )
 
@@ -80,7 +81,7 @@ Return the complete polished article — not a list of changes.`,
 		log.Fatalf("create agent: %v", err)
 	}
 
-	editor.SetTracer(text.New(os.Stderr))
+	editor.SetTracing(trace.NewProvider(trace.WithProcessor(text.New(os.Stderr))))
 
 	srv, err := a2a.New(editor, "http://localhost"+addr,
 		a2a.WithVersion("1.0"),

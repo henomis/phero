@@ -157,15 +157,47 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, opts ...ll
 	}
 
 	return &llm.Result{
-		Message: msg,
-		Model:   model,
-		Usage: &llm.Usage{
-			InputTokens:      int(res.Usage.InputTokens),
-			OutputTokens:     int(res.Usage.OutputTokens),
-			CacheReadTokens:  int(res.Usage.CacheReadInputTokens),
-			CacheWriteTokens: int(res.Usage.CacheCreationInputTokens),
-		},
+		Message:         msg,
+		Model:           model,
+		Usage:           usageFromAnthropic(res.Usage),
+		FinishReason:    finishReasonFromAnthropic(res.StopReason),
+		RawFinishReason: string(res.StopReason),
 	}, nil
+}
+
+// Provider returns "anthropic".
+func (c *Client) Provider() string { return providerName }
+
+// Model returns the configured model.
+func (c *Client) Model() string { return strings.TrimSpace(c.model) }
+
+// usageFromAnthropic converts Anthropic usage. Anthropic counts thinking in
+// output_tokens without a separate figure, so ReasoningTokens stays zero.
+func usageFromAnthropic(u anthropicapi.Usage) *llm.Usage {
+	return &llm.Usage{
+		InputTokens:      int(u.InputTokens),
+		OutputTokens:     int(u.OutputTokens),
+		CacheReadTokens:  int(u.CacheReadInputTokens),
+		CacheWriteTokens: int(u.CacheCreationInputTokens),
+	}
+}
+
+// finishReasonFromAnthropic maps an Anthropic stop reason to the common set.
+func finishReasonFromAnthropic(r anthropicapi.StopReason) llm.FinishReason {
+	switch r {
+	case "":
+		return ""
+	case anthropicapi.StopReasonEndTurn, anthropicapi.StopReasonStopSequence, anthropicapi.StopReasonPauseTurn:
+		return llm.FinishStop
+	case anthropicapi.StopReasonMaxTokens:
+		return llm.FinishLength
+	case anthropicapi.StopReasonToolUse:
+		return llm.FinishToolCalls
+	case anthropicapi.StopReasonRefusal:
+		return llm.FinishContentFilter
+	default:
+		return llm.FinishError
+	}
 }
 
 // buildParams converts Phero messages and call options into Anthropic request

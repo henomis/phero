@@ -58,19 +58,19 @@ const (
 // ContentPart is a single piece of content within a message — either text or an image.
 type ContentPart struct {
 	// Type identifies the kind of content.
-	Type ContentType
+	Type ContentType `json:"type"`
 	// Text holds the text content when Type is ContentTypeText.
-	Text string
+	Text string `json:"text,omitempty"`
 	// ImageURL holds the image URL when Type is ContentTypeImageURL.
-	ImageURL string
+	ImageURL string `json:"imageUrl,omitempty"`
 	// ImageBase64 holds the base64-encoded image bytes when Type is ContentTypeImageBase64.
-	ImageBase64 string
+	ImageBase64 string `json:"imageBase64,omitempty"`
 	// MIMEType is the MIME type of the image (e.g. "image/png") when Type is ContentTypeImageBase64.
-	MIMEType string
+	MIMEType string `json:"mimeType,omitempty"`
 	// Signature holds the provider verification signature for a reasoning part
 	// (Type ContentTypeReasoning). It must be round-tripped unchanged so the
 	// provider accepts the thinking block on subsequent turns.
-	Signature string
+	Signature string `json:"signature,omitempty"`
 }
 
 // Text returns a ContentPart containing the given plain text.
@@ -161,41 +161,41 @@ func detectImageMIMEType(data []byte, path string) string {
 // FunctionCall holds the name and JSON-encoded arguments of a tool invocation.
 type FunctionCall struct {
 	// Name is the name of the tool being called.
-	Name string
+	Name string `json:"name"`
 	// Arguments is the raw JSON-encoded argument object.
-	Arguments string
+	Arguments string `json:"arguments"`
 }
 
 // ToolCall represents a single tool invocation requested by the model.
 type ToolCall struct {
 	// ID is the opaque identifier assigned by the model to correlate this call with its result.
-	ID string
+	ID string `json:"id"`
 	// Type is the tool type (always ToolTypeFunction for function tools).
-	Type string
+	Type string `json:"type"`
 	// Function holds the name and arguments for this call.
-	Function FunctionCall
+	Function FunctionCall `json:"function"`
 }
 
 // Message is a single turn in a conversation between a user, assistant, or tool.
 type Message struct {
 	// Role is the participant role: one of RoleSystem, RoleUser, RoleAssistant, RoleTool.
-	Role string
+	Role string `json:"role"`
 	// Parts holds the multimodal content of the message.
 	// For simple text messages this will be a single ContentPart with Type ContentTypeText.
-	Parts []ContentPart
+	Parts []ContentPart `json:"parts,omitempty"`
 	// ToolCalls holds tool invocations requested by the assistant.
 	// Only populated on assistant messages.
-	ToolCalls []ToolCall
+	ToolCalls []ToolCall `json:"toolCalls,omitempty"`
 	// ToolCallID is the ID of the ToolCall this message is a response to.
 	// Only set on tool-result messages (Role == RoleTool).
-	ToolCallID string
+	ToolCallID string `json:"toolCallId,omitempty"`
 	// ToolError reports that the tool call this message answers failed.
 	// Only meaningful on tool-result messages (Role == RoleTool). Providers that
 	// model tool errors natively (e.g. Anthropic's tool_result is_error) use it;
 	// others convey the failure through the message's text content.
-	ToolError bool
+	ToolError bool `json:"toolError,omitempty"`
 	// Name is an optional participant name, used by some providers.
-	Name string
+	Name string `json:"name,omitempty"`
 }
 
 // TextContent returns the concatenation of all text parts in the message.
@@ -274,30 +274,65 @@ func ToolResultMessage(toolCallID string, parts ...ContentPart) Message {
 
 // Usage holds token consumption figures from a single LLM call.
 type Usage struct {
-	// InputTokens is the number of tokens in the prompt sent to the model.
-	InputTokens int
+	// InputTokens is the number of prompt tokens sent to the model, excluding
+	// CacheReadTokens and CacheWriteTokens.
+	InputTokens int `json:"inputTokens"`
 	// OutputTokens is the number of tokens produced by the model.
-	OutputTokens int
+	OutputTokens int `json:"outputTokens"`
 	// CacheReadTokens is the number of input tokens served from a prompt cache.
 	// Only populated by providers that report it (e.g. Anthropic prompt caching);
 	// zero otherwise. These tokens are billed at the cache-read rate.
-	CacheReadTokens int
+	CacheReadTokens int `json:"cacheReadTokens,omitempty"`
 	// CacheWriteTokens is the number of input tokens written to a prompt cache.
 	// Only populated by providers that report it; zero otherwise. These tokens
 	// are billed at the cache-write rate.
-	CacheWriteTokens int
+	CacheWriteTokens int `json:"cacheWriteTokens,omitempty"`
+	// ReasoningTokens is the number of output tokens spent on reasoning
+	// (extended thinking). It is a subset of OutputTokens, never added on top.
+	// Zero when the provider does not report it separately.
+	ReasoningTokens int `json:"reasoningTokens,omitempty"`
+}
+
+// FinishReason is the normalised reason a model stopped generating.
+type FinishReason string
+
+const (
+	// FinishStop means the model reached a natural stop point or a stop sequence.
+	FinishStop FinishReason = "stop"
+	// FinishLength means the output hit the token limit.
+	FinishLength FinishReason = "length"
+	// FinishToolCalls means the model stopped to call tools.
+	FinishToolCalls FinishReason = "tool_calls"
+	// FinishContentFilter means the provider blocked or truncated the output.
+	FinishContentFilter FinishReason = "content_filter"
+	// FinishError means the provider reported an error or another reason.
+	FinishError FinishReason = "error"
+)
+
+// Describer is optionally implemented by LLM backends to report the provider
+// and the configured model, used for observability.
+type Describer interface {
+	// Provider returns the provider name, e.g. "openai".
+	Provider() string
+	// Model returns the configured model name.
+	Model() string
 }
 
 // Result represents the output of an LLM execution, including the assistant message and any tool calls.
 type Result struct {
-	Message *Message
+	Message *Message `json:"message"`
 	// Usage holds token counts for this call. May be nil when the provider does
 	// not return usage information.
-	Usage *Usage
+	Usage *Usage `json:"usage,omitempty"`
 	// Model is the model that produced this result, as reported by the provider
 	// (which may be more specific than the requested name, e.g. a dated version).
 	// Used for best-effort cost estimation; may be empty.
-	Model string
+	Model string `json:"model,omitempty"`
+	// FinishReason is the normalised reason the model stopped. Empty when the
+	// provider does not report one.
+	FinishReason FinishReason `json:"finishReason,omitempty"`
+	// RawFinishReason is the provider's original finish reason.
+	RawFinishReason string `json:"rawFinishReason,omitempty"`
 }
 
 // LLM is the minimal interface implemented by chat-model backends.

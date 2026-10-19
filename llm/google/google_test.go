@@ -178,9 +178,13 @@ func TestExecute_TextAndUsage(t *testing.T) {
 		t.Errorf("model = %q", res.Model)
 	}
 
-	want := llm.Usage{InputTokens: 15, OutputTokens: 10, CacheReadTokens: 5}
+	want := llm.Usage{InputTokens: 15, OutputTokens: 10, CacheReadTokens: 5, ReasoningTokens: 3}
 	if res.Usage == nil || *res.Usage != want {
 		t.Errorf("usage = %+v, want %+v", res.Usage, want)
+	}
+
+	if res.FinishReason != llm.FinishStop || res.RawFinishReason != "STOP" {
+		t.Errorf("finish = %q (%q)", res.FinishReason, res.RawFinishReason)
 	}
 
 	req := f.request(t, 0)
