@@ -47,12 +47,6 @@ func weather(_ context.Context, in *WeatherInput) (string, error) {
 }
 
 func main() {
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey == "" {
-		fmt.Fprintln(os.Stderr, "OPENAI_API_KEY is not set")
-		os.Exit(1)
-	}
-
 	ctx := context.Background()
 
 	// OpenTelemetry SDK wiring, owned by the application.
@@ -68,7 +62,9 @@ func main() {
 		trace.WithResourceAttributes(trace.String("deployment.environment", "example")),
 	)
 
-	client := openai.New(apiKey, openai.WithModel("gpt-4o-mini"))
+	// Build LLM client from environment variables
+	client, llmInfo := buildLLMFromEnv()
+	fmt.Printf("LLM: %s\n\n", llmInfo)
 
 	weatherTool, err := llm.NewTool("get_weather", "Returns the current weather of a city", weather)
 	if err != nil {
@@ -104,6 +100,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Read the spans before shutdown: InMemoryExporter.Shutdown resets them.
+	spans := mem.GetSpans()
+
 	if err := tp.Shutdown(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "shutdown: %v\n", err)
 	}
@@ -113,10 +112,43 @@ func main() {
 		result.Summary.StopReason, result.Summary.LLMCalls,
 		result.Summary.Usage.InputTokens, result.Summary.Usage.OutputTokens, result.Summary.TraceID)
 
-	printSpans(mem.GetSpans())
+	printSpans(spans)
 }
 
 // printSpans prints each exported span with its GenAI attributes.
+func buildLLMFromEnv() (llm.LLM, string) {
+	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	baseURL := strings.TrimSpace(os.Getenv("OPENAI_BASE_URL"))
+	model := strings.TrimSpace(os.Getenv("OPENAI_MODEL"))
+
+	// If no key and no base URL are set, assume a local OpenAI-compatible server (e.g. Ollama).
+	if apiKey == "" && baseURL == "" {
+		baseURL = openai.OllamaBaseURL
+	}
+
+	if model == "" {
+		if baseURL == openai.OllamaBaseURL && apiKey == "" {
+			model = "gpt-oss:20b-cloud"
+		} else {
+			model = openai.DefaultModel
+		}
+	}
+
+	opts := []openai.Option{openai.WithModel(model)}
+	if baseURL != "" {
+		opts = append(opts, openai.WithBaseURL(baseURL))
+	}
+
+	client := openai.New(apiKey, opts...)
+
+	info := fmt.Sprintf("model=%s base_url=%s", model, baseURL)
+	if baseURL == "" {
+		info = fmt.Sprintf("model=%s", model)
+	}
+
+	return client, info
+}
+
 func printSpans(spans tracetest.SpanStubs) {
 	for _, s := range spans {
 		fmt.Printf("%s  span=%s parent=%s  %s (%s)\n",

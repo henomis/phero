@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/henomis/phero/v2/agent"
@@ -61,13 +62,9 @@ func calculate(_ context.Context, input *CalculatorInput) (*CalculatorOutput, er
 }
 
 func main() {
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey == "" {
-		fmt.Fprintln(os.Stderr, "OPENAI_API_KEY is not set")
-		os.Exit(1)
-	}
-
-	client := openai.New(apiKey, openai.WithModel("gpt-4o-mini"))
+	// Build LLM client from environment variables
+	client, llmInfo := buildLLMFromEnv()
+	fmt.Fprintf(os.Stderr, "LLM: %s\n\n", llmInfo)
 
 	calculatorTool, err := llm.NewTool("calculator", "Performs basic arithmetic", calculate)
 	if err != nil {
@@ -97,6 +94,39 @@ func main() {
 
 	fmt.Printf("\nResult: %s\n", result.TextContent())
 	printRunSummary(result.Summary)
+}
+
+func buildLLMFromEnv() (llm.LLM, string) {
+	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	baseURL := strings.TrimSpace(os.Getenv("OPENAI_BASE_URL"))
+	model := strings.TrimSpace(os.Getenv("OPENAI_MODEL"))
+
+	// If no key and no base URL are set, assume a local OpenAI-compatible server (e.g. Ollama).
+	if apiKey == "" && baseURL == "" {
+		baseURL = openai.OllamaBaseURL
+	}
+
+	if model == "" {
+		if baseURL == openai.OllamaBaseURL && apiKey == "" {
+			model = "gpt-oss:20b-cloud"
+		} else {
+			model = openai.DefaultModel
+		}
+	}
+
+	opts := []openai.Option{openai.WithModel(model)}
+	if baseURL != "" {
+		opts = append(opts, openai.WithBaseURL(baseURL))
+	}
+
+	client := openai.New(apiKey, opts...)
+
+	info := fmt.Sprintf("model=%s base_url=%s", model, baseURL)
+	if baseURL == "" {
+		info = fmt.Sprintf("model=%s", model)
+	}
+
+	return client, info
 }
 
 func printRunSummary(summary *trace.RunSummary) {
