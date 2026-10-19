@@ -65,6 +65,8 @@ const (
 	StopMaxIterations StopReason = "max_iterations"
 	// StopHandoff means the run ended by handing off to other agents.
 	StopHandoff StopReason = "handoff"
+	// StopRequested means a tool stopped the run on purpose (agent.StopRun).
+	StopRequested StopReason = "stopped"
 	// StopCancelled means the context was cancelled.
 	StopCancelled StopReason = "cancelled"
 	// StopGuardrail means a guardrail blocked a model call.

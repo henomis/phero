@@ -31,10 +31,32 @@ var (
 	ErrMaxIterationsReached = errors.New("maximum iterations reached")
 	// ErrSessionSaveFailed is returned when the memory save after a successful run fails.
 	ErrSessionSaveFailed = errors.New("session save failed")
+	// ErrStopRun matches the error of a run that a tool stopped with StopRun.
+	ErrStopRun = errors.New("run stopped by a tool")
 	// ErrIncompleteStream is returned by RunStream when the LLM stream ended without
 	// a terminal chunk carrying the assembled message.
 	ErrIncompleteStream = errors.New("llm stream ended without a complete message")
 )
+
+// StopRun returns the error a tool's handler returns to end the agent's run
+// on purpose, for example to wait for a human: the run ends once every tool
+// call of the current round has run, without another LLM call. Run returns
+// the partial result, with its Summary (StopReason trace.StopRequested), and
+// an error matching ErrStopRun and cause. The run's span ends without an
+// error: a requested stop is not a failure.
+//
+// The tool's call is recorded as successful, with "The run was stopped:"
+// and the error's text as its result. A sub-agent run through AsTool that is
+// stopped stops its caller's run too, since AsTool returns its error.
+// Cancelling the run's context with a StopRun cause
+// (context.WithCancelCause) is reported the same way.
+func StopRun(cause error) error {
+	if cause == nil {
+		return ErrStopRun
+	}
+
+	return fmt.Errorf("%w: %w", ErrStopRun, cause)
+}
 
 // ToolAlreadyExistsError is returned when a tool with the same name is already registered.
 type ToolAlreadyExistsError struct {

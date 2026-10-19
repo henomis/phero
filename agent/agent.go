@@ -257,14 +257,17 @@ func (a *Agent) callOptions() []llm.CallOption {
 // The agent calls the LLM, executes any requested tool calls, and repeats until
 // the model returns a message without tool calls.
 //
-// If the maximum iterations limit is reached, the function returns
-// ErrMaxIterationsReached together with a non-nil result holding any partial
-// text the model produced and the run's Summary (use errors.Is to distinguish).
-//
-// ctx is checked before every iteration, so cancelling it (for example from
-// inside a tool) stops the run even when the LLM ignores ctx. A cancelled run
-// returns a non-nil partial result, like ErrMaxIterationsReached, and an error
-// matching ctx.Err() and, when set, the cause given to context.WithCancelCause.
+// A run that fails still returns a non-nil result, holding any partial text
+// the model produced and the run's Summary (whose StopReason says why it
+// ended), together with the error; use errors.Is to tell the cases apart:
+//   - ErrMaxIterationsReached when the iteration limit is reached;
+//   - ErrStopRun when a tool stopped the run (see StopRun);
+//   - ctx.Err() and, when set, the cause given to context.WithCancelCause when
+//     ctx is cancelled. ctx is checked before every iteration, so cancelling it
+//     (for example from inside a tool) stops the run even when the LLM
+//     ignores ctx;
+//   - the LLM's or memory's error otherwise (llm.ErrGuardrailBlocked when a
+//     guardrail blocked the call).
 //
 // The session is saved to memory even when ctx is cancelled. If saving fails,
 // the result is still returned together with the save error joined via
@@ -313,7 +316,7 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 
 	session, sessionIndex, err = a.prepareSession(ctx, parts)
 	if err != nil {
-		return nil, err
+		return &Result{}, err
 	}
 
 	for {
@@ -335,10 +338,14 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 				return partialResultFromSession(session[sessionIndex:]), cancellationError(ctx)
 			}
 
-			return nil, iterErr
+			return partialResultFromSession(session[sessionIndex:]), iterErr
 		}
 
 		session = iterationResult.session
+
+		if iterationResult.stop != nil {
+			return iterationResult.result, iterationResult.stop
+		}
 
 		// If result is nil, the agent executed tool calls and needs to call the LLM again.
 		if iterationResult.result != nil {
@@ -355,10 +362,19 @@ func (a *Agent) finishRun(
 ) error {
 	rs.run.StopReason = stopReason(ctx, result, err)
 
+	// A stop a tool asked for is how the run was meant to end, not a failure:
+	// its span ends without an error, unless saving the session fails.
+	var spanErr error
+	if rs.run.StopReason != trace.StopRequested {
+		spanErr = err
+	}
+
 	// A cancelled run still records its turn: saving must not inherit the cancellation.
 	if session != nil {
 		if saveErr := a.saveSession(context.WithoutCancel(ctx), session, sessionIndex); saveErr != nil {
-			err = errors.Join(err, fmt.Errorf("%w: %w", ErrSessionSaveFailed, saveErr))
+			saveErr = fmt.Errorf("%w: %w", ErrSessionSaveFailed, saveErr)
+			err = errors.Join(err, saveErr)
+			spanErr = errors.Join(spanErr, saveErr)
 		}
 	}
 
@@ -370,7 +386,7 @@ func (a *Agent) finishRun(
 		}
 	}
 
-	rs.span.End(err)
+	rs.span.End(spanErr)
 
 	if result != nil {
 		result.Summary = trace.NewRunSummary(rs.span)
@@ -384,6 +400,8 @@ func stopReason(ctx context.Context, result *Result, err error) trace.StopReason
 	switch {
 	case errors.Is(err, ErrMaxIterationsReached):
 		return trace.StopMaxIterations
+	case errors.Is(err, ErrStopRun):
+		return trace.StopRequested
 	case err != nil && (ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)):
 		return trace.StopCancelled
 	case errors.Is(err, llm.ErrGuardrailBlocked):
@@ -470,6 +488,8 @@ type agentIteration struct {
 	session []llm.Message
 	// result is the run's final result; nil means the loop must call the LLM again.
 	result *Result
+	// stop is the StopRun error a tool returned: the run ends with result.
+	stop error
 }
 
 // handleAgentIteration executes one iteration of the agent loop: it calls the LLM with the current messages,
@@ -540,11 +560,13 @@ func (a *Agent) processToolCalls(
 	var wg sync.WaitGroup
 	wg.Add(len(toolCalls))
 
+	stops := make([]error, len(toolCalls))
+
 	for i, toolCall := range toolCalls {
 		go func() {
 			defer wg.Done()
 
-			results[i] = a.handleToolCall(ctx, toolCall, iteration)
+			results[i], stops[i] = a.handleToolCall(ctx, toolCall, iteration)
 		}()
 	}
 
@@ -571,6 +593,16 @@ func (a *Agent) processToolCalls(
 		if hAgent, ok := a.handoffs[toolCalls[i].Function.Name]; ok {
 			handoffs = append(handoffs, a.handoff(ctx, hAgent, handoffContext(toolCalls[i])))
 		}
+	}
+
+	// A stop ends the run after this round: every call of the round ran and
+	// its result is in the session, as for a handoff.
+	if stop := errors.Join(stops...); stop != nil {
+		return agentIteration{
+			session: session,
+			result:  &Result{Parts: nonBlankParts(textOnly(message.Parts))},
+			stop:    stop,
+		}, nil
 	}
 
 	if len(handoffs) > 0 {
@@ -608,8 +640,9 @@ func (a *Agent) handoff(ctx context.Context, target *Agent, handoffCtx string) H
 	return Handoff{Agent: target, Context: handoffCtx, Span: span.Context()}
 }
 
-// handleToolCall executes a tool call and returns the result as a message to be added to the conversation.
-func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, iteration int) *llm.Message {
+// handleToolCall executes a tool call and returns the result as a message to be added to the conversation,
+// and the tool's error when it asked to stop the run (StopRun).
+func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, iteration int) (*llm.Message, error) {
 	payload := &trace.ToolCall{
 		Name:      toolCall.Function.Name,
 		CallID:    toolCall.ID,
@@ -619,6 +652,14 @@ func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, itera
 	ctx, span := trace.Start(ctx, string(trace.KindTool)+" "+toolCall.Function.Name, payload)
 
 	resultParts, err := a.executeToolCall(ctx, toolCall)
+
+	// A tool that stops the run did what it was asked: its call is no error.
+	var stop error
+	if errors.Is(err, ErrStopRun) {
+		stop, err = err, nil
+		resultParts = []llm.ContentPart{llm.Text("The run was stopped: " + stop.Error())}
+	}
+
 	if err != nil {
 		resultParts = []llm.ContentPart{llm.Text(fmt.Sprintf("Error executing tool '%s': %v", toolCall.Function.Name, err))}
 	}
@@ -632,7 +673,7 @@ func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, itera
 		Parts:      resultParts,
 		ToolCallID: toolCall.ID,
 		ToolError:  err != nil,
-	}
+	}, stop
 }
 
 // prepareSession prepares the messages for the LLM call, including the system prompt, memory messages, and user input.

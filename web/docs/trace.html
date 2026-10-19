@@ -85,7 +85,8 @@ fmt.Println(result.Summary.StopReason, result.Summary.Usage.CostUSD)</code></pre
       </table>
       <p>
         Durations are <code>End - Start</code>. A run's stop reason is one of <code>final</code>, <code>max_iterations</code>,
-        <code>handoff</code>, <code>cancelled</code>, <code>guardrail</code> or <code>error</code>.
+        <code>handoff</code>, <code>stopped</code> (a tool called <code>agent.StopRun</code>; the span is not marked
+        as failed), <code>cancelled</code>, <code>guardrail</code> or <code>error</code>.
       </p>
     </section>
 

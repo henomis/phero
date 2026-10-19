@@ -344,23 +344,31 @@ a.SetMaxIterations(10)</code></pre>
         <code>SetMaxIterations(n)</code>; <code>SetMaxIterations(0)</code> removes it.
       </p>
       <p>
+        A tool stops the run on purpose, for example to wait for a human answer, by returning
+        <code>agent.StopRun(cause)</code>. The run ends once every tool call of the current round has run, without
+        another LLM call. <code>Run</code> returns the partial result with its <code>Summary</code> (stop reason
+        <code>stopped</code>) and an error that matches both <code>agent.ErrStopRun</code> and the cause. A requested
+        stop is not a failure: the tool call is recorded as successful and the run's span ends without an error. A
+        sub-agent stopped inside <code>AsTool</code> stops its caller too.
+      </p>
+      <p>
         <code>Run</code> also checks its context before every iteration, so cancelling it stops the run even with an
-        LLM that ignores the context (a stub, a cache, a local function). A tool can stop the run this way, for
-        example to wait for a human answer. Cancelled runs also return a non-nil partial result with its
-        <code>Summary</code>, and an error that matches both <code>context.Canceled</code> and the cause given to
-        <code>context.WithCancelCause</code>. <code>RunStream</code> yields the same error.
+        LLM that ignores the context (a stub, a cache, a local function). Cancelled runs return a non-nil partial
+        result with its <code>Summary</code>, and an error that matches both <code>context.Canceled</code> and the
+        cause given to <code>context.WithCancelCause</code>; a <code>StopRun</code> cause counts as a requested stop.
+      </p>
+      <p>
+        Every failed run returns a non-nil result with any partial text and its <code>Summary</code>, whose
+        <code>StopReason</code> tells why it ended (a guardrail block is <code>guardrail</code>). <code>RunStream</code>
+        yields the same error, with the partial result in the event's <code>Result</code>.
       </p>
 
       <pre><code class="language-go">var errAskedHuman = errors.New("asked human")
 
-ctx, cancel := context.WithCancelCause(ctx)
-defer cancel(nil)
-
 askHuman, _ := llm.NewTool("ask_human", "Ask the user a question.",
     func(_ context.Context, in *struct{ Question string }) (string, error) {
         sendToUser(in.Question)
-        cancel(errAskedHuman) // stop the run after this tool call
-        return "question sent", nil
+        return "", agent.StopRun(errAskedHuman) // stop the run after this round
     })
 _ = a.AddTool(askHuman)
 
@@ -395,7 +403,9 @@ if errors.Is(err, errAskedHuman) {
         <li><code>ToolAlreadyExistsError</code>: tool name collision on <code>AddTool</code> or <code>AddHandoff</code></li>
         <li><code>ToolUnknownError</code>: model requested a tool that is not registered</li>
         <li><code>ErrMaxIterationsReached</code>: iteration cap hit (25 by default, often due to repeated tool calls); <code>Run</code> still returns a non-nil result with any partial text and the <code>Summary</code> alongside this error</li>
-        <li><code>context.Canceled</code> / <code>context.DeadlineExceeded</code>: the run's context ended; <code>Run</code> returns a non-nil partial result as above, and the error also wraps the cancellation cause when there is one</li>
+        <li><code>ErrStopRun</code>: a tool stopped the run with <code>StopRun</code>; the error also wraps the tool's cause</li>
+        <li><code>context.Canceled</code> / <code>context.DeadlineExceeded</code>: the run's context ended; the error also wraps the cancellation cause when there is one</li>
+        <li>Any other error (the LLM's, the memory's, <code>llm.ErrGuardrailBlocked</code>): like all of the above, <code>Run</code> returns it with a non-nil partial result and its <code>Summary</code></li>
         <li><code>ErrSessionSaveFailed</code>: the run completed successfully but saving the conversation to memory failed</li>
       </ul>
     </section>

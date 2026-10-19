@@ -58,7 +58,8 @@ type Event struct {
 	ToolError bool
 	// Iteration is the 1-based agent loop iteration this event belongs to.
 	Iteration int
-	// Result holds the final agent result (EventDone only).
+	// Result holds the final agent result (EventDone), or the partial result
+	// of a failed run, with its Summary, alongside the error.
 	Result *Result
 }
 
@@ -72,7 +73,8 @@ type emitFunc func(Event) bool
 // It yields text and reasoning deltas as the model produces them, a ToolCall and
 // ToolResult event around each tool invocation, and finally a single
 // EventDone whose Result mirrors what Run would have returned. If the run
-// fails, the iterator yields the error and stops.
+// fails, the iterator yields the error, with an Event whose Result is the
+// partial result Run would have returned (Type is empty), and stops.
 //
 // Streaming uses the underlying LLM's incremental API when it implements
 // llm.StreamingLLM; otherwise it transparently falls back to a single buffered
@@ -100,7 +102,7 @@ func (a *Agent) RunStream(ctx context.Context, parts ...llm.ContentPart) iter.Se
 		}
 
 		if err != nil {
-			yield(Event{}, err)
+			yield(Event{Result: result}, err)
 			return
 		}
 

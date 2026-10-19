@@ -214,6 +214,10 @@ func TestTracing_StopReasons(t *testing.T) {
 			name: "cancelled", cancel: true, llm: makeStub(textResult("ok"), nil),
 			want: trace.StopCancelled, iters: 0,
 		},
+		{
+			name: "stopped", llm: makeStub(toolCallResult("stop", "c", "{}"), nil, textResult("unreachable"), nil),
+			want: trace.StopRequested, iters: 1,
+		},
 	}
 
 	for _, tt := range tests {
@@ -226,6 +230,11 @@ func TestTracing_StopReasons(t *testing.T) {
 				t.Fatal(err)
 			}
 
+			stop := func(context.Context, *struct{}) (string, error) { return "", agent.StopRun(errors.New("ask a human")) }
+			if err := a.AddTool(mustTool(t, "stop", stop)); err != nil {
+				t.Fatal(err)
+			}
+
 			if tt.setup != nil {
 				tt.setup(a)
 			}
@@ -235,7 +244,7 @@ func TestTracing_StopReasons(t *testing.T) {
 				cancel()
 			}
 
-			_, _ = a.Run(ctx, llm.Text("go"))
+			res, err := a.Run(ctx, llm.Text("go"))
 
 			cancel()
 
@@ -247,6 +256,17 @@ func TestTracing_StopReasons(t *testing.T) {
 			run := runPayload(t, runs[0])
 			if run.StopReason != tt.want || run.Iterations != tt.iters {
 				t.Fatalf("stop=%q iterations=%d, want %q %d", run.StopReason, run.Iterations, tt.want, tt.iters)
+			}
+
+			// Every run, failed ones included, returns its Summary.
+			if res == nil || res.Summary == nil || res.Summary.StopReason != tt.want ||
+				res.Summary.Iterations != tt.iters {
+				t.Fatalf("result = %+v (err %v), want a Summary with stop %q", res, err, tt.want)
+			}
+
+			// Only a failure marks the run span as failed.
+			if failed := runs[0].Err != nil; failed != (err != nil && tt.want != trace.StopRequested) {
+				t.Fatalf("run span err = %v, run err = %v", runs[0].Err, err)
 			}
 		})
 	}
