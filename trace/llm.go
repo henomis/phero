@@ -35,10 +35,28 @@ type instrumentedLLM struct {
 	inner llm.LLM
 }
 
+// inLLMCall reports whether ctx is inside a model call span, either directly
+// or through middleware spans such as retry attempts. Other spans end the
+// search, so a model call made by a tool or a guardrail judge is still traced.
+func inLLMCall(ctx context.Context) bool {
+	for s := SpanFrom(ctx); s != nil; s = s.parent {
+		switch s.payload.(type) {
+		case *LLMCall:
+			return true
+		case *Middleware:
+			continue
+		default:
+			return false
+		}
+	}
+
+	return false
+}
+
 func (l *instrumentedLLM) Execute(
 	ctx context.Context, messages []llm.Message, opts ...llm.CallOption,
 ) (*llm.Result, error) {
-	if _, ok := SpanFrom(ctx).Payload().(*LLMCall); ok {
+	if inLLMCall(ctx) {
 		return l.inner.Execute(ctx, messages, opts...)
 	}
 
@@ -66,21 +84,7 @@ func (l *instrumentedLLM) Execute(
 	ctx, span := Start(ctx, name, call)
 
 	res, err := l.inner.Execute(ctx, messages, opts...)
-	if res != nil {
-		call.Response = res.Message
-		call.ResponseModel = res.Model
-		call.FinishReason = res.FinishReason
-		call.RawFinishReason = res.RawFinishReason
-
-		if res.Usage != nil {
-			call.Usage = *res.Usage
-		}
-
-		if !call.CacheHit {
-			call.CostUSD = call.Usage.Cost(call.ResponseModel)
-		}
-	}
-
+	call.SetResult(res)
 	span.End(err)
 
 	return res, err

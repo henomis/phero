@@ -318,3 +318,64 @@ func TestExporter_ErrorStatus(t *testing.T) {
 		t.Fatalf("expected error status and exception event, got %+v", got.Status)
 	}
 }
+
+func TestExporter_InputTokensIncludeCachedTokens(t *testing.T) {
+	p, mem, _ := setup(t, true)
+	a := mustAgent(t, describedLLM{fn: func([]llm.Message) *llm.Result {
+		res := answer("hi")
+		res.Usage.CacheReadTokens = 6
+		res.Usage.CacheWriteTokens = 4
+
+		return res
+	}}, "writer")
+	a.SetTracing(p)
+
+	if _, err := a.Run(context.Background(), llm.Text("hello")); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"chat gemini-test", "invoke_agent writer"} {
+		s := byName(mem.GetSpans(), name)[0]
+		want := map[attribute.Key]int64{
+			"gen_ai.usage.input_tokens":                20,
+			"gen_ai.usage.cache_read.input_tokens":     6,
+			"gen_ai.usage.cache_creation.input_tokens": 4,
+		}
+
+		for k, v := range want {
+			if got, ok := attr(s, k); !ok || got.AsInt64() != v {
+				t.Errorf("%s: %s = %v, want %d", name, k, got.AsInterface(), v)
+			}
+		}
+	}
+}
+
+func TestExporter_ReleasesPrompts(t *testing.T) {
+	mem := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(mem))
+
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+
+	exp := otelbackend.New(tp, otelbackend.WithContent(true))
+	p := trace.NewProvider(trace.WithProcessor(exp), trace.WithIDSource(exp.IDSource()))
+	client := describedLLM{fn: func([]llm.Message) *llm.Result { return answer("hi") }}
+
+	a := mustAgent(t, client, "writer")
+	a.SetTracing(p)
+
+	if _, err := a.Run(context.Background(), llm.Text("hello")); err != nil {
+		t.Fatal(err)
+	}
+
+	// A direct call under an application span is not part of any run.
+	ctx, request := trace.Start(trace.WithProvider(context.Background(), p), "handle request", nil)
+	if _, err := trace.InstrumentLLM(client).Execute(ctx, []llm.Message{llm.UserMessage(llm.Text("hi"))}); err != nil {
+		t.Fatal(err)
+	}
+
+	request.End(nil)
+
+	if runs, prompts := exp.Retained(); runs != 0 || prompts != 0 {
+		t.Fatalf("exporter retains %d runs and %d prompts", runs, prompts)
+	}
+}

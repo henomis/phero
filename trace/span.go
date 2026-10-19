@@ -100,7 +100,7 @@ func Start(ctx context.Context, name string, payload Payload, opts ...StartOptio
 	}
 
 	var sc SpanContext
-	if p != nil && p.ids != nil {
+	if p.recording() && p.ids != nil {
 		sc = p.ids.NewSpanContext(ctx, parentSC, payload.kind(), name, cfg.start)
 	}
 

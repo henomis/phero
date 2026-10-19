@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/trace"
@@ -252,6 +253,13 @@ func TestInstrumentLLM(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Nor does it under a middleware span of that call, such as a retry attempt.
+	attemptCtx, attempt := trace.Start(callCtx, "retry", &trace.Middleware{Name: "retry"})
+	if _, err := client.Execute(attemptCtx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	attempt.End(nil)
 	outer.End(nil)
 
 	calls := rec.ByKind(trace.KindLLM)
@@ -262,5 +270,85 @@ func TestInstrumentLLM(t *testing.T) {
 	p, _ := calls[0].Payload.(*trace.LLMCall)
 	if p.ResponseModel != "m" || p.Usage.OutputTokens != 3 || len(p.Messages) != 1 {
 		t.Fatalf("unexpected payload %+v", p)
+	}
+}
+
+func TestInstrumentLLM_TracesCallsUnderOtherSpans(t *testing.T) {
+	rec, ctx := newRecorded()
+	inner := llm.Func(func(context.Context, []llm.Message, ...llm.CallOption) (*llm.Result, error) {
+		return &llm.Result{Message: &llm.Message{Role: llm.RoleAssistant}}, nil
+	})
+	client := trace.InstrumentLLM(inner)
+
+	// A model call made by a tool that runs during another model call is its
+	// own call.
+	callCtx, outer := trace.Start(ctx, "chat", &trace.LLMCall{})
+	toolCtx, tool := trace.Start(callCtx, "execute_tool judge", &trace.ToolCall{Name: "judge"})
+
+	if _, err := client.Execute(toolCtx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	tool.End(nil)
+	outer.End(nil)
+
+	if n := len(rec.ByKind(trace.KindLLM)); n != 2 {
+		t.Fatalf("expected 2 LLM spans, got %d", n)
+	}
+}
+
+func TestLLMCall_SetResult(t *testing.T) {
+	usage := &llm.Usage{InputTokens: 1_000_000}
+
+	// Without a response model the cost is priced on the request model.
+	call := &trace.LLMCall{RequestModel: "gpt-4o-mini"}
+	call.SetResult(&llm.Result{Usage: usage})
+
+	if call.Usage.InputTokens != 1_000_000 || call.CostUSD != 0.15 {
+		t.Fatalf("unexpected usage %+v cost %v", call.Usage, call.CostUSD)
+	}
+
+	// A cache hit costs nothing. Its usage is whatever the cache reports (see
+	// middleware.WithReportCachedUsage).
+	hit := &trace.LLMCall{RequestModel: "gpt-4o-mini", CacheHit: true}
+	hit.SetResult(&llm.Result{Model: "gpt-4o-mini", FinishReason: llm.FinishStop, Usage: usage})
+
+	if hit.Usage != *usage || hit.CostUSD != 0 || hit.FinishReason != llm.FinishStop {
+		t.Fatalf("unexpected cache hit %+v", hit)
+	}
+
+	call.SetResult(nil)
+}
+
+type countingIDs struct{ calls int }
+
+func (c *countingIDs) NewSpanContext(
+	context.Context, trace.SpanContext, trace.Kind, string, time.Time,
+) trace.SpanContext {
+	c.calls++
+	return trace.SpanContext{}
+}
+
+func TestStart_StoppedProviderSkipsIDSource(t *testing.T) {
+	ids := &countingIDs{}
+	p := trace.NewProvider(trace.WithProcessor(tracetest.NewRecorder()), trace.WithIDSource(ids))
+	ctx := trace.WithProvider(context.Background(), p)
+
+	_, span := trace.Start(ctx, "before", nil)
+	span.End(nil)
+
+	if err := p.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	_, span = trace.Start(ctx, "after", nil)
+	span.End(nil)
+
+	if ids.calls != 1 {
+		t.Fatalf("expected the ID source to be used once, got %d", ids.calls)
+	}
+
+	if !span.Context().IsValid() {
+		t.Fatal("span after shutdown should still get a valid identity")
 	}
 }

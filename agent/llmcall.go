@@ -58,26 +58,7 @@ func (a *Agent) startLLMCall(
 
 // endLLMCall records the model result on call and ends span.
 func endLLMCall(span *trace.Span, call *trace.LLMCall, res *llm.Result, err error) {
-	if res != nil {
-		call.Response = res.Message
-		call.ResponseModel = res.Model
-		call.FinishReason = res.FinishReason
-		call.RawFinishReason = res.RawFinishReason
-
-		if res.Usage != nil {
-			call.Usage = *res.Usage
-		}
-
-		if !call.CacheHit {
-			model := call.ResponseModel
-			if model == "" {
-				model = call.RequestModel
-			}
-
-			call.CostUSD = call.Usage.Cost(model)
-		}
-	}
-
+	call.SetResult(res)
 	span.End(err)
 }
 

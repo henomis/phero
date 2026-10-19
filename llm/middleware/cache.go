@@ -262,13 +262,24 @@ func callContract(cfg *llm.CallConfig) string {
 		return ""
 	}
 
-	type contract struct {
-		Format     string          `json:"format,omitempty"`
-		Schema     map[string]any  `json:"schema,omitempty"`
-		ToolChoice *llm.ToolChoice `json:"tool_choice,omitempty"`
+	// toolChoice mirrors llm.ToolChoice without its JSON tags, so that the
+	// fingerprint, and so the stored entries, stay the same if those tags change.
+	type toolChoice struct {
+		Mode llm.ToolChoiceMode
+		Name string
 	}
 
-	c := contract{ToolChoice: cfg.ToolChoice}
+	type contract struct {
+		Format     string         `json:"format,omitempty"`
+		Schema     map[string]any `json:"schema,omitempty"`
+		ToolChoice *toolChoice    `json:"tool_choice,omitempty"`
+	}
+
+	var c contract
+	if tc := cfg.ToolChoice; tc != nil {
+		c.ToolChoice = &toolChoice{Mode: tc.Mode, Name: tc.Name}
+	}
+
 	if f := cfg.ResponseFormat; f != nil {
 		c.Format = f.Name()
 		c.Schema = f.Schema()

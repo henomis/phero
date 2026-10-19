@@ -274,7 +274,8 @@ func ToolResultMessage(toolCallID string, parts ...ContentPart) Message {
 
 // Usage holds token consumption figures from a single LLM call.
 type Usage struct {
-	// InputTokens is the number of tokens in the prompt sent to the model.
+	// InputTokens is the number of prompt tokens sent to the model, excluding
+	// CacheReadTokens and CacheWriteTokens.
 	InputTokens int `json:"inputTokens"`
 	// OutputTokens is the number of tokens produced by the model.
 	OutputTokens int `json:"outputTokens"`

@@ -145,6 +145,35 @@ type LLMCall struct {
 	CacheHit bool `json:"cacheHit,omitempty"`
 }
 
+// SetResult records the model result on c. The cost is priced on the response
+// model, falling back to the request model when the provider does not echo
+// it; a cache hit costs nothing.
+func (c *LLMCall) SetResult(res *llm.Result) {
+	if res == nil {
+		return
+	}
+
+	c.Response = res.Message
+	c.ResponseModel = res.Model
+	c.FinishReason = res.FinishReason
+	c.RawFinishReason = res.RawFinishReason
+
+	if res.Usage != nil {
+		c.Usage = *res.Usage
+	}
+
+	if c.CacheHit {
+		return
+	}
+
+	model := c.ResponseModel
+	if model == "" {
+		model = c.RequestModel
+	}
+
+	c.CostUSD = c.Usage.Cost(model)
+}
+
 // ToolCall is the payload of a tool execution span.
 type ToolCall struct {
 	// Name is the tool name.

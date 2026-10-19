@@ -350,8 +350,13 @@ func middlewareAttrs(m *trace.Middleware) []attribute.KeyValue {
 	return attrs
 }
 
+// usageAttrs returns the GenAI usage attributes. in excludes cached tokens,
+// while gen_ai.usage.input_tokens includes every input token, cached or not.
 func usageAttrs(in, out, cacheRead, cacheWrite, reasoning int) []attribute.KeyValue {
-	attrs := []attribute.KeyValue{semconv.GenAIUsageInputTokens(in), semconv.GenAIUsageOutputTokens(out)}
+	attrs := []attribute.KeyValue{
+		semconv.GenAIUsageInputTokens(in + cacheRead + cacheWrite),
+		semconv.GenAIUsageOutputTokens(out),
+	}
 
 	if cacheRead > 0 {
 		attrs = append(attrs, semconv.GenAIUsageCacheReadInputTokens(cacheRead))

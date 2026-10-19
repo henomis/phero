@@ -16,6 +16,8 @@ package middleware_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"math"
 	"testing"
@@ -296,5 +298,31 @@ func TestSemanticCache_ResponseFormatIsPartOfTheContract(t *testing.T) {
 		if inner.calls != c.wantCalls {
 			t.Fatalf("%s: inner calls = %d, want %d", c.name, inner.calls, c.wantCalls)
 		}
+	}
+}
+
+func TestSemanticCache_ToolChoiceContractIsStable(t *testing.T) {
+	emb := mapEmbedder{fn: func(string) embedding.Vector { return embedding.Vector{1, 0, 0} }}
+	store := &memStore{}
+
+	mw, err := middleware.NewSemanticCache(emb, store)
+	if err != nil {
+		t.Fatalf("NewSemanticCache: %v", err)
+	}
+
+	client := llm.Use(&countingLLM{text: "answer"}, mw)
+	msgs := []llm.Message{llm.UserMessage(llm.Text("hello"))}
+
+	if _, execErr := client.Execute(context.Background(), msgs, llm.WithToolChoice(llm.ToolChoiceNone)); execErr != nil {
+		t.Fatalf("Execute: %v", execErr)
+	}
+
+	// The fingerprint written by earlier releases, so that their entries keep
+	// matching.
+	legacy := sha256.Sum256([]byte(`{"tool_choice":{"Mode":"none","Name":""}}`))
+	want := hex.EncodeToString(legacy[:])
+
+	if len(store.points) != 1 || store.points[0].Payload["contract"] != want {
+		t.Fatalf("contract = %v, want %s", store.points[0].Payload["contract"], want)
 	}
 }

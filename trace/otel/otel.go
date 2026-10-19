@@ -45,6 +45,9 @@ type Exporter struct {
 
 	// spans holds the live OpenTelemetry span of each phero span.
 	spans sync.Map // trace.SpanID -> oteltrace.Span
+	// runs holds the live run spans. Only their model calls send a message
+	// delta, so only they need an entry in prompts.
+	runs sync.Map // trace.SpanID -> struct{}
 	// prompts holds, per run span, the prompt of its latest model call, so
 	// that each call can export its full input.
 	prompts sync.Map // trace.SpanID -> []llm.Message
@@ -95,6 +98,10 @@ func (e *Exporter) IDSource() trace.IDSource { return idSource{e} }
 
 // OnStart starts the OpenTelemetry span when the IDSource has not already.
 func (e *Exporter) OnStart(ctx context.Context, s *trace.SpanData) {
+	if s.Kind == trace.KindRun {
+		e.runs.Store(s.Context.SpanID, struct{}{})
+	}
+
 	if _, ok := e.spans.Load(s.Context.SpanID); ok {
 		return
 	}
@@ -161,13 +168,19 @@ func (e *Exporter) end(s *trace.SpanData) {
 	span.End(oteltrace.WithTimestamp(s.End))
 
 	if s.Kind == trace.KindRun {
+		e.runs.Delete(s.Context.SpanID)
 		e.prompts.Delete(s.Context.SpanID)
 	}
 }
 
 // fullPrompt returns the full prompt of a model call by joining the previous
-// prompt of the same run with the call's message delta.
+// prompt of the same run with the call's message delta. A call outside a run
+// carries its whole prompt and is not remembered.
 func (e *Exporter) fullPrompt(s *trace.SpanData, call *trace.LLMCall) []llm.Message {
+	if _, ok := e.runs.Load(s.Parent.SpanID); !ok {
+		return call.Messages
+	}
+
 	var prev []llm.Message
 	if v, ok := e.prompts.Load(s.Parent.SpanID); ok {
 		prev, _ = v.([]llm.Message)
