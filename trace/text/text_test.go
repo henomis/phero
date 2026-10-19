@@ -16,148 +16,57 @@ package text_test
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"strings"
 	"testing"
-	"time"
 
+	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/trace"
 	"github.com/henomis/phero/v2/trace/text"
 )
 
-func TestTextTracer_AgentStart(t *testing.T) {
+func TestProcessor_PrintsIndentedTree(t *testing.T) {
 	var buf bytes.Buffer
 
-	tr := text.New(&buf)
-	tr.Trace(trace.AgentStartEvent{
-		AgentName: "myagent",
-		Input:     "hello",
-		Timestamp: time.Date(2026, 3, 24, 10, 0, 0, 0, time.UTC),
-	})
+	p := trace.NewProvider(trace.WithProcessor(text.New(&buf)))
+	ctx := trace.WithProvider(context.Background(), p)
+
+	ctx, run := trace.Start(ctx, "invoke_agent myagent", &trace.Run{Agent: "myagent", Input: []llm.ContentPart{llm.Text("hello")}})
+	tctx, tool := trace.Start(ctx, "execute_tool bash", &trace.ToolCall{Name: "bash", Arguments: `{"cmd":"ls"}`, Result: "file.txt"})
+	tool.AddEvent("guardrail.blocked", trace.String("phero.guardrail.name", "pii"))
+	tool.End(errors.New("permission denied"))
+
+	_, call := trace.Start(tctx, "chat gpt", &trace.LLMCall{ResponseModel: "gpt", Usage: llm.Usage{InputTokens: 3, OutputTokens: 4}})
+	call.End(nil)
+
+	run.End(nil)
 
 	out := buf.String()
-	if !strings.Contains(out, "AgentStart") {
-		t.Errorf("expected 'AgentStart' in output, got: %q", out)
+	for _, want := range []string{
+		"▶", "invoke_agent myagent", "input=hello",
+		"\n" + "\033[2m", "  ", "execute_tool bash", `args={"cmd":"ls"}`, "result=file.txt", "err=", "permission denied",
+		"guardrail.blocked", "name=pii", "stop=", "tokens=3/4",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in output:\n%s", want, out)
+		}
 	}
 
-	if !strings.Contains(out, "myagent") {
-		t.Errorf("expected agent name in output, got: %q", out)
-	}
-
-	if !strings.Contains(out, "hello") {
-		t.Errorf("expected input in output, got: %q", out)
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("expected 5 lines, got %d:\n%s", len(lines), out)
 	}
 }
 
-func TestTextTracer_ToolCallResult(t *testing.T) {
+func TestProcessor_MaxLen(t *testing.T) {
 	var buf bytes.Buffer
 
-	tr := text.New(&buf)
-	tr.Trace(trace.ToolCallEvent{
-		AgentName: "agent1", ToolName: "bash",
-		Arguments: `{"cmd":"ls"}`, Iteration: 1,
-		Timestamp: time.Now(),
-	})
-	tr.Trace(trace.ToolResultEvent{
-		AgentName: "agent1", ToolName: "bash",
-		Result: "file.txt\n", Iteration: 1,
-		Timestamp: time.Now(),
-	})
+	p := trace.NewProvider(trace.WithProcessor(text.New(&buf, text.WithMaxLen(3), text.WithVerbose())))
+	_, s := trace.Start(trace.WithProvider(context.Background(), p), "t", &trace.ToolCall{Name: "t", Arguments: "abcdef"})
+	s.End(nil)
 
-	out := buf.String()
-	if !strings.Contains(out, "ToolCall") {
-		t.Errorf("expected 'ToolCall' in output")
-	}
-
-	if !strings.Contains(out, "ToolResult") {
-		t.Errorf("expected 'ToolResult' in output")
-	}
-
-	if !strings.Contains(out, "✓") {
-		t.Errorf("expected success icon in output")
+	if !strings.Contains(buf.String(), "args=abc…") {
+		t.Fatalf("expected truncated args, got %q", buf.String())
 	}
 }
-
-func TestTextTracer_ToolResultError(t *testing.T) {
-	var buf bytes.Buffer
-
-	tr := text.New(&buf)
-	tr.Trace(trace.ToolResultEvent{
-		AgentName: "agent1", ToolName: "bash",
-		Err: errTest, Iteration: 1,
-		Timestamp: time.Now(),
-	})
-
-	out := buf.String()
-	if !strings.Contains(out, "✗") {
-		t.Errorf("expected error icon in output, got: %q", out)
-	}
-}
-
-func TestTextTracer_RunSummary(t *testing.T) {
-	var buf bytes.Buffer
-
-	tr := text.New(&buf)
-	tr.Trace(trace.AgentRunSummaryEvent{
-		Summary: trace.RunSummary{
-			AgentName:       "agent1",
-			Iterations:      2,
-			LLMCalls:        2,
-			ToolCalls:       1,
-			ToolErrors:      0,
-			MemoryRetrieved: 2,
-			MemorySaved:     4,
-			Usage:           trace.UsageSummary{InputTokens: 12, OutputTokens: 5},
-			Latency:         trace.LatencySummary{},
-			Tools:           []trace.ToolCallSummary{{ToolName: "bash", Calls: 1, Errors: 0}},
-		},
-		Timestamp: time.Now(),
-	})
-
-	out := buf.String()
-	if !strings.Contains(out, "RunSummary") {
-		t.Errorf("expected 'RunSummary' in output, got: %q", out)
-	}
-
-	if !strings.Contains(out, "tool_calls=1") {
-		t.Errorf("expected tool call total in output, got: %q", out)
-	}
-
-	if !strings.Contains(out, "tools=[bash=1/0]") {
-		t.Errorf("expected per-tool summary in output, got: %q", out)
-	}
-}
-
-func TestTextTracer_AllEventTypes_NoPanic(t *testing.T) {
-	var buf bytes.Buffer
-
-	tr := text.New(&buf)
-	now := time.Now()
-
-	events := []trace.Event{
-		trace.AgentStartEvent{AgentName: "a", Input: "i", Timestamp: now},
-		trace.AgentIterationEvent{AgentName: "a", Iteration: 1, Timestamp: now},
-		trace.AgentRunSummaryEvent{Summary: trace.RunSummary{AgentName: "a"}, Timestamp: now},
-		trace.AgentEndEvent{AgentName: "a", Output: "o", Iterations: 1, Timestamp: now},
-		trace.LLMRequestEvent{AgentName: "a", MessageCount: 2, ToolNames: []string{"t1"}, Iteration: 1, Timestamp: now},
-		trace.LLMResponseEvent{AgentName: "a", Iteration: 1, Timestamp: now},
-		trace.ToolCallEvent{AgentName: "a", ToolName: "t", Arguments: "{}", Iteration: 1, Timestamp: now},
-		trace.ToolResultEvent{AgentName: "a", ToolName: "t", Result: "ok", Iteration: 1, Timestamp: now},
-		trace.MemorySaveEvent{AgentName: "a", Count: 3, Timestamp: now},
-		trace.MemoryRetrieveEvent{AgentName: "a", Count: 2, Timestamp: now},
-	}
-	for _, e := range events {
-		tr.Trace(e)
-	}
-
-	if buf.Len() == 0 {
-		t.Error("expected non-empty output")
-	}
-}
-
-// helpers
-
-type testError struct{ msg string }
-
-func (e testError) Error() string { return e.msg }
-
-var errTest = testError{"tool failed"}

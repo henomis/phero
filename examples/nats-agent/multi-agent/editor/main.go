@@ -40,6 +40,7 @@ import (
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/llm/openai"
 	natsagent "github.com/henomis/phero/v2/nats"
+	"github.com/henomis/phero/v2/trace"
 	"github.com/henomis/phero/v2/trace/text"
 )
 
@@ -77,7 +78,7 @@ Return the complete polished article — not a list of changes.`,
 		log.Fatalf("create agent: %v", err)
 	}
 
-	editor.SetTracer(text.New(os.Stderr))
+	editor.SetTracing(trace.NewProvider(trace.WithProcessor(text.New(os.Stderr))))
 
 	srv, err := natsagent.New(nc, editor, owner, name,
 		natsagent.WithAgentID("phero"),

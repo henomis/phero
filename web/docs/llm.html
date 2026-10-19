@@ -547,8 +547,8 @@ timeTool.Use(func(tool *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
     <section>
       <h2>Tracing raw LLM calls</h2>
       <p>
-        The <code>trace</code> package can wrap any <code>llm.LLM</code> with <code>trace.NewLLM</code>. This is useful when you want
-        observability around direct <code>Execute</code> calls without going through an agent.
+        The <code>trace</code> package can wrap any <code>llm.LLM</code> with <code>trace.InstrumentLLM</code> to record a
+        <code>chat</code> span for each direct <code>Execute</code> call made without an agent.
       </p>
 
       <pre><code class="language-go">import (
@@ -556,20 +556,24 @@ timeTool.Use(func(tool *llm.Tool, next llm.ToolHandler) llm.ToolHandler {
     "github.com/henomis/phero/v2/trace/text"
 )
 
-traced := trace.NewLLM(llmClient, text.New(os.Stderr))
+p := trace.NewProvider(trace.WithProcessor(text.New(os.Stderr)))
+traced := trace.InstrumentLLM(llmClient)
 
-result, err := traced.Execute(ctx, messages, llm.WithTools(tools...))</code></pre>
+result, err := traced.Execute(trace.WithProvider(ctx, p), messages, llm.WithTools(tools...))</code></pre>
 
       <p>
-        When called inside an agent, request and response events are automatically annotated with the agent name and iteration number.
+        Inside an agent the wrapper adds nothing: the agent already records each call as a span.
       </p>
     </section>
 
     <section>
       <h2>Token usage and cost</h2>
       <p>
-        Every <code>Result</code> carries <code>Usage{InputTokens, OutputTokens, CacheReadTokens, CacheWriteTokens}</code>
-        and the resolved <code>Model</code> name. Call <code>usage.Cost(model)</code> for a best-effort US-dollar
+        Every <code>Result</code> carries <code>Usage{InputTokens, OutputTokens, CacheReadTokens, CacheWriteTokens, ReasoningTokens}</code>,
+        the resolved <code>Model</code> name and a normalised <code>FinishReason</code> (<code>stop</code>, <code>length</code>,
+        <code>tool_calls</code>, <code>content_filter</code>, <code>error</code>; the provider's value is in <code>RawFinishReason</code>).
+        <code>ReasoningTokens</code> is a subset of <code>OutputTokens</code>, and cached input is reported only in
+        <code>CacheReadTokens</code>, so it is billed once. Call <code>usage.Cost(model)</code> for a best-effort US-dollar
         estimate using a built-in per-model pricing table; unknown models return <code>0</code>. Override or add rates
         with <code>llm.RegisterPricing</code>. Agents aggregate this into <code>RunSummary.Usage.CostUSD</code>.
       </p>

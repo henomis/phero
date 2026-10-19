@@ -12,24 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package trace provides observability hooks for phero agents and LLM calls.
+// Package trace records phero agent runs as trees of spans.
 //
-// A Tracer receives typed Event values at each significant lifecycle point:
-// agent start/end, per-iteration boundaries, LLM request/response, tool
-// call/result, and memory save/retrieve.
+// Each operation is a span created with Start and finished with End: an agent
+// run (*Run), a model call (*LLMCall), a tool call (*ToolCall), a handoff,
+// memory access, retrieval, embeddings, LLM middleware work, or a *Custom span
+// of your own. Spans are parented through the context, so concurrent runs
+// never share spans and a sub-agent run as a tool nests under that tool call.
+// The typed payload of a span holds the full input and output of the
+// operation.
 //
-// The package ships one built-in implementation:
+// A Provider delivers spans to Processors, called in order; several
+// processors fan spans out to several backends:
 //
-//   - NoopTracer discards all events (zero cost, the default).
+//	p := trace.NewProvider(trace.WithProcessor(text.New(os.Stderr)))
+//	a.SetTracing(p)                     // or ctx = trace.WithProvider(ctx, p)
+//	defer p.Shutdown(ctx)
 //
-// Concrete backends live in sub-packages and can be composed freely:
+// Backends live in sub-packages: trace/text (colorized span tree),
+// trace/jsonfile (NDJSON) and trace/otel (OpenTelemetry, GenAI semantic
+// conventions). trace/tracetest records spans in memory for tests. Content,
+// Redact and Batch wrap a processor to strip or mask content, or to export in
+// the background.
 //
-//   - trace/text   — human-readable, colour-coded lines written to an io.Writer.
-//   - trace/jsonfile — newline-delimited JSON (NDJSON) appended to a file.
+// Each span aggregates the Totals of its descendants (calls, tokens, cost,
+// time, per model, agent and tool). Agents build Result.Summary from the run
+// span, so the summary includes sub-agents. Totals are recorded even without
+// a provider; then nothing is exported.
 //
-// The tracer is propagated through the context using WithTracer and FromContext,
-// so tool handlers can emit their own events without coupling to the agent struct.
-//
-// An LLM wrapper is available via NewLLM, which can be used independently of any
-// agent to trace raw llm.LLM.Execute calls.
+// W3C trace context: Inject returns the traceparent of the current span and
+// Extract makes a remote span the parent of the next one. LogAttrs returns the
+// trace and span IDs for slog. WithSession and WithAttributes add a session
+// ID and attributes to every span started from a context.
 package trace

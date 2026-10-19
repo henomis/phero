@@ -25,6 +25,7 @@ import (
 	"github.com/henomis/phero/v2/embedding"
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/textsplitter"
+	"github.com/henomis/phero/v2/trace"
 	"github.com/henomis/phero/v2/vectorstore"
 )
 
@@ -137,7 +138,7 @@ func (m *RAG) ingestBatch(ctx context.Context, docs []document.Document, offset 
 		texts[i] = d.Content
 	}
 
-	vectors, err := m.embedder.Embed(ctx, texts)
+	vectors, err := m.embed(ctx, texts)
 	if err != nil {
 		return &IngestError{Op: opEmbed, BatchStart: offset, BatchEnd: offset + len(docs), Cause: err}
 	}
@@ -247,18 +248,30 @@ func (m *RAG) IngestOnce(ctx context.Context, splitter textsplitter.Splitter) er
 // Options are forwarded to the backing store, e.g. vectorstore.WithFilter to
 // restrict results by payload metadata. When no options are provided, the
 // default filter configured via WithFilter (if any) is applied.
+//
+// The search is traced as a span with a *trace.Retrieval payload, with the
+// query embedding as a child span.
 func (m *RAG) Query(
 	ctx context.Context, queryText string, opts ...vectorstore.QueryOption,
-) ([]vectorstore.ScoredPoint, error) {
+) (results []vectorstore.ScoredPoint, err error) {
 	if strings.TrimSpace(queryText) == "" {
 		return nil, ErrEmptyQueryText
 	}
 
-	if err := m.ensureCollection(ctx); err != nil {
+	payload := &trace.Retrieval{Query: queryText, TopK: int(m.topk)} //nolint:gosec // top-k is small
+	ctx, span := trace.Start(ctx, string(trace.KindRetrieval), payload)
+
+	defer func() {
+		payload.Hits = hits(results)
+
+		span.End(err)
+	}()
+
+	if err = m.ensureCollection(ctx); err != nil {
 		return nil, err
 	}
 
-	vectors, err := m.embedder.Embed(ctx, []string{queryText})
+	vectors, err := m.embed(ctx, []string{queryText})
 	if err != nil {
 		return nil, &QueryError{Op: opEmbed, Cause: err}
 	}
@@ -269,14 +282,50 @@ func (m *RAG) Query(
 
 	if len(opts) == 0 && m.filter != nil {
 		opts = []vectorstore.QueryOption{vectorstore.WithFilter(m.filter)}
+		payload.Filter = m.filter
 	}
 
-	results, err := m.store.Query(ctx, vectors[0], m.topk, opts...)
+	results, err = m.store.Query(ctx, vectors[0], m.topk, opts...)
 	if err != nil {
 		return nil, &QueryError{Op: "store query", Cause: err}
 	}
 
 	return results, nil
+}
+
+// embed calls the embedder inside a span with a *trace.Embedding payload.
+func (m *RAG) embed(ctx context.Context, texts []string) ([]embedding.Vector, error) {
+	ctx, span := trace.Start(ctx, string(trace.KindEmbedding), &trace.Embedding{Inputs: len(texts)})
+
+	vectors, err := m.embedder.Embed(ctx, texts)
+
+	span.End(err)
+
+	return vectors, err
+}
+
+// hits converts search results to trace hits, splitting the stored text from
+// the metadata.
+func hits(results []vectorstore.ScoredPoint) []trace.Hit {
+	if len(results) == 0 {
+		return nil
+	}
+
+	out := make([]trace.Hit, len(results))
+	for i, r := range results {
+		content, _ := r.Payload[contentKey].(string)
+
+		meta := make(map[string]any, len(r.Payload))
+		for k, v := range r.Payload {
+			if k != contentKey {
+				meta[k] = v
+			}
+		}
+
+		out[i] = trace.Hit{ID: r.ID, Score: float64(r.Score), Content: content, Metadata: meta}
+	}
+
+	return out
 }
 
 // AsTool exposes this RAG instance as an llm.FunctionTool.

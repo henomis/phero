@@ -37,7 +37,7 @@ Phero is a modern Go framework for building multi-agent AI systems. Like ants in
 - **🧠 Skills system** Define reusable agent capabilities in `SKILL.md` files
 - **🔌 MCP support** Integrate Model Context Protocol servers as agent tools
 - **🧾 Memory management** Conversational context storage for agents
-- **🔍 Tracing** Typed lifecycle events with a colorized text tracer (`trace/text`), an NDJSON file tracer (`trace/jsonfile`), and an OpenTelemetry tracer (`trace/otel`); per-run summary with token usage and latency breakdowns
+- **🔍 Tracing** Span tree of every run (agent, model calls, tools, handoffs, memory, retrieval, middleware) with full typed payloads; colorized text tree (`trace/text`), NDJSON (`trace/jsonfile`) and OpenTelemetry export following the GenAI semantic conventions (`trace/otel`); per-run summary with stop reason, token usage and cost (sub-agents included) and latency breakdowns
 - **🛡️ Tool guardrails** Bash tool blocklist, allowlist, timeout, and safe-mode options
 - **✂️ Text splitting** Recursive and Markdown-aware chunkers under `textsplitter/recursive` and `textsplitter/markdown`
 - **🧬 Embeddings** Semantic search capabilities via OpenAI embeddings
@@ -106,7 +106,7 @@ Phero is organized into focused packages, each solving a specific problem:
 - **`mcp`** Model Context Protocol adapter for external tool integration
 - **`a2a`** Agent-to-Agent (A2A) protocol — expose agents as HTTP servers or call remote agents as tools
 - **`nats`** NATS Agent Protocol v0.3 — register agents as NATS micro services; discover and call them over pub/sub
-- **`trace`** Typed observability events; `trace/text` for human-readable colorized output; `trace/jsonfile` for NDJSON file logging; `trace/otel` for OpenTelemetry spans; `trace.NewLLM` for raw LLM call wrapping
+- **`trace`** Span-based tracing with a pluggable `Provider` and processors; `trace/text` for a colorized span tree; `trace/jsonfile` for NDJSON; `trace/otel` for OpenTelemetry GenAI spans; W3C `Inject`/`Extract`; `trace.InstrumentLLM` for raw LLM calls
 - **`tool/agent`** Create and run a sub-agent at runtime as a delegated tool
 - **`tool/file`** Filesystem tools (`read`, `write`, `edit`, `glob`, `grep`)
 - **`tool/bash`** Bash command execution with guardrails (blocklist, allowlist, timeout, safe mode) and background execution (`RunInBackground`, `bash_output`, `kill_shell`)
@@ -148,7 +148,8 @@ Comprehensive examples are included in the [`examples/`](examples/) directory:
 | [MCP Integration](examples/mcp/) | Run an MCP server as a subprocess and expose its tools to agents |
 | [Playwright MCP](examples/playwright-mcp/) | Connect browser automation tools through MCP and orchestrate them from an agent |
 | [Supervisor Blackboard](examples/supervisor-blackboard/) | Supervisor-worker pattern with a shared blackboard for coordination |
-| [Tracing](examples/tracing/) | Attach a colorized tracer to an agent and inspect LLM requests, tool calls, and memory events in real time |
+| [Tracing](examples/tracing/) | Print the span tree of an agent run: model calls, tool calls, usage and stop reason |
+| [Tracing (OpenTelemetry)](examples/tracing-otel/) | Export agent spans to OpenTelemetry with GenAI attributes, nested under the caller's span |
 
 
 

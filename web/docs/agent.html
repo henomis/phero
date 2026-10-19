@@ -286,21 +286,24 @@ if err := json.Unmarshal([]byte(result.TextContent()), &v); err != nil {
     <section>
       <h2>Tracing</h2>
       <p>
-        Agents support opt-in observability via <code>SetTracer</code>. When a tracer is attached, the agent emits typed events for
-        start and end, each loop iteration, tool calls and results, plus memory retrieval and persistence.
+        Every run is recorded as a tree of spans: the run, each model call, each tool call, handoffs and memory access.
+        Attach a <code>trace.Provider</code> with <code>SetTracing</code>, or put one in the context with
+        <code>trace.WithProvider</code> so that every agent in the call tree (sub-agents included) uses it.
       </p>
 
       <pre><code class="language-go">import (
     "os"
 
+    "github.com/henomis/phero/v2/trace"
     "github.com/henomis/phero/v2/trace/text"
 )
 
-a.SetTracer(text.New(os.Stderr))</code></pre>
+a.SetTracing(trace.NewProvider(trace.WithProcessor(text.New(os.Stderr))))</code></pre>
 
       <p>
-        The built-in text tracer is intended for local development and debugging. For raw LLM tracing outside the agent loop,
-        see <a href="trace.html">trace.NewLLM</a>.
+        <code>Result.Summary</code> is always populated, with or without a provider: stop reason, iterations, token usage
+        and cost (including sub-agents run through <code>AsTool</code>), per-tool, per-model and per-agent breakdowns, and
+        latency. See <a href="trace.html">trace</a> for processors and OpenTelemetry export.
       </p>
     </section>
 

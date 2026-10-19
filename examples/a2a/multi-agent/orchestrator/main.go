@@ -48,6 +48,7 @@ import (
 	"github.com/henomis/phero/v2/agent"
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/llm/openai"
+	"github.com/henomis/phero/v2/trace"
 	"github.com/henomis/phero/v2/trace/text"
 )
 
@@ -124,7 +125,7 @@ Return the final polished article as your answer.`,
 		log.Fatalf("create orchestrator: %v", err)
 	}
 
-	orchestrator.SetTracer(text.New(os.Stderr))
+	orchestrator.SetTracing(trace.NewProvider(trace.WithProcessor(text.New(os.Stderr))))
 
 	if err := orchestrator.AddTool(researchTool); err != nil {
 		log.Fatalf("add researcher tool: %v", err)

@@ -356,7 +356,7 @@ func TestAgent_AsTool(t *testing.T) {
 	t.Logf("AsTool response: %q", result.TextContent())
 }
 
-// TestAgent_TracingIntegration verifies that the tracer receives events during
+// TestAgent_TracingIntegration verifies that the processor receives spans during
 // an agent run and that the summary is populated.
 func TestAgent_TracingIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -365,27 +365,27 @@ func TestAgent_TracingIntegration(t *testing.T) {
 	// Use a jsonfile tracer written to a temp file.
 	traceFile := t.TempDir() + "/trace.ndjson"
 
-	tracer, err := tracejsonfile.New(traceFile)
+	proc, err := tracejsonfile.New(traceFile)
 	if err != nil {
 		t.Fatalf("tracejsonfile.New: %v", err)
 	}
 
+	tracing := trace.NewProvider(trace.WithProcessor(proc))
+
 	defer func() {
-		if cerr := tracer.Close(); cerr != nil {
-			t.Logf("tracer.Close: %v", cerr)
+		if cerr := tracing.Shutdown(context.Background()); cerr != nil {
+			t.Logf("Shutdown: %v", cerr)
 		}
 	}()
 
 	llmClient := buildOpenAILLM()
-
-	ctx = trace.WithTracer(ctx, tracer)
 
 	a, err := agent.New(llmClient, "traced-agent", "You are a brief assistant.")
 	if err != nil {
 		t.Fatalf("agent.New: %v", err)
 	}
 
-	a.SetTracer(tracer)
+	a.SetTracing(tracing)
 
 	result, err := a.Run(ctx, llm.Text("Say hello."))
 	if err != nil {

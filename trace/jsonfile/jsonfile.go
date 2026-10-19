@@ -15,7 +15,9 @@
 package jsonfile
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"sync"
 	"time"
@@ -23,37 +25,42 @@ import (
 	"github.com/henomis/phero/v2/trace"
 )
 
-const (
-	fieldAgentName = "agent_name"
-	fieldErr       = "err"
-	fieldIteration = "iteration"
-	fieldToolName  = "tool_name"
-	fieldCallID    = "call_id"
-	fieldCount     = "count"
-)
-
-// record is the JSON envelope written for each event.
-type record struct {
-	Type      string    `json:"type"`
-	Timestamp time.Time `json:"timestamp"`
-	Data      any       `json:"data"`
+// Record is the JSON object written for each span.
+type Record struct {
+	TraceID      string            `json:"traceId"`
+	SpanID       string            `json:"spanId"`
+	ParentSpanID string            `json:"parentSpanId,omitempty"`
+	ParentRemote bool              `json:"parentRemote,omitempty"`
+	Name         string            `json:"name"`
+	Kind         trace.Kind        `json:"kind"`
+	Start        time.Time         `json:"start"`
+	End          time.Time         `json:"end"`
+	DurationMS   float64           `json:"durationMs"`
+	Error        string            `json:"error,omitempty"`
+	Agent        string            `json:"agent,omitempty"`
+	SessionID    string            `json:"sessionId,omitempty"`
+	Attrs        []trace.Attr      `json:"attrs,omitempty"`
+	Events       []trace.SpanEvent `json:"events,omitempty"`
+	Links        []string          `json:"links,omitempty"`
+	Totals       *trace.Totals     `json:"totals,omitempty"`
+	Payload      trace.Payload     `json:"payload"`
 }
 
-// Tracer appends one JSON record per line (NDJSON) to a file.
-//
-// Tracer is safe for concurrent use.
-type Tracer struct {
-	mu  sync.Mutex
-	f   *os.File
-	enc *json.Encoder
+// Processor appends one Record per ended span to a file. It is safe for
+// concurrent use.
+type Processor struct {
+	mu     sync.Mutex
+	f      *os.File
+	enc    *json.Encoder
+	err    error
+	closed bool
 }
 
-// New opens (or creates) the file at filePath in append mode and returns a
-// Tracer that writes one JSON line per event.
-//
-// The caller must call Close when the Tracer is no longer needed in order to
-// release the underlying file descriptor.
-func New(filePath string) (*Tracer, error) {
+var _ trace.Processor = (*Processor)(nil)
+
+// New opens (or creates) the file at filePath in append mode. Shut the
+// processor down (directly or through trace.Provider.Shutdown) to close it.
+func New(filePath string) (*Processor, error) {
 	if filePath == "" {
 		return nil, ErrEmptyFilePath
 	}
@@ -63,106 +70,76 @@ func New(filePath string) (*Tracer, error) {
 		return nil, err
 	}
 
-	return &Tracer{f: f, enc: json.NewEncoder(f)}, nil
+	return &Processor{f: f, enc: json.NewEncoder(f)}, nil
 }
 
-// Close releases the underlying file descriptor.
-func (t *Tracer) Close() error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+// OnStart does nothing: spans are written when they end.
+func (*Processor) OnStart(context.Context, *trace.SpanData) {}
 
-	return t.f.Close()
-}
+// OnEnd writes s as one JSON line. The first write error is kept and returned
+// by Shutdown.
+func (p *Processor) OnEnd(s *trace.SpanData) {
+	r := toRecord(s)
 
-// Trace encodes event as a single JSON line and appends it to the file.
-func (t *Tracer) Trace(event trace.Event) {
-	r := toRecord(event)
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	if p.closed {
+		return
+	}
 
-	_ = t.enc.Encode(r) //nolint:errchkjson // tracer intentionally swallows encode errors to avoid disrupting the agent
-}
-
-// toRecord maps a typed Event to a JSON-serialisable record.
-func toRecord(event trace.Event) record {
-	switch e := event.(type) {
-	case trace.AgentStartEvent:
-		return record{Type: "AgentStart", Timestamp: e.Timestamp, Data: map[string]any{
-			fieldAgentName: e.AgentName,
-			"input":        e.Input,
-		}}
-	case trace.AgentEndEvent:
-		errStr := ""
-		if e.Err != nil {
-			errStr = e.Err.Error()
-		}
-
-		return record{Type: "AgentEnd", Timestamp: e.Timestamp, Data: map[string]any{
-			fieldAgentName: e.AgentName,
-			"output":       e.Output,
-			fieldErr:       errStr,
-			"iterations":   e.Iterations,
-		}}
-	case trace.AgentIterationEvent:
-		return record{Type: "AgentIteration", Timestamp: e.Timestamp, Data: map[string]any{
-			fieldAgentName: e.AgentName,
-			fieldIteration: e.Iteration,
-		}}
-	case trace.AgentRunSummaryEvent:
-		return record{Type: "AgentRunSummary", Timestamp: e.Timestamp, Data: map[string]any{
-			"summary": e.Summary,
-		}}
-	case trace.LLMRequestEvent:
-		return record{Type: "LLMRequest", Timestamp: e.Timestamp, Data: map[string]any{
-			fieldAgentName:  e.AgentName,
-			"message_count": e.MessageCount,
-			"tool_names":    e.ToolNames,
-			fieldIteration:  e.Iteration,
-		}}
-	case trace.LLMResponseEvent:
-		return record{Type: "LLMResponse", Timestamp: e.Timestamp, Data: map[string]any{
-			fieldAgentName: e.AgentName,
-			"message":      e.Message,
-			"usage":        e.Usage,
-			fieldIteration: e.Iteration,
-		}}
-	case trace.ToolCallEvent:
-		return record{Type: "ToolCall", Timestamp: e.Timestamp, Data: map[string]any{
-			fieldAgentName: e.AgentName,
-			fieldToolName:  e.ToolName,
-			"arguments":    e.Arguments,
-			fieldCallID:    e.CallID,
-			fieldIteration: e.Iteration,
-		}}
-	case trace.ToolResultEvent:
-		errStr := ""
-		if e.Err != nil {
-			errStr = e.Err.Error()
-		}
-
-		return record{Type: "ToolResult", Timestamp: e.Timestamp, Data: map[string]any{
-			fieldAgentName: e.AgentName,
-			fieldToolName:  e.ToolName,
-			"result":       e.Result,
-			fieldErr:       errStr,
-			fieldCallID:    e.CallID,
-			fieldIteration: e.Iteration,
-		}}
-	case trace.MemorySaveEvent:
-		return record{Type: "MemorySave", Timestamp: e.Timestamp, Data: map[string]any{
-			fieldAgentName: e.AgentName,
-			fieldCount:     e.Count,
-		}}
-	case trace.MemoryRetrieveEvent:
-		return record{Type: "MemoryRetrieve", Timestamp: e.Timestamp, Data: map[string]any{
-			fieldAgentName: e.AgentName,
-			fieldCount:     e.Count,
-		}}
-	default:
-		return record{Type: "Unknown", Timestamp: time.Now()}
+	if err := p.enc.Encode(r); err != nil && p.err == nil {
+		p.err = err
 	}
 }
 
-// Ensure Tracer implements trace.Tracer at compile time.
-var _ trace.Tracer = (*Tracer)(nil)
+// Shutdown closes the file and returns the first write error, if any.
+func (p *Processor) Shutdown(context.Context) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.closed {
+		return p.err
+	}
+
+	p.closed = true
+
+	return errors.Join(p.err, p.f.Close())
+}
+
+func toRecord(s *trace.SpanData) *Record {
+	r := &Record{
+		TraceID:    s.Context.TraceID.String(),
+		SpanID:     s.Context.SpanID.String(),
+		Name:       s.Name,
+		Kind:       s.Kind,
+		Start:      s.Start,
+		End:        s.End,
+		DurationMS: float64(s.Duration()) / float64(time.Millisecond),
+		Agent:      s.Agent,
+		SessionID:  s.SessionID,
+		Attrs:      s.Attrs,
+		Events:     s.Events,
+		Payload:    s.Payload,
+	}
+
+	if s.Parent.SpanID.IsValid() {
+		r.ParentSpanID = s.Parent.SpanID.String()
+		r.ParentRemote = s.Parent.Remote
+	}
+
+	if s.Err != nil {
+		r.Error = s.Err.Error()
+	}
+
+	for _, l := range s.Links {
+		r.Links = append(r.Links, l.Traceparent())
+	}
+
+	if s.Totals.LLMCalls > 0 || s.Totals.ToolCalls > 0 || s.Totals.AgentRuns > 0 {
+		t := s.Totals
+		r.Totals = &t
+	}
+
+	return r
+}

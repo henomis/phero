@@ -27,6 +27,7 @@ import (
 
 	"github.com/henomis/phero/v2/embedding"
 	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/trace"
 	"github.com/henomis/phero/v2/vectorstore"
 )
 
@@ -157,8 +158,16 @@ func (s *semanticCacheLLM) Execute(
 	vector := vectors[0]
 
 	if cached := s.lookup(ctx, vector, contract); cached != nil {
+		trace.SpanFrom(ctx).AddEvent(eventCacheHit)
+
+		if call, ok := trace.PayloadFrom[*trace.LLMCall](ctx); ok {
+			call.CacheHit = true
+		}
+
 		return cached, nil
 	}
+
+	trace.SpanFrom(ctx).AddEvent(eventCacheMiss)
 
 	result, err := s.inner.Execute(ctx, messages, opts...)
 	if err != nil {

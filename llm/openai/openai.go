@@ -95,15 +95,60 @@ func (c *Client) Execute(ctx context.Context, messages []llm.Message, opts ...ll
 	}
 
 	msg := messageFromOpenAI(response.Choices[0].Message)
+	raw := string(response.Choices[0].FinishReason)
 
 	return &llm.Result{
-		Message: &msg,
-		Model:   model,
-		Usage: &llm.Usage{
-			InputTokens:  response.Usage.PromptTokens,
-			OutputTokens: response.Usage.CompletionTokens,
-		},
+		Message:         &msg,
+		Model:           model,
+		Usage:           usageFromOpenAI(response.Usage),
+		FinishReason:    finishReasonFromOpenAI(raw),
+		RawFinishReason: raw,
 	}, nil
+}
+
+// Provider returns "openai".
+func (c *Client) Provider() string { return providerName }
+
+// Model returns the configured model.
+func (c *Client) Model() string { return c.model }
+
+// usageFromOpenAI converts OpenAI usage. Cached prompt tokens are reported as
+// CacheReadTokens and excluded from InputTokens, so they are billed once at
+// the cache-read rate; reasoning tokens are a subset of OutputTokens.
+func usageFromOpenAI(u openai.Usage) *llm.Usage {
+	usage := &llm.Usage{
+		InputTokens:  u.PromptTokens,
+		OutputTokens: u.CompletionTokens,
+	}
+
+	if u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens > 0 {
+		usage.CacheReadTokens = u.PromptTokensDetails.CachedTokens
+		usage.InputTokens -= usage.CacheReadTokens
+	}
+
+	if u.CompletionTokensDetails != nil {
+		usage.ReasoningTokens = u.CompletionTokensDetails.ReasoningTokens
+	}
+
+	return usage
+}
+
+// finishReasonFromOpenAI maps an OpenAI finish reason to the common set.
+func finishReasonFromOpenAI(raw string) llm.FinishReason {
+	switch openai.FinishReason(raw) {
+	case "", openai.FinishReasonNull:
+		return ""
+	case openai.FinishReasonStop:
+		return llm.FinishStop
+	case openai.FinishReasonLength:
+		return llm.FinishLength
+	case openai.FinishReasonToolCalls, openai.FinishReasonFunctionCall:
+		return llm.FinishToolCalls
+	case openai.FinishReasonContentFilter:
+		return llm.FinishContentFilter
+	default:
+		return llm.FinishError
+	}
 }
 
 // buildRequest resolves the call options and converts messages and options

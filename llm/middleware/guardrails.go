@@ -19,6 +19,7 @@ import (
 	"fmt"
 
 	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/trace"
 )
 
 const (
@@ -52,6 +53,12 @@ func (e *GuardrailError) Error() string {
 // Unwrap returns the underlying guard error.
 func (e *GuardrailError) Unwrap() error {
 	return e.Err
+}
+
+// Is reports true for llm.ErrGuardrailBlocked, so callers can detect a
+// guardrail block without importing this package.
+func (e *GuardrailError) Is(target error) bool {
+	return target == llm.ErrGuardrailBlocked
 }
 
 // GuardrailOption configures a Guardrails middleware.
@@ -122,7 +129,7 @@ func (g *guardrailsLLM) Execute(
 ) (*llm.Result, error) {
 	for _, guard := range g.cfg.messageGuards {
 		if err := guard.guard(ctx, messages); err != nil {
-			return nil, &GuardrailError{Stage: stageInput, Name: guard.name, Err: err}
+			return nil, blocked(ctx, &GuardrailError{Stage: stageInput, Name: guard.name, Err: err})
 		}
 	}
 
@@ -133,9 +140,20 @@ func (g *guardrailsLLM) Execute(
 
 	for _, guard := range g.cfg.resultGuards {
 		if guardErr := guard.guard(ctx, result); guardErr != nil {
-			return nil, &GuardrailError{Stage: stageOutput, Name: guard.name, Err: guardErr}
+			return nil, blocked(ctx, &GuardrailError{Stage: stageOutput, Name: guard.name, Err: guardErr})
 		}
 	}
 
 	return result, nil
+}
+
+// blocked records a guardrail.blocked event on the current span and returns e.
+func blocked(ctx context.Context, e *GuardrailError) error {
+	trace.SpanFrom(ctx).AddEvent(eventGuardrailBlocked,
+		trace.String(attrGuardrailStage, e.Stage),
+		trace.String(attrGuardrailName, e.Name),
+		trace.String(attrGuardrailError, e.Err.Error()),
+	)
+
+	return e
 }

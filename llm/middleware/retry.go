@@ -16,10 +16,12 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"math/rand"
 	"time"
 
 	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/trace"
 )
 
 const (
@@ -27,6 +29,7 @@ const (
 	defaultMaxBackoff     = 30 * time.Second
 	jitterHalfDivisor     = 2
 	jitterQuarterDivisor  = 4
+	backoffFactor         = 2
 )
 
 // RetryOption configures a Retry middleware.
@@ -93,53 +96,82 @@ type retryLLM struct {
 }
 
 // Execute calls inner.Execute up to maxAttempts times, sleeping with
-// exponential back-off and +/-25% jitter between each attempt.
+// exponential back-off and +/-25% jitter between each attempt. When the error
+// is an *llm.ProviderError with a RetryAfter hint, the sleep is at least that
+// long, still capped by the maximum back-off.
+//
+// Every attempt after the first runs under a trace span with a
+// *trace.Middleware payload named "retry", covering the wait and the call.
 func (r *retryLLM) Execute(ctx context.Context, messages []llm.Message, opts ...llm.CallOption) (*llm.Result, error) {
-	var lastErr error
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	result, err := r.inner.Execute(ctx, messages, opts...)
+	if err == nil {
+		return result, nil
+	}
 
 	backoff := r.cfg.initialBackoff
 
-	for attempt := 0; attempt < r.cfg.maxAttempts; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-
-		result, err := r.inner.Execute(ctx, messages, opts...)
-		if err == nil {
-			return result, nil
-		}
-
-		lastErr = err
-
+	for attempt := 2; attempt <= r.cfg.maxAttempts; attempt++ {
 		if !r.cfg.shouldRetry(err) {
 			return nil, err
 		}
 
-		if attempt == r.cfg.maxAttempts-1 {
-			break
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
 		}
 
-		sleep := backoff
-		if half := int64(backoff) / jitterHalfDivisor; half > 0 {
-			jitter := time.Duration(rand.Int63n(half)) - backoff/jitterQuarterDivisor //nolint:gosec
-
-			sleep += jitter
-			if sleep < 0 {
-				sleep = 0
-			}
+		payload := &trace.Middleware{
+			Name: middlewareRetry, Attempt: attempt, Wait: r.sleepFor(backoff, err), Reason: err.Error(),
 		}
+		attemptCtx, span := trace.Start(ctx, middlewareRetry, payload)
 
 		select {
 		case <-ctx.Done():
+			span.End(ctx.Err())
 			return nil, ctx.Err()
-		case <-time.After(sleep):
+		case <-time.After(payload.Wait):
 		}
 
-		backoff *= 2
-		if backoff > r.cfg.maxBackoff {
-			backoff = r.cfg.maxBackoff
+		result, err = r.inner.Execute(attemptCtx, messages, opts...)
+		if err == nil {
+			payload.Outcome = outcomeOK
+
+			span.End(nil)
+
+			return result, nil
 		}
+
+		payload.Outcome = outcomeError
+
+		span.End(err)
+
+		backoff = min(backoff*backoffFactor, r.cfg.maxBackoff)
 	}
 
-	return nil, &MaxAttemptsExceededError{Attempts: r.cfg.maxAttempts, Err: lastErr}
+	if !r.cfg.shouldRetry(err) {
+		return nil, err
+	}
+
+	return nil, &MaxAttemptsExceededError{Attempts: r.cfg.maxAttempts, Err: err}
+}
+
+// sleepFor returns the jittered back-off, raised to the provider's RetryAfter
+// hint when err carries one, and capped by the maximum back-off.
+func (r *retryLLM) sleepFor(backoff time.Duration, err error) time.Duration {
+	sleep := backoff
+	if half := int64(backoff) / jitterHalfDivisor; half > 0 {
+		jitter := time.Duration(rand.Int63n(half)) - backoff/jitterQuarterDivisor //nolint:gosec
+
+		sleep = max(sleep+jitter, 0)
+	}
+
+	var perr *llm.ProviderError
+	if errors.As(err, &perr) && perr.RetryAfter > sleep {
+		sleep = perr.RetryAfter
+	}
+
+	return min(sleep, r.cfg.maxBackoff)
 }

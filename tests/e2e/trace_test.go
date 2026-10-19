@@ -31,23 +31,20 @@ import (
 	tracetext "github.com/henomis/phero/v2/trace/text"
 )
 
-// TestTraceJSONFile_WritesEvents verifies that running an agent with the NDJSON
-// tracer produces a non-empty trace file containing known event types.
-func TestTraceJSONFile_WritesEvents(t *testing.T) {
+// TestTraceJSONFile_WritesSpans verifies that running an agent with the NDJSON
+// processor produces a trace file with the run and model call spans.
+func TestTraceJSONFile_WritesSpans(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	tracePath := t.TempDir() + "/trace.ndjson"
 
-	tracer, err := tracejsonfile.New(tracePath)
+	proc, err := tracejsonfile.New(tracePath)
 	if err != nil {
 		t.Fatalf("tracejsonfile.New: %v", err)
 	}
-	defer func() {
-		if cerr := tracer.Close(); cerr != nil {
-			t.Logf("tracer.Close: %v", cerr)
-		}
-	}()
+
+	p := trace.NewProvider(trace.WithProcessor(proc))
 
 	llmClient := buildOpenAILLM()
 	a, err := agent.New(llmClient, "json-traced-agent", "You are a concise assistant.")
@@ -55,8 +52,7 @@ func TestTraceJSONFile_WritesEvents(t *testing.T) {
 		t.Fatalf("agent.New: %v", err)
 	}
 
-	a.SetTracer(tracer)
-	ctx = trace.WithTracer(ctx, tracer)
+	a.SetTracing(p)
 
 	result, err := a.Run(ctx, llm.Text("Say hello in one short sentence."))
 	if err != nil {
@@ -65,35 +61,30 @@ func TestTraceJSONFile_WritesEvents(t *testing.T) {
 
 	t.Logf("Agent response: %q", result.TextContent())
 
+	if err := p.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
 	data, err := os.ReadFile(tracePath)
 	if err != nil {
 		t.Fatalf("os.ReadFile: %v", err)
 	}
 
-	if len(data) == 0 {
-		t.Fatal("expected non-empty trace file")
-	}
-
 	content := string(data)
-	if !strings.Contains(content, "AgentStart") {
-		t.Error("expected AgentStart event in trace file")
-	}
-	if !strings.Contains(content, "LLMRequest") {
-		t.Error("expected LLMRequest event in trace file")
-	}
-	if !strings.Contains(content, "AgentEnd") {
-		t.Error("expected AgentEnd event in trace file")
+	for _, want := range []string{`"kind":"invoke_agent"`, `"kind":"chat"`, `"stopReason":"final"`} {
+		if !strings.Contains(content, want) {
+			t.Errorf("expected %s in trace file", want)
+		}
 	}
 }
 
-// TestTraceText_WritesReadableOutput verifies that the text tracer writes
+// TestTraceText_WritesReadableOutput verifies that the text processor writes
 // human-readable output lines for an agent run.
 func TestTraceText_WritesReadableOutput(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	var buf bytes.Buffer
-	tracer := tracetext.New(&buf)
 
 	llmClient := buildOpenAILLM()
 	a, err := agent.New(llmClient, "text-traced-agent", "You are a concise assistant.")
@@ -101,8 +92,7 @@ func TestTraceText_WritesReadableOutput(t *testing.T) {
 		t.Fatalf("agent.New: %v", err)
 	}
 
-	a.SetTracer(tracer)
-	ctx = trace.WithTracer(ctx, tracer)
+	a.SetTracing(trace.NewProvider(trace.WithProcessor(tracetext.New(&buf))))
 
 	result, err := a.Run(ctx, llm.Text("Respond with a short greeting."))
 	if err != nil {
@@ -112,29 +102,22 @@ func TestTraceText_WritesReadableOutput(t *testing.T) {
 	t.Logf("Agent response: %q", result.TextContent())
 
 	output := buf.String()
-	if strings.TrimSpace(output) == "" {
-		t.Fatal("expected non-empty text trace output")
-	}
-
 	t.Logf("Trace output:\n%s", output)
 
-	if !strings.Contains(output, "AgentStart") {
-		t.Error("expected AgentStart in text trace")
-	}
-	if !strings.Contains(output, "AgentEnd") {
-		t.Error("expected AgentEnd in text trace")
+	for _, want := range []string{"invoke_agent text-traced-agent", "chat", "stop=final"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected %q in text trace", want)
+		}
 	}
 }
 
-// TestTraceContextPropagation verifies that the tracer set on the agent
-// is used during agent execution (the agent field takes priority over the
-// context value which it overwrites internally).
-func TestTraceContextPropagation(t *testing.T) {
+// TestTraceContextProvider verifies that an agent without its own provider
+// uses the one carried by the context.
+func TestTraceContextProvider(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	var buf bytes.Buffer
-	tracer := tracetext.New(&buf)
 
 	llmClient := buildOpenAILLM()
 	a, err := agent.New(llmClient, "ctx-traced-agent", "You are a concise assistant.")
@@ -142,10 +125,7 @@ func TestTraceContextPropagation(t *testing.T) {
 		t.Fatalf("agent.New: %v", err)
 	}
 
-	// The agent stores its own tracer and overwrites the context tracer on Run.
-	// SetTracer is the correct way to inject a tracer; the context value is used
-	// by nested agents spawned during hand-off.
-	a.SetTracer(tracer)
+	ctx = trace.WithProvider(ctx, trace.NewProvider(trace.WithProcessor(tracetext.New(&buf))))
 
 	result, err := a.Run(ctx, llm.Text("Say only hi."))
 	if err != nil {
@@ -154,12 +134,7 @@ func TestTraceContextPropagation(t *testing.T) {
 
 	t.Logf("Agent response: %q", result.TextContent())
 
-	output := buf.String()
-	if strings.TrimSpace(output) == "" {
-		t.Fatal("expected trace output via context tracer")
-	}
-
-	if !strings.Contains(output, "ctx-traced-agent") {
+	if !strings.Contains(buf.String(), "ctx-traced-agent") {
 		t.Error("expected agent name in trace output")
 	}
 }

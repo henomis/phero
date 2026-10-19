@@ -15,44 +15,84 @@
 package otel_test
 
 import (
-	"errors"
+	"context"
+	"strings"
+	"sync"
 	"testing"
-	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
+	"github.com/henomis/phero/v2/agent"
 	"github.com/henomis/phero/v2/llm"
-	phtrace "github.com/henomis/phero/v2/trace"
+	"github.com/henomis/phero/v2/trace"
 	otelbackend "github.com/henomis/phero/v2/trace/otel"
 )
 
-func newTestTracer(t *testing.T) (*otelbackend.Tracer, *tracetest.InMemoryExporter) {
+type describedLLM struct {
+	fn func(messages []llm.Message) *llm.Result
+}
+
+func (d describedLLM) Execute(_ context.Context, messages []llm.Message, _ ...llm.CallOption) (*llm.Result, error) {
+	return d.fn(messages), nil
+}
+
+func (describedLLM) Provider() string { return "google" }
+func (describedLLM) Model() string    { return "gemini-test" }
+
+func answer(text string) *llm.Result {
+	return &llm.Result{
+		Message:      &llm.Message{Role: llm.RoleAssistant, Parts: []llm.ContentPart{llm.Text(text)}},
+		Usage:        &llm.Usage{InputTokens: 10, OutputTokens: 5, ReasoningTokens: 2},
+		Model:        "gemini-test-001",
+		FinishReason: llm.FinishStop,
+	}
+}
+
+func toolCall(name, args string) *llm.Result {
+	return &llm.Result{
+		Message: &llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{
+			ID: "call-1", Type: llm.ToolTypeFunction, Function: llm.FunctionCall{Name: name, Arguments: args},
+		}}},
+		Usage:        &llm.Usage{InputTokens: 4, OutputTokens: 1},
+		FinishReason: llm.FinishToolCalls,
+	}
+}
+
+func setup(t *testing.T, withIDs bool, opts ...otelbackend.Option) (*trace.Provider, *tracetest.InMemoryExporter, *sdktrace.TracerProvider) {
 	t.Helper()
 
-	exp := tracetest.NewInMemoryExporter()
-	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp))
+	mem := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(mem))
 
-	t.Cleanup(func() { _ = tp.Shutdown(t.Context()) })
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 
-	return otelbackend.New(tp.Tracer("test")), exp
-}
+	exp := otelbackend.New(tp, opts...)
 
-func spanByName(spans tracetest.SpanStubs, name string) (tracetest.SpanStub, bool) {
-	for _, s := range spans {
-		if s.Name == name {
-			return s, true
-		}
+	popts := []trace.Option{trace.WithProcessor(exp)}
+	if withIDs {
+		popts = append(popts, trace.WithIDSource(exp.IDSource()))
 	}
 
-	return tracetest.SpanStub{}, false
+	return trace.NewProvider(popts...), mem, tp
 }
 
-func attrValue(s tracetest.SpanStub, key string) (attribute.Value, bool) {
+func mustAgent(t *testing.T, client llm.LLM, name string) *agent.Agent {
+	t.Helper()
+
+	a, err := agent.New(client, name, name+" instructions")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return a
+}
+
+func attr(s tracetest.SpanStub, key attribute.Key) (attribute.Value, bool) {
 	for _, kv := range s.Attributes {
-		if string(kv.Key) == key {
+		if kv.Key == key {
 			return kv.Value, true
 		}
 	}
@@ -60,134 +100,221 @@ func attrValue(s tracetest.SpanStub, key string) (attribute.Value, bool) {
 	return attribute.Value{}, false
 }
 
-func TestTracer_RunProducesNestedSpans(t *testing.T) {
-	tr, exp := newTestTracer(t)
-	now := time.Now()
+func byName(spans tracetest.SpanStubs, prefix string) []tracetest.SpanStub {
+	var out []tracetest.SpanStub
 
-	tr.Trace(phtrace.AgentStartEvent{AgentName: "writer", Input: "hello", Timestamp: now})
-	tr.Trace(phtrace.LLMRequestEvent{AgentName: "writer", MessageCount: 2, ToolNames: []string{"calc"}, Iteration: 1, Timestamp: now})
-
-	msg := llm.AssistantMessage([]llm.ContentPart{llm.Text("hi")})
-	tr.Trace(phtrace.LLMResponseEvent{
-		AgentName: "writer",
-		Message:   &msg,
-		Usage:     &llm.Usage{InputTokens: 12, OutputTokens: 7},
-		Model:     "gpt-test",
-		Iteration: 1,
-		Timestamp: now,
-	})
-	tr.Trace(phtrace.ToolCallEvent{AgentName: "writer", ToolName: "calc", Arguments: `{"a":1}`, CallID: "call_1", Iteration: 1, Timestamp: now})
-	tr.Trace(phtrace.ToolResultEvent{AgentName: "writer", ToolName: "calc", Result: "2", CallID: "call_1", Iteration: 1, Timestamp: now})
-	tr.Trace(phtrace.AgentEndEvent{AgentName: "writer", Output: "done", Iterations: 1, Timestamp: now})
-	tr.Trace(phtrace.AgentRunSummaryEvent{Summary: phtrace.RunSummary{
-		AgentName: "writer",
-		LLMCalls:  1,
-		ToolCalls: 1,
-		Usage:     phtrace.UsageSummary{InputTokens: 12, OutputTokens: 7, CostUSD: 0.0003},
-		Latency:   phtrace.LatencySummary{Total: 1500 * time.Millisecond},
-	}, Timestamp: now})
-
-	spans := exp.GetSpans()
-	if len(spans) != 3 {
-		t.Fatalf("expected 3 spans (agent, llm, tool), got %d: %v", len(spans), spans.Snapshots())
+	for _, s := range spans {
+		if strings.HasPrefix(s.Name, prefix) {
+			out = append(out, s)
+		}
 	}
 
-	root, ok := spanByName(spans, "agent writer")
-	if !ok {
-		t.Fatal("missing root span 'agent writer'")
-	}
+	return out
+}
 
-	llmSpan, ok := spanByName(spans, "llm.request")
-	if !ok {
-		t.Fatal("missing 'llm.request' span")
-	}
+func TestExporter_ConcurrentRunsOfSameAgent(t *testing.T) {
+	for _, withIDs := range []bool{true, false} {
+		p, mem, _ := setup(t, withIDs)
+		a := mustAgent(t, describedLLM{fn: func([]llm.Message) *llm.Result { return answer("hi") }}, "writer")
+		a.SetTracing(p)
 
-	toolSpan, ok := spanByName(spans, "tool calc")
-	if !ok {
-		t.Fatal("missing 'tool calc' span")
-	}
+		var wg sync.WaitGroup
+		for range 5 {
+			wg.Go(func() { _, _ = a.Run(context.Background(), llm.Text("x")) })
+		}
 
-	// Child spans must share the root's trace and parent to it.
-	if llmSpan.SpanContext.TraceID() != root.SpanContext.TraceID() {
-		t.Error("llm span not in root trace")
-	}
+		wg.Wait()
 
-	if llmSpan.Parent.SpanID() != root.SpanContext.SpanID() {
-		t.Error("llm span not parented to root")
-	}
+		runs := byName(mem.GetSpans(), "invoke_agent writer")
+		chats := byName(mem.GetSpans(), "chat gemini-test")
 
-	if toolSpan.Parent.SpanID() != root.SpanContext.SpanID() {
-		t.Error("tool span not parented to root")
-	}
+		if len(runs) != 5 || len(chats) != 5 {
+			t.Fatalf("withIDs=%v: expected 5 runs and 5 chats, got %d and %d", withIDs, len(runs), len(chats))
+		}
 
-	// Attribute spot checks.
-	if v, found := attrValue(llmSpan, "gen_ai.response.model"); !found || v.AsString() != "gpt-test" {
-		t.Errorf("llm span model attr = %v (ok=%v)", v.AsString(), found)
-	}
+		parents := map[string]bool{}
+		for _, r := range runs {
+			parents[r.SpanContext.SpanID().String()] = true
+		}
 
-	if v, found := attrValue(llmSpan, "gen_ai.usage.input_tokens"); !found || v.AsInt64() != 12 {
-		t.Errorf("llm span input tokens = %v (ok=%v)", v.AsInt64(), found)
-	}
+		seen := map[string]bool{}
 
-	if v, found := attrValue(root, "phero.run.cost_usd"); !found || v.AsFloat64() != 0.0003 {
-		t.Errorf("root cost attr = %v (ok=%v)", v.AsFloat64(), found)
-	}
+		for _, c := range chats {
+			pid := c.Parent.SpanID().String()
+			if !parents[pid] || seen[pid] {
+				t.Fatalf("withIDs=%v: chat span not uniquely parented to a run", withIDs)
+			}
 
-	if v, found := attrValue(toolSpan, "phero.tool.result"); !found || v.AsString() != "2" {
-		t.Errorf("tool result attr = %v (ok=%v)", v.AsString(), found)
+			seen[pid] = true
+		}
 	}
 }
 
-func TestTracer_ToolErrorSetsStatus(t *testing.T) {
-	tr, exp := newTestTracer(t)
-	now := time.Now()
+func TestExporter_SharesIDsAndHonoursCallerSpan(t *testing.T) {
+	p, mem, tp := setup(t, true)
+	a := mustAgent(t, describedLLM{fn: func([]llm.Message) *llm.Result { return answer("hi") }}, "writer")
+	a.SetTracing(p)
 
-	tr.Trace(phtrace.AgentStartEvent{AgentName: "a", Timestamp: now})
-	tr.Trace(phtrace.ToolCallEvent{AgentName: "a", ToolName: "boom", CallID: "c1", Iteration: 1, Timestamp: now})
-	tr.Trace(phtrace.ToolResultEvent{AgentName: "a", ToolName: "boom", Err: errors.New("kaboom"), CallID: "c1", Iteration: 1, Timestamp: now})
-	tr.Trace(phtrace.AgentEndEvent{AgentName: "a", Err: errors.New("failed"), Iterations: 1, Timestamp: now})
-	tr.Trace(phtrace.AgentRunSummaryEvent{Summary: phtrace.RunSummary{AgentName: "a", Error: "failed"}, Timestamp: now})
+	ctx, caller := tp.Tracer("app").Start(context.Background(), "http request")
 
-	spans := exp.GetSpans()
-
-	toolSpan, ok := spanByName(spans, "tool boom")
-	if !ok {
-		t.Fatal("missing tool span")
+	res, err := a.Run(ctx, llm.Text("x"))
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	if toolSpan.Status.Code != codes.Error {
-		t.Errorf("expected error status on tool span, got %v", toolSpan.Status.Code)
+	caller.End()
+
+	run := byName(mem.GetSpans(), "invoke_agent")[0]
+	if run.Parent.SpanID() != caller.SpanContext().SpanID() {
+		t.Fatal("run span should be a child of the caller's span")
 	}
 
-	if len(toolSpan.Events) == 0 {
-		t.Error("expected recorded error event on tool span")
-	}
-
-	root, ok := spanByName(spans, "agent a")
-	if !ok {
-		t.Fatal("missing root span")
-	}
-
-	if root.Status.Code != codes.Error {
-		t.Errorf("expected error status on root span, got %v", root.Status.Code)
+	if run.SpanContext.SpanID().String() != res.Summary.SpanID || run.SpanContext.TraceID().String() != res.Summary.TraceID {
+		t.Fatal("phero and OTel span IDs should match")
 	}
 }
 
-func TestTracer_RootSpanEndedOnSummary(t *testing.T) {
-	tr, exp := newTestTracer(t)
-	now := time.Now()
+func TestExporter_SubAgentNestsUnderTool(t *testing.T) {
+	p, mem, _ := setup(t, true)
 
-	tr.Trace(phtrace.AgentStartEvent{AgentName: "x", Timestamp: now})
-	tr.Trace(phtrace.AgentEndEvent{AgentName: "x", Output: "ok", Iterations: 1, Timestamp: now})
+	child := mustAgent(t, describedLLM{fn: func([]llm.Message) *llm.Result { return answer("child") }}, "child")
 
-	// Before the summary event the root span must still be open (not exported).
-	if got := len(exp.GetSpans()); got != 0 {
-		t.Fatalf("root span ended too early: %d spans exported", got)
+	childTool, err := child.AsTool("ask_child", "asks")
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	tr.Trace(phtrace.AgentRunSummaryEvent{Summary: phtrace.RunSummary{AgentName: "x"}, Timestamp: now})
+	calls := 0
+	parent := mustAgent(t, describedLLM{fn: func([]llm.Message) *llm.Result {
+		calls++
+		if calls == 1 {
+			return toolCall("ask_child", `{"input":"q"}`)
+		}
 
-	if got := len(exp.GetSpans()); got != 1 {
-		t.Fatalf("expected root span exported after summary, got %d", got)
+		return answer("done")
+	}}, "parent")
+	parent.SetTracing(p)
+
+	if err = parent.AddTool(childTool); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err = parent.Run(context.Background(), llm.Text("go")); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := byName(mem.GetSpans(), "execute_tool ask_child")[0]
+	childRun := byName(mem.GetSpans(), "invoke_agent child")[0]
+
+	if childRun.Parent.SpanID() != tool.SpanContext.SpanID() {
+		t.Fatal("child run should nest under the tool span")
+	}
+
+	parentRun := byName(mem.GetSpans(), "invoke_agent parent")[0]
+	if v, _ := attr(parentRun, "phero.run.llm_calls"); v.AsInt64() != 3 {
+		t.Fatalf("parent totals should include the child: llm_calls=%d", v.AsInt64())
+	}
+}
+
+func TestExporter_SemanticConventions(t *testing.T) {
+	p, mem, _ := setup(t, true)
+	a := mustAgent(t, describedLLM{fn: func([]llm.Message) *llm.Result { return answer("hi") }}, "writer")
+	a.SetTracing(p)
+
+	_, _ = a.Run(trace.WithSession(context.Background(), "s-1"), llm.Text("secret prompt"))
+
+	chat := byName(mem.GetSpans(), "chat gemini-test")[0]
+	want := map[attribute.Key]any{
+		"gen_ai.operation.name":                "chat",
+		"gen_ai.provider.name":                 "gcp.gemini",
+		"gen_ai.request.model":                 "gemini-test",
+		"gen_ai.response.model":                "gemini-test-001",
+		"gen_ai.usage.input_tokens":            int64(10),
+		"gen_ai.usage.output_tokens":           int64(5),
+		"gen_ai.usage.reasoning.output_tokens": int64(2),
+		"gen_ai.agent.name":                    "writer",
+		"gen_ai.conversation.id":               "s-1",
+	}
+
+	for k, v := range want {
+		got, ok := attr(chat, k)
+		if !ok || got.AsInterface() != v {
+			t.Errorf("%s = %v, want %v", k, got.AsInterface(), v)
+		}
+	}
+
+	if fr, _ := attr(chat, "gen_ai.response.finish_reasons"); len(fr.AsStringSlice()) != 1 || fr.AsStringSlice()[0] != "stop" {
+		t.Errorf("finish_reasons = %v", fr.AsInterface())
+	}
+
+	for _, s := range mem.GetSpans() {
+		for _, kv := range s.Attributes {
+			if strings.Contains(kv.Value.String(), "secret prompt") || kv.Key == "gen_ai.input.messages" {
+				t.Fatalf("content must be off by default, found %s on %s", kv.Key, s.Name)
+			}
+		}
+	}
+}
+
+func TestExporter_ContentOptInWithFullPromptAndLimit(t *testing.T) {
+	p, mem, _ := setup(t, true, otelbackend.WithContent(true), otelbackend.WithMaxAttrBytes(4096))
+
+	calls := 0
+	a := mustAgent(t, describedLLM{fn: func([]llm.Message) *llm.Result {
+		calls++
+		if calls == 1 {
+			return toolCall("echo", `{"v":1}`)
+		}
+
+		return answer(strings.Repeat("x", 10000))
+	}}, "writer")
+	a.SetTracing(p)
+
+	echo, err := llm.NewTool("echo", "echoes", func(_ context.Context, _ *struct{}) (string, error) { return "echoed", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err = a.AddTool(echo); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err = a.Run(context.Background(), llm.Text("hello")); err != nil {
+		t.Fatal(err)
+	}
+
+	chats := byName(mem.GetSpans(), "chat")
+	second := chats[1]
+
+	in, ok := attr(second, "gen_ai.input.messages")
+	if !ok || !strings.Contains(in.AsString(), "hello") || !strings.Contains(in.AsString(), "tool_call_response") {
+		t.Fatalf("second call should carry the full prompt, got %q", in.AsString())
+	}
+
+	if sys, found := attr(second, "gen_ai.system_instructions"); !found || !strings.Contains(sys.AsString(), "writer instructions") {
+		t.Fatalf("missing system instructions: %v", sys.AsInterface())
+	}
+
+	out, _ := attr(second, "gen_ai.output.messages")
+	if len(out.AsString()) > 4096+len("…") {
+		t.Fatalf("output messages not truncated: %d bytes", len(out.AsString()))
+	}
+
+	tool := byName(mem.GetSpans(), "execute_tool echo")[0]
+	if args, _ := attr(tool, "gen_ai.tool.call.arguments"); args.AsString() != `{"v":1}` {
+		t.Fatalf("tool arguments = %q", args.AsString())
+	}
+}
+
+func TestExporter_ErrorStatus(t *testing.T) {
+	p, mem, _ := setup(t, true)
+	ctx := trace.WithProvider(context.Background(), p)
+
+	_, s := trace.Start(ctx, "execute_tool t", &trace.ToolCall{Name: "t"})
+	s.End(context.DeadlineExceeded)
+
+	got := mem.GetSpans()[0]
+	if got.Status.Code != codes.Error || len(got.Events) == 0 {
+		t.Fatalf("expected error status and exception event, got %+v", got.Status)
 	}
 }

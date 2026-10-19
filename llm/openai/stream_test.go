@@ -49,7 +49,8 @@ func TestExecuteStream_TextAndUsage(t *testing.T) {
 		`{"id":"1","object":"chat.completion.chunk","model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","content":"Hel"}}]}`,
 		`{"choices":[{"index":0,"delta":{"content":"lo"}}]}`,
 		`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
-		`{"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`,
+		`{"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7,`+
+			`"prompt_tokens_details":{"cached_tokens":1},"completion_tokens_details":{"reasoning_tokens":1}}}`,
 	)
 	defer srv.Close()
 
@@ -80,8 +81,13 @@ func TestExecuteStream_TextAndUsage(t *testing.T) {
 		t.Fatalf("final message = %v, want text %q", final.Message, "Hello")
 	}
 
-	if final.Usage == nil || final.Usage.InputTokens != 5 || final.Usage.OutputTokens != 2 {
-		t.Fatalf("final usage = %+v, want in=5 out=2", final.Usage)
+	want := llm.Usage{InputTokens: 4, OutputTokens: 2, CacheReadTokens: 1, ReasoningTokens: 1}
+	if final.Usage == nil || *final.Usage != want {
+		t.Fatalf("final usage = %+v, want %+v", final.Usage, want)
+	}
+
+	if final.FinishReason != llm.FinishStop || final.RawFinishReason != "stop" {
+		t.Fatalf("finish = %q (%q), want stop", final.FinishReason, final.RawFinishReason)
 	}
 
 	if final.Model != "gpt-4o-mini" {

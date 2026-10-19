@@ -13,3 +13,8 @@
 // limitations under the License.
 
 package trace
+
+import "errors"
+
+// ErrInvalidTraceparent is returned by ParseTraceparent for a malformed value.
+var ErrInvalidTraceparent = errors.New("trace: invalid traceparent")

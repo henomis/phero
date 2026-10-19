@@ -16,80 +16,72 @@ package trace
 
 import (
 	"context"
-	"time"
 
 	"github.com/henomis/phero/v2/llm"
 )
 
-// tracedLLM wraps an llm.LLM and emits LLMRequestEvent / LLMResponseEvent
-// around every Execute call.
-type tracedLLM struct {
-	inner  llm.LLM
-	tracer Tracer
-}
-
-// NewLLM wraps inner with tracing, emitting LLMRequestEvent before and
-// LLMResponseEvent after each Execute call.
+// InstrumentLLM wraps an llm.LLM so that each Execute call outside an agent
+// is recorded as a span with an *LLMCall payload. Spans go to the provider in
+// the call's context (see WithProvider).
 //
-// When used inside an agent the AgentName and Iteration fields are populated
-// automatically from the context. When used standalone they are left empty/zero.
-func NewLLM(inner llm.LLM, t Tracer) llm.LLM {
-	return &tracedLLM{inner: inner, tracer: t}
+// Calls made inside an agent run are already traced by the agent; the
+// wrapper then adds nothing, so it is safe to share one wrapped client
+// between agents and direct calls.
+func InstrumentLLM(inner llm.LLM) llm.LLM {
+	return &instrumentedLLM{inner: inner}
 }
 
-// Execute emits an LLMRequestEvent, delegates to the inner LLM, then emits an
-// LLMResponseEvent.
-func (tl *tracedLLM) Execute(ctx context.Context, messages []llm.Message, opts ...llm.CallOption) (*llm.Result, error) {
-	agentName := agentNameFromContext(ctx)
-	iteration := iterationFromContext(ctx)
+type instrumentedLLM struct {
+	inner llm.LLM
+}
 
-	tools := llm.NewCallConfig(opts...).Tools
-
-	toolNames := make([]string, len(tools))
-	for i, t := range tools {
-		toolNames[i] = t.Name()
+func (l *instrumentedLLM) Execute(
+	ctx context.Context, messages []llm.Message, opts ...llm.CallOption,
+) (*llm.Result, error) {
+	if _, ok := SpanFrom(ctx).Payload().(*LLMCall); ok {
+		return l.inner.Execute(ctx, messages, opts...)
 	}
 
-	tl.tracer.Trace(LLMRequestEvent{
-		AgentName:    agentName,
-		MessageCount: len(messages),
-		ToolNames:    toolNames,
-		Iteration:    iteration,
-		Timestamp:    time.Now(),
-	})
-
-	result, err := tl.inner.Execute(ctx, messages, opts...)
-
-	var (
-		msg   *llm.Message
-		usage *llm.Usage
-		model string
-	)
-	if result != nil {
-		msg = result.Message
-		usage = result.Usage
-		model = result.Model
+	call := &LLMCall{Messages: messages}
+	if d, ok := l.inner.(llm.Describer); ok {
+		call.Provider = d.Provider()
+		call.RequestModel = d.Model()
 	}
 
-	tl.tracer.Trace(LLMResponseEvent{
-		AgentName: agentName,
-		Message:   msg,
-		Usage:     usage,
-		Model:     model,
-		Iteration: iteration,
-		Timestamp: time.Now(),
-	})
+	cfg := llm.NewCallConfig(opts...)
+	for _, t := range cfg.Tools {
+		call.Tools = append(call.Tools, ToolDef{Name: t.Name(), Description: t.Description(), Schema: t.InputSchema()})
+	}
 
-	if msg != nil {
-		if reasoning := msg.ReasoningContent(); reasoning != "" {
-			tl.tracer.Trace(ReasoningEvent{
-				AgentName: agentName,
-				Content:   reasoning,
-				Iteration: iteration,
-				Timestamp: time.Now(),
-			})
+	call.ToolChoice = cfg.ToolChoice
+	if cfg.ResponseFormat != nil {
+		call.ResponseFormat = cfg.ResponseFormat.Name()
+	}
+
+	name := string(KindLLM)
+	if call.RequestModel != "" {
+		name += " " + call.RequestModel
+	}
+
+	ctx, span := Start(ctx, name, call)
+
+	res, err := l.inner.Execute(ctx, messages, opts...)
+	if res != nil {
+		call.Response = res.Message
+		call.ResponseModel = res.Model
+		call.FinishReason = res.FinishReason
+		call.RawFinishReason = res.RawFinishReason
+
+		if res.Usage != nil {
+			call.Usage = *res.Usage
+		}
+
+		if !call.CacheHit {
+			call.CostUSD = call.Usage.Cost(call.ResponseModel)
 		}
 	}
 
-	return result, err
+	span.End(err)
+
+	return res, err
 }

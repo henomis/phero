@@ -16,191 +16,82 @@ package jsonfile_test
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
-	"strings"
+	"path/filepath"
 	"testing"
-	"time"
 
+	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/trace"
 	"github.com/henomis/phero/v2/trace/jsonfile"
 )
 
 func TestNew_EmptyPath_ReturnsError(t *testing.T) {
-	_, err := jsonfile.New("")
-	if err == nil {
-		t.Fatal("expected error for empty path, got nil")
+	if _, err := jsonfile.New(""); !errors.Is(err, jsonfile.ErrEmptyFilePath) {
+		t.Fatalf("expected ErrEmptyFilePath, got %v", err)
 	}
 }
 
-func TestNew_ValidPath_CreatesFile(t *testing.T) {
-	f, err := os.CreateTemp("", "trace-*.ndjson")
+func TestProcessor_WritesOneLinePerSpan(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "trace.ndjson")
+
+	proc, err := jsonfile.New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	path := f.Name()
-	if closeErr := f.Close(); closeErr != nil {
-		t.Fatalf("Close: %v", closeErr)
-	}
+	p := trace.NewProvider(trace.WithProcessor(proc))
+	ctx := trace.WithProvider(context.Background(), p)
 
-	removeIfExists(t, path)
-	t.Cleanup(func() {
-		removeIfExists(t, path)
+	ctx, run := trace.Start(ctx, "invoke_agent a", &trace.Run{Agent: "a"})
+	_, call := trace.Start(ctx, "chat m", &trace.LLMCall{
+		ResponseModel: "m",
+		Messages:      []llm.Message{llm.UserMessage(llm.Text("hello"))},
+		Usage:         llm.Usage{InputTokens: 2},
 	})
+	call.End(errors.New("boom"))
+	run.End(nil)
 
-	tr, err := jsonfile.New(path)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	if closeErr := tr.Close(); closeErr != nil {
-		t.Fatalf("Close: %v", closeErr)
-	}
-
-	if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
-		t.Error("expected file to be created")
-	}
-}
-
-func TestTracer_Trace_WritesNDJSON(t *testing.T) {
-	f, err := os.CreateTemp("", "trace-*.ndjson")
-	if err != nil {
+	if err = p.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
-	path := f.Name()
-	if closeErr := f.Close(); closeErr != nil {
-		t.Fatalf("Close: %v", closeErr)
-	}
-
-	t.Cleanup(func() {
-		removeIfExists(t, path)
-	})
-
-	tr, err := jsonfile.New(path)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	now := time.Now()
-
-	events := []trace.Event{
-		trace.AgentStartEvent{AgentName: "a", Input: "hello", Timestamp: now},
-		trace.AgentIterationEvent{AgentName: "a", Iteration: 1, Timestamp: now},
-		trace.AgentRunSummaryEvent{Summary: trace.RunSummary{AgentName: "a"}, Timestamp: now},
-		trace.AgentEndEvent{AgentName: "a", Output: "ok", Iterations: 2, Timestamp: now},
-		trace.LLMRequestEvent{AgentName: "a", MessageCount: 3, ToolNames: []string{"t1"}, Iteration: 1, Timestamp: now},
-		trace.LLMResponseEvent{AgentName: "a", Iteration: 1, Timestamp: now},
-		trace.ToolCallEvent{AgentName: "a", ToolName: "bash", Arguments: "{}", CallID: "c1", Iteration: 1, Timestamp: now},
-		trace.ToolResultEvent{AgentName: "a", ToolName: "bash", Result: "ok", CallID: "c1", Iteration: 1, Timestamp: now},
-		trace.MemorySaveEvent{AgentName: "a", Count: 4, Timestamp: now},
-		trace.MemoryRetrieveEvent{AgentName: "a", Count: 2, Timestamp: now},
-	}
-	for _, e := range events {
-		tr.Trace(e)
-	}
-
-	if closeErr := tr.Close(); closeErr != nil {
-		t.Fatalf("Close: %v", closeErr)
-	}
-
-	file, err := os.Open(path)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer func() {
-		if closeErr := file.Close(); closeErr != nil {
-			t.Errorf("Close: %v", closeErr)
-		}
-	}()
-
-	expectedTypes := []string{
-		"AgentStart", "AgentIteration", "AgentRunSummary", "AgentEnd",
-		"LLMRequest", "LLMResponse",
-		"ToolCall", "ToolResult",
-		"MemorySave", "MemoryRetrieve",
-	}
-
-	scanner := bufio.NewScanner(file)
-
-	var lines []string
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-
-	if scanErr := scanner.Err(); scanErr != nil {
-		t.Fatalf("scanner: %v", scanErr)
-	}
-
-	if len(lines) != len(expectedTypes) {
-		t.Fatalf("expected %d lines, got %d", len(expectedTypes), len(lines))
-	}
-
-	for i, line := range lines {
-		var m map[string]any
-		if unmarshalErr := json.Unmarshal([]byte(line), &m); unmarshalErr != nil {
-			t.Errorf("line %d is not valid JSON: %v - %q", i, unmarshalErr, line)
-			continue
-		}
-
-		got, _ := m["type"].(string)
-		if !strings.EqualFold(got, expectedTypes[i]) {
-			t.Errorf("line %d: expected type %q, got %q", i, expectedTypes[i], got)
-		}
-	}
-}
-
-func TestTracer_Trace_ErrorEvent(t *testing.T) {
-	f, err := os.CreateTemp("", "trace-*.ndjson")
+	f, err := os.Open(path) //nolint:gosec // test file
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer f.Close()
 
-	path := f.Name()
-	if closeErr := f.Close(); closeErr != nil {
-		t.Fatalf("Close: %v", closeErr)
+	var records []map[string]any
+
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		var r map[string]any
+		if err = json.Unmarshal(sc.Bytes(), &r); err != nil {
+			t.Fatalf("invalid json line: %v", err)
+		}
+
+		records = append(records, r)
 	}
 
-	t.Cleanup(func() {
-		removeIfExists(t, path)
-	})
-
-	tr, err := jsonfile.New(path)
-	if err != nil {
-		t.Fatalf("New: %v", err)
+	if len(records) != 2 {
+		t.Fatalf("expected 2 records, got %d", len(records))
 	}
 
-	tr.Trace(trace.AgentEndEvent{AgentName: "a", Err: errTest, Iterations: 1, Timestamp: time.Now()})
-	tr.Trace(trace.ToolResultEvent{AgentName: "a", ToolName: "t", Err: errTest, Iteration: 1, Timestamp: time.Now()})
-
-	if closeErr := tr.Close(); closeErr != nil {
-		t.Fatalf("Close: %v", closeErr)
+	llmRec, runRec := records[0], records[1]
+	if llmRec["kind"] != "chat" || llmRec["error"] != "boom" || llmRec["parentSpanId"] != runRec["spanId"] {
+		t.Fatalf("unexpected llm record %v", llmRec)
 	}
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
+	payload, _ := llmRec["payload"].(map[string]any)
+	if msgs, _ := payload["messages"].([]any); len(msgs) != 1 {
+		t.Fatalf("expected full prompt in payload, got %v", payload)
 	}
 
-	if !strings.Contains(string(data), "tool failed") {
-		t.Errorf("expected error message in output, got: %s", data)
-	}
-}
-
-// helpers
-
-type testError struct{ msg string }
-
-func (e testError) Error() string { return e.msg }
-
-var errTest = testError{"tool failed"}
-
-func removeIfExists(t *testing.T, path string) {
-	t.Helper()
-
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("Remove(%q): %v", path, err)
+	totals, _ := runRec["totals"].(map[string]any)
+	if totals["llmCalls"] != float64(1) {
+		t.Fatalf("expected run totals, got %v", runRec["totals"])
 	}
 }

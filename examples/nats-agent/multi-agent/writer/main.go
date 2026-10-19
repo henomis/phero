@@ -40,6 +40,7 @@ import (
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/llm/openai"
 	natsagent "github.com/henomis/phero/v2/nats"
+	"github.com/henomis/phero/v2/trace"
 	"github.com/henomis/phero/v2/trace/text"
 )
 
@@ -73,7 +74,7 @@ Use active voice, avoid jargon, and make complex ideas accessible to a general a
 		log.Fatalf("create agent: %v", err)
 	}
 
-	writer.SetTracer(text.New(os.Stderr))
+	writer.SetTracing(trace.NewProvider(trace.WithProcessor(text.New(os.Stderr))))
 
 	srv, err := natsagent.New(nc, writer, owner, name,
 		natsagent.WithAgentID("phero"),

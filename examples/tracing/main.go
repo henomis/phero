@@ -81,8 +81,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Attach a text Tracer to see all lifecycle events in the terminal.
-	a.SetTracer(text.New(os.Stderr))
+	// Print the span tree of the run (agent, LLM calls, tools) to the terminal.
+	a.SetTracing(trace.NewProvider(trace.WithProcessor(text.New(os.Stderr))))
 
 	if err := a.AddTool(calculatorTool); err != nil {
 		fmt.Fprintf(os.Stderr, "AddTool: %v\n", err)
@@ -105,7 +105,8 @@ func printRunSummary(summary *trace.RunSummary) {
 	}
 
 	fmt.Printf(
-		"Run summary: iterations=%d llm_calls=%d tool_calls=%d tokens=%d/%d cost=$%.4f latency=%s\n",
+		"Run summary: stop=%s iterations=%d llm_calls=%d tool_calls=%d tokens=%d/%d cost=$%.4f latency=%s\n",
+		summary.StopReason,
 		summary.Iterations,
 		summary.LLMCalls,
 		summary.ToolCalls,

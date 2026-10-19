@@ -39,6 +39,10 @@ type StreamChunk struct {
 	Usage *Usage
 	// Model is the model that produced the response. Set only on the terminal chunk.
 	Model string
+	// FinishReason is the normalised finish reason. Set only on the terminal chunk.
+	FinishReason FinishReason
+	// RawFinishReason is the provider's original finish reason. Set only on the terminal chunk.
+	RawFinishReason string
 	// Done reports whether this is the terminal chunk of the stream.
 	Done bool
 }
@@ -79,6 +83,9 @@ func StreamOrBuffer(
 			chunk.Usage = result.Usage
 
 			chunk.Model = result.Model
+			chunk.FinishReason = result.FinishReason
+
+			chunk.RawFinishReason = result.RawFinishReason
 			if result.Message != nil {
 				chunk.TextDelta = result.Message.TextContent()
 			}

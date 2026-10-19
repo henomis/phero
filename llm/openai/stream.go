@@ -62,6 +62,7 @@ func (c *Client) ExecuteStream(
 			toolOrder   []int
 			usage       *llm.Usage
 			model       = c.model
+			finish      string
 		)
 
 		for {
@@ -80,14 +81,15 @@ func (c *Client) ExecuteStream(
 			}
 
 			if response.Usage != nil {
-				usage = &llm.Usage{
-					InputTokens:  response.Usage.PromptTokens,
-					OutputTokens: response.Usage.CompletionTokens,
-				}
+				usage = usageFromOpenAI(*response.Usage)
 			}
 
 			if len(response.Choices) == 0 {
 				continue
+			}
+
+			if fr := response.Choices[0].FinishReason; fr != "" {
+				finish = string(fr)
 			}
 
 			delta := response.Choices[0].Delta
@@ -151,6 +153,9 @@ func (c *Client) ExecuteStream(
 			message.Parts = []llm.ContentPart{llm.Text(text)}
 		}
 
-		yield(llm.StreamChunk{Done: true, Message: message, Usage: usage, Model: model}, nil)
+		yield(llm.StreamChunk{
+			Done: true, Message: message, Usage: usage, Model: model,
+			FinishReason: finishReasonFromOpenAI(finish), RawFinishReason: finish,
+		}, nil)
 	}
 }

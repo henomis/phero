@@ -108,4 +108,4 @@ The exact greeting will vary based on the model.
 - Both examples use `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_MODEL` through a local `buildLLMFromEnv()` helper.
 - If both `OPENAI_API_KEY` and `OPENAI_BASE_URL` are empty, the examples default to an Ollama-compatible base URL.
 - The client assumes the server is reachable at `http://localhost:8080`.
-- Both agents use the built-in `trace/text` tracer, which writes human-readable trace lines to stderr.
+- Both agents use the built-in `trace/text` processor, which prints the span tree of each run to stderr.

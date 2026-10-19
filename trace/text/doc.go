@@ -12,6 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package text provides a human-readable, colour-coded Tracer implementation
-// that writes one formatted line per event to an io.Writer.
+// Package text provides a human-readable, colour-coded trace.Processor that
+// prints the span tree of agent runs to an io.Writer.
+//
+//	p := trace.NewProvider(trace.WithProcessor(text.New(os.Stderr)))
+//	a.SetTracing(p)
+//
+// A line is printed when a span ends, indented by its depth in the tree. Run
+// spans also print a line when they start; WithVerbose does so for every
+// span. Content (prompts, tool arguments and results, outputs) is printed in
+// full unless WithMaxLen is set.
 package text
