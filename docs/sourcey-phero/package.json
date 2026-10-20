@@ -1,0 +1,12 @@
+{
+  "name": "phero-sourcey-api-docs",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Reproducible Sourcey Go API reference for Phero.",
+  "scripts": {
+    "build": "sourcey build -o ../../web/docs/api"
+  },
+  "dependencies": {
+    "sourcey": "3.6.5"
+  }
+}

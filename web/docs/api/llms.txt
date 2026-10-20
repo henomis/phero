@@ -1,0 +1,42 @@
+# Phero Go API
+
+> Package a2a exposes phero agents as A2A servers and lets agents call remote A2A endpoints as tools.
+
+## Go API
+
+- [a2a](/phero/docs/api/go-api/pkg-a2a.html): Package a2a exposes phero agents as A2A servers and lets agents call remote A2A endpoints as tools.
+- [agent](/phero/docs/api/go-api/pkg-agent.html): Package agent provides a small orchestration layer around an llm.LLM.
+- [document](/phero/docs/api/go-api/pkg-document.html): Package document defines the Document type returned by text splitters.
+- [embedding](/phero/docs/api/go-api/pkg-embedding.html): Package embedding defines a small, provider-agnostic interface for generating vector embeddings from text.
+- [embedding/openai](/phero/docs/api/go-api/pkg-embedding-openai.html): Package openai provides an OpenAI-backed Embedder implementation.
+- [llm](/phero/docs/api/go-api/pkg-llm.html): Package llm provides small, composable building blocks for driving LLM-backed applications.
+- [llm/anthropic](/phero/docs/api/go-api/pkg-llm-anthropic.html): Package anthropic provides an llm.LLM implementation backed by Anthropic's Messages API.
+- [llm/middleware](/phero/docs/api/go-api/pkg-llm-middleware.html): Package middleware provides built-in llm.Middleware implementations for the phero framework.
+- [llm/openai](/phero/docs/api/go-api/pkg-llm-openai.html): Package openai provides an llm.LLM implementation backed by the OpenAI Chat Completions API.
+- [mcp](/phero/docs/api/go-api/pkg-mcp.html): Package mcp provides adapters for working with the Model Context Protocol (MCP) in this codebase.
+- [memory](/phero/docs/api/go-api/pkg-memory.html): Package memory defines the Memory interface for conversational context storage.
+- [memory/jsonfile](/phero/docs/api/go-api/pkg-memory-jsonfile.html): Package jsonfile provides a file-backed message store for agents.
+- [memory/nats](/phero/docs/api/go-api/pkg-memory-nats.html): Package natsmemory implements the memory.Memory interface using NATS JetStream Key-Value.
+- [memory/psql](/phero/docs/api/go-api/pkg-memory-psql.html): Package psql implements the memory.Memory interface using PostgreSQL.
+- [memory/rag](/phero/docs/api/go-api/pkg-memory-rag.html): Package rag provides a memory.Memory implementation backed by the project's retrieval-augmented generation (RAG) store.
+- [memory/simple](/phero/docs/api/go-api/pkg-memory-simple.html): Package simple provides a small in-memory message store for agents.
+- [nats](/phero/docs/api/go-api/pkg-nats.html): Package nats implements the NATS Agent Protocol v0.3 for Phero agents.
+- [rag](/phero/docs/api/go-api/pkg-rag.html): Package rag provides a small retrieval-augmented generation (RAG) helper.
+- [skill](/phero/docs/api/go-api/pkg-skill.html): Package skill provides helpers to discover and parse skill definitions.
+- [textsplitter](/phero/docs/api/go-api/pkg-textsplitter.html): Package textsplitter defines the shared abstractions for text splitting.
+- [textsplitter/markdown](/phero/docs/api/go-api/pkg-textsplitter-markdown.html): Package markdown provides a Markdown-aware text splitter.
+- [textsplitter/recursive](/phero/docs/api/go-api/pkg-textsplitter-recursive.html): Package recursive provides a recursive character-based text splitter.
+- [tool/agent](/phero/docs/api/go-api/pkg-tool-agent.html): Package agent provides a reusable tool wrapper for delegating tasks to another runnable agent.
+- [tool/bash](/phero/docs/api/go-api/pkg-tool-bash.html): Package bash provides a Phero tool that executes bash commands on behalf of an LLM agent.
+- [tool/file](/phero/docs/api/go-api/pkg-tool-file.html): Package file provides filesystem-oriented tools aligned with read/write/edit/glob/grep naming.
+- [tool/human](/phero/docs/api/go-api/pkg-tool-human.html): Package human provides a structured user interaction tool for agents.
+- [tool/skill](/phero/docs/api/go-api/pkg-tool-skill.html): Package skill provides a dispatcher tool that loads SKILL.md instructions into the current conversation.
+- [trace](/phero/docs/api/go-api/pkg-trace.html): Package trace provides observability hooks for phero agents and LLM calls.
+- [trace/jsonfile](/phero/docs/api/go-api/pkg-trace-jsonfile.html): Package jsonfile provides a file-backed Tracer that persists trace events as newline-delimited JSON (NDJSON).
+- [trace/otel](/phero/docs/api/go-api/pkg-trace-otel.html): Package otel provides an OpenTelemetry-backed trace.Tracer that maps phero agent, LLM, and tool events onto OpenTelemetry spans.
+- [trace/text](/phero/docs/api/go-api/pkg-trace-text.html): Package text provides a human-readable, colour-coded Tracer implementation that writes one formatted line per event to an io.Writer.
+- [vectorstore](/phero/docs/api/go-api/pkg-vectorstore.html): Package vectorstore defines the Store interface for vector search backends.
+- [vectorstore/psql](/phero/docs/api/go-api/pkg-vectorstore-psql.html): Package psql implements the vectorstore.Store interface using PostgreSQL + pgvector.
+- [vectorstore/qdrant](/phero/docs/api/go-api/pkg-vectorstore-qdrant.html): Package qdrant implements the vectorstore.Store interface using Qdrant.
+- [vectorstore/weaviate](/phero/docs/api/go-api/pkg-vectorstore-weaviate.html): Package weaviate provides a Weaviate-backed vectorstore.Store implementation using the official Weaviate Go client (v4).
+- [Go API](/phero/docs/api/go-api.html): github.com/henomis/phero
