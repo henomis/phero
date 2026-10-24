@@ -58,6 +58,8 @@ func main() {
 			fmt.Printf("\n[calling tool %s(%s)]\n", ev.ToolName, ev.ToolArgs)
 		case agent.EventToolResult:
 			fmt.Printf("\n[tool %s -> %s]\n", ev.ToolName, ev.ToolResult)
+		case agent.EventUsage:
+			// per-call usage; the run's total is printed with EventDone
 		case agent.EventDone:
 			fmt.Println()
 

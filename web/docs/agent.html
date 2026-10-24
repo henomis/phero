@@ -263,9 +263,15 @@ if err := json.Unmarshal([]byte(result.TextContent()), &v); err != nil {
       <p>
         <code>Agent.RunStream</code> runs the agent like <code>Run</code> but yields progress as a sequence of
         <code>Event</code>s over a Go 1.23 iterator: text and reasoning deltas as the model produces them, a
-        <code>ToolCall</code> and <code>ToolResult</code> event around each tool invocation, and a final
+        <code>ToolCall</code> and <code>ToolResult</code> event around each tool invocation, an
+        <code>EventUsage</code> with the token usage of each LLM call, and a final
         <code>EventDone</code> whose <code>Result</code> mirrors <code>Run</code>. It uses the underlying LLM's
         streaming API when available and otherwise falls back to a single buffered response.
+      </p>
+      <p>
+        The tool calls of one round run concurrently. Their <code>ToolCall</code> events come in call order before
+        they start, and each <code>ToolResult</code> comes as soon as its call finishes, so a slow tool does not hold
+        back the results of fast ones. Match a result to its call with <code>ToolCallID</code>.
       </p>
 
       <pre><code class="language-go">for ev, err := range a.RunStream(ctx, llm.Text("Tell me a story.")) {

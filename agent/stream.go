@@ -32,10 +32,15 @@ const (
 	EventReasoningDelta
 	// EventToolCall is emitted just before a tool call is executed.
 	EventToolCall
-	// EventToolResult is emitted after a tool call returns.
+	// EventToolResult is emitted when a tool call returns. The calls of one
+	// round run concurrently, and their results are emitted in the order the
+	// calls finish, so a slow tool does not hold back the others' results.
 	EventToolResult
 	// EventDone is the terminal event; its Result holds the final run result.
 	EventDone
+	// EventUsage carries the token usage of one LLM call (Usage), emitted when
+	// the call completes, when the provider reports it.
+	EventUsage
 )
 
 // Event is a single streaming event produced by Agent.RunStream.
@@ -56,6 +61,8 @@ type Event struct {
 	ToolResult string
 	// ToolError reports whether the tool call failed (EventToolResult).
 	ToolError bool
+	// Usage is the token usage of the iteration's LLM call (EventUsage).
+	Usage *llm.Usage
 	// Iteration is the 1-based agent loop iteration this event belongs to.
 	Iteration int
 	// Result holds the final agent result (EventDone), or the partial result
@@ -164,6 +171,10 @@ func (a *Agent) streamIteration(
 		RawFinishReason: final.RawFinishReason,
 	}
 	endLLMCall(span, call, result, nil)
+
+	if final.Usage != nil {
+		emit(Event{Type: EventUsage, Usage: final.Usage, Iteration: iteration})
+	}
 
 	return result, nil
 }

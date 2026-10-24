@@ -16,9 +16,11 @@ package agent_test
 
 import (
 	"context"
+	"errors"
 	"iter"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/henomis/phero/v2/agent"
 	"github.com/henomis/phero/v2/llm"
@@ -72,7 +74,7 @@ func TestRunStream_StreamsTextDeltasAndDone(t *testing.T) {
 			text.WriteString(ev.TextDelta)
 		case agent.EventDone:
 			done = ev.Result
-		case agent.EventReasoningDelta, agent.EventToolCall, agent.EventToolResult:
+		case agent.EventReasoningDelta, agent.EventToolCall, agent.EventToolResult, agent.EventUsage:
 			// not checked in this test
 		}
 	}
@@ -139,7 +141,7 @@ func TestRunStream_EmitsToolEventsViaBufferedFallback(t *testing.T) {
 			}
 		case agent.EventDone:
 			done = ev.Result
-		case agent.EventTextDelta, agent.EventReasoningDelta:
+		case agent.EventTextDelta, agent.EventReasoningDelta, agent.EventUsage:
 			// not checked in this test
 		}
 	}
@@ -171,5 +173,89 @@ func TestRunStream_PropagatesError(t *testing.T) {
 
 	if gotErr == nil {
 		t.Fatal("expected an error from RunStream")
+	}
+}
+
+// TestRunStream_ToolResultsInCompletionOrder checks that a fast tool's result
+// is emitted while a slow tool of the same round still runs: the slow tool
+// only returns once the consumer has seen the fast result.
+func TestRunStream_ToolResultsInCompletionOrder(t *testing.T) {
+	two := toolCallResult("slow", "s", "{}")
+	two.Message.ToolCalls = append(two.Message.ToolCalls, toolCallResult("fast", "f", "{}").Message.ToolCalls...)
+
+	stub := &stubLLM{responses: []*llm.Result{two, textResult("done")}, errs: []error{nil, nil}}
+	a := mustNew(t, stub, "agent", "desc")
+
+	sawFast := make(chan struct{})
+
+	for _, tl := range []*llm.Tool{
+		mustTool(t, "slow", func(context.Context, *struct{}) (string, error) {
+			select {
+			case <-sawFast:
+				return "slow", nil
+			case <-time.After(5 * time.Second):
+				return "", errors.New("the fast result was not emitted before the slow tool returned")
+			}
+		}),
+		mustTool(t, "fast", func(context.Context, *struct{}) (string, error) { return "fast", nil }),
+	} {
+		if err := a.AddTool(tl); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var order []string
+
+	for ev, err := range a.RunStream(context.Background(), llm.Text("go")) {
+		if err != nil {
+			t.Fatalf("RunStream: %v", err)
+		}
+
+		if ev.Type == agent.EventToolResult {
+			if ev.ToolError {
+				t.Fatalf("%s failed: %s", ev.ToolName, ev.ToolResult)
+			}
+
+			order = append(order, ev.ToolName)
+			if ev.ToolName == "fast" {
+				close(sawFast)
+			}
+		}
+	}
+
+	if len(order) != 2 || order[0] != "fast" || order[1] != "slow" {
+		t.Fatalf("tool results = %v, want fast then slow", order)
+	}
+}
+
+func TestRunStream_EmitsUsagePerIteration(t *testing.T) {
+	stub := &stubLLM{
+		responses: []*llm.Result{
+			toolCallResultWithUsage("echo_tool", "c1", "{}", &llm.Usage{InputTokens: 100, OutputTokens: 10}),
+			textResult("done"),
+		},
+		errs: []error{nil, nil},
+	}
+
+	a := mustNew(t, stub, "agent", "desc")
+	if err := a.AddTool(mustTool(t, "echo_tool", func(context.Context, *struct{}) (string, error) { return "ok", nil })); err != nil {
+		t.Fatal(err)
+	}
+
+	var usage []int
+
+	for ev, err := range a.RunStream(context.Background(), llm.Text("go")) {
+		if err != nil {
+			t.Fatalf("RunStream: %v", err)
+		}
+
+		if ev.Type == agent.EventUsage {
+			usage = append(usage, ev.Iteration, ev.Usage.InputTokens)
+		}
+	}
+
+	// textResult reports 10 input tokens.
+	if len(usage) != 4 || usage[0] != 1 || usage[1] != 100 || usage[2] != 2 || usage[3] != 10 {
+		t.Fatalf("usage events (iteration, input tokens) = %v", usage)
 	}
 }

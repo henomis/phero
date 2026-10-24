@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/memory"
@@ -728,8 +727,9 @@ func (a *Agent) handleAgentIteration(
 
 // processToolCalls executes the tool calls in message (if any) concurrently,
 // preserving order, and appends their results to the session. When emit is
-// non-nil it pushes a ToolCall event before execution and a ToolResult event
-// after, both in call order, on the single calling goroutine.
+// non-nil it pushes the ToolCall events, in call order, before execution, and
+// each ToolResult event as soon as its call finishes, all on the single
+// calling goroutine.
 func (a *Agent) processToolCalls(
 	ctx context.Context, session []llm.Message, message *llm.Message,
 	iteration int, emit emitFunc,
@@ -751,35 +751,34 @@ func (a *Agent) processToolCalls(
 		}
 	}
 
-	// Execute all tool calls concurrently, preserving order.
+	// Execute all tool calls concurrently; results keep the call order. Each
+	// result is emitted, on this goroutine, as soon as its call finishes.
 	results := make([]*llm.Message, len(toolCalls))
-
-	var wg sync.WaitGroup
-	wg.Add(len(toolCalls))
-
 	stops := make([]error, len(toolCalls))
+	finished := make(chan int, len(toolCalls))
 
 	for i, toolCall := range toolCalls {
 		go func() {
-			defer wg.Done()
-
 			results[i], stops[i] = a.handleToolCall(ctx, toolCall, iteration)
+			finished <- i
 		}()
 	}
 
-	wg.Wait()
+	for range toolCalls {
+		i := <-finished
 
-	if emit != nil {
-		for i, result := range results {
-			emit(Event{
-				Type:       EventToolResult,
-				ToolCallID: toolCalls[i].ID,
-				ToolName:   toolCalls[i].Function.Name,
-				ToolResult: llm.TextContent(result.Parts...),
-				ToolError:  result.ToolError,
-				Iteration:  iteration,
-			})
+		if emit == nil {
+			continue
 		}
+
+		emit(Event{
+			Type:       EventToolResult,
+			ToolCallID: toolCalls[i].ID,
+			ToolName:   toolCalls[i].Function.Name,
+			ToolResult: llm.TextContent(results[i].Parts...),
+			ToolError:  results[i].ToolError,
+			Iteration:  iteration,
+		})
 	}
 
 	// Append results in order; collect all handoffs (fan-out when more than one).
