@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func requireBash(t *testing.T) {
@@ -192,9 +193,36 @@ func TestBashTool_Timeout_KillsLongRunning(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	_, err = tool.run(context.Background(), &Input{Command: "sleep 10"})
-	if err == nil {
-		t.Fatal("expected error from timeout, got nil")
+	start := time.Now()
+
+	out, err := tool.run(context.Background(), &Input{Command: "echo started; sleep 10"})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if !out.TimedOut || !strings.HasPrefix(out.Output, "started\n") || !strings.Contains(out.Output, "timed out") {
+		t.Fatalf("output = %+v, want the output so far and a timeout note", out)
+	}
+
+	// The sleep child keeps the output pipe open: the call must still return.
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("run took %v after a 50ms timeout", elapsed)
+	}
+}
+
+func TestBashTool_CallerCancelReturnsError(t *testing.T) {
+	requireBash(t)
+
+	tool, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	if _, err = tool.run(ctx, &Input{Command: "sleep 10"}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want the caller's context error", err)
 	}
 }
 
@@ -231,12 +259,23 @@ func TestBashTool_OutputTruncated(t *testing.T) {
 		t.Fatalf("expected output")
 	}
 
-	if len(out.Output) != 10 {
-		t.Fatalf("expected length 10, got %d", len(out.Output))
+	if !strings.HasPrefix(out.Output, "abcde") || !strings.HasSuffix(out.Output, "vwxyz") ||
+		!strings.Contains(out.Output, "[... 16 bytes truncated ...]") {
+		t.Fatalf("output = %q, want the start, a marker and the end", out.Output)
 	}
 
 	if !out.Truncated {
 		t.Fatal("expected truncated output")
+	}
+}
+
+func TestTruncateOutput_KeepsUTF8Whole(t *testing.T) {
+	tool := &Tool{maxOutputChars: 7}
+
+	// Each "é" is two bytes: cutting at a fixed byte would split one.
+	out, truncated := tool.truncateOutput("éééééééééé")
+	if !truncated || !utf8.ValidString(out) {
+		t.Fatalf("out = %q, want valid UTF-8 and truncated", out)
 	}
 }
 

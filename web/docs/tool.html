@@ -199,7 +199,9 @@ if err := a.AddTool(bashTool.KillTool());   err != nil { panic(err) }</code></pr
         <li><code>WithTimeout(d)</code>: fixed maximum execution time per command</li>
         <li><code>WithDefaultTimeout(d)</code>: timeout used when the LLM does not supply one in the request (default: 120 s)</li>
         <li><code>WithMaxTimeout(d)</code>: cap on the LLM-supplied per-request timeout value (default: 600 s)</li>
-        <li><code>WithMaxOutputChars(n)</code>: output truncation threshold (default: 30 000 chars)</li>
+        <li><code>WithMaxOutputChars(n)</code>: output truncation threshold (default: 30 000 bytes). Longer output
+          keeps its start and its end, where errors usually are, around a <code>[... N bytes truncated ...]</code>
+          marker, without splitting a UTF-8 character</li>
         <li><code>WithBlocklist(patterns...)</code>: any command containing a pattern (case-insensitive) returns <code>ErrCommandBlocked</code></li>
         <li><code>WithAllowlist(patterns...)</code>: when set, the command must match at least one pattern or <code>ErrCommandNotAllowed</code> is returned</li>
         <li><code>WithWorkingDirectory(dir)</code>: directory in which commands run</li>
@@ -209,6 +211,11 @@ if err := a.AddTool(bashTool.KillTool());   err != nil { panic(err) }</code></pr
         <li><code>RunInBackground bool</code>: start the command in the background; the tool returns a <code>bash_id</code> immediately</li>
         <li><code>Timeout int</code>: optional per-request timeout in milliseconds, capped by <code>WithMaxTimeout</code></li>
       </ul>
+      <p>
+        A command killed at its timeout is not an error: the result holds what it printed until then, followed by
+        "command timed out after …", with <code>TimedOut</code> set, so the model sees how far it got. A cancelled
+        caller context still returns the context's error.
+      </p>
     </section>
 
     <section>

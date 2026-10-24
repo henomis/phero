@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/henomis/phero/v2/llm"
 )
@@ -49,6 +50,9 @@ type Output struct {
 	BashID    string `json:"bash_id,omitempty"`
 	Running   bool   `json:"running"`
 	Truncated bool   `json:"truncated"`
+	// TimedOut reports that the command was killed when its timeout expired;
+	// Output holds what it printed until then.
+	TimedOut bool `json:"timed_out,omitempty"`
 }
 
 // OutputInput represents input for retrieving background shell output.
@@ -84,9 +88,15 @@ const DefaultTimeout = 120 * time.Second
 // MaxTimeout is the maximum allowed timeout for command execution.
 const MaxTimeout = 600 * time.Second
 
-// MaxOutputChars is the maximum number of output characters returned from a
-// single tool call before truncation.
+// MaxOutputChars is the maximum number of output bytes returned from a single
+// tool call before truncation. Truncated output keeps its start and its end,
+// where errors usually are, and marks the cut.
 const MaxOutputChars = 30000
+
+// waitDelay is how long a command killed at its timeout may keep its output
+// open (a child process still writing) before the pipes are closed, so the
+// call returns.
+const waitDelay = 2 * time.Second
 
 const randomIDBytes = 8
 
@@ -295,26 +305,8 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 		return nil, ErrTimeoutTooLarge
 	}
 
-	lower := strings.ToLower(input.Command)
-	for _, pat := range t.blocklist {
-		if strings.Contains(lower, pat) {
-			return nil, ErrCommandBlocked
-		}
-	}
-
-	if len(t.allowlist) > 0 {
-		allowed := false
-
-		for _, pat := range t.allowlist {
-			if strings.Contains(lower, pat) {
-				allowed = true
-				break
-			}
-		}
-
-		if !allowed {
-			return nil, ErrCommandNotAllowed
-		}
+	if err := t.checkCommand(input.Command); err != nil {
+		return nil, err
 	}
 
 	cmdTimeout, err := t.resolveTimeout(input.Timeout)
@@ -345,6 +337,8 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 		cmd.Dir = t.workingDir
 	}
 
+	cmd.WaitDelay = waitDelay
+
 	combined, err := cmd.CombinedOutput()
 	out, truncated := t.truncateOutput(string(combined))
 
@@ -352,10 +346,22 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 		return &Output{Output: out, Running: false, Truncated: truncated}, nil
 	}
 
-	// If the context expired (timeout or cancellation), surface that error
-	// rather than the process exit error so callers can distinguish policy failures.
+	// The caller's context ended: surface that rather than the exit error.
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	// The command's own timeout expired: return what it printed so far, so
+	// the model can see how far it got.
 	if runCtx.Err() != nil {
-		return nil, runCtx.Err()
+		if out != "" && !strings.HasSuffix(out, "\n") {
+			out += "\n"
+		}
+
+		out += fmt.Sprintf("command timed out after %s", cmdTimeout)
+		out, truncated = t.truncateOutput(out)
+
+		return &Output{Output: out, Truncated: truncated, TimedOut: true}, nil
 	}
 
 	// If the command executed but failed (non-zero exit), return output with an inline marker
@@ -493,16 +499,56 @@ func (t *Tool) resolveTimeout(timeoutMs int) (time.Duration, error) {
 	return effective, nil
 }
 
+// checkCommand applies the blocklist and the allowlist, case-insensitively,
+// to command.
+func (t *Tool) checkCommand(command string) error {
+	lower := strings.ToLower(command)
+	for _, pat := range t.blocklist {
+		if strings.Contains(lower, pat) {
+			return ErrCommandBlocked
+		}
+	}
+
+	if len(t.allowlist) == 0 {
+		return nil
+	}
+
+	for _, pat := range t.allowlist {
+		if strings.Contains(lower, pat) {
+			return nil
+		}
+	}
+
+	return ErrCommandNotAllowed
+}
+
+// truncateOutput cuts output longer than maxOutputChars bytes to its first and
+// last halves, joined by a marker saying how many bytes were cut. The cuts
+// fall on UTF-8 character boundaries.
 func (t *Tool) truncateOutput(output string) (string, bool) {
-	if t.maxOutputChars <= 0 {
+	if t.maxOutputChars <= 0 || len(output) <= t.maxOutputChars {
 		return output, false
 	}
 
-	if len(output) <= t.maxOutputChars {
-		return output, false
+	head := runeBoundary(output, t.maxOutputChars/2) //nolint:mnd // half for the start, half for the end
+	tail := len(output) - (t.maxOutputChars - head)
+
+	// Move the tail's start forward to the next character boundary.
+	for tail < len(output) && !utf8.RuneStart(output[tail]) {
+		tail++
 	}
 
-	return output[:t.maxOutputChars], true
+	return output[:head] + fmt.Sprintf("\n[... %d bytes truncated ...]\n", tail-head) + output[tail:], true
+}
+
+// runeBoundary returns the largest index i <= n where a UTF-8 character of s
+// starts, so s[:i] does not split one.
+func runeBoundary(s string, n int) int {
+	for n > 0 && n < len(s) && !utf8.RuneStart(s[n]) {
+		n--
+	}
+
+	return n
 }
 
 func (t *Tool) startBackground(command string, timeout time.Duration) (string, error) {
