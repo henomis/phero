@@ -38,7 +38,7 @@ const (
 
 // Item is one task of the list.
 type Item struct {
-	Content string `json:"content" jsonschema:"description=What the task is, in a short imperative sentence"`
+	Content string `json:"content" jsonschema_description:"What the task is, in a short imperative sentence"`
 	Status  Status `json:"status" jsonschema:"enum=pending,enum=in_progress,enum=completed"`
 }
 
