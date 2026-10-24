@@ -129,6 +129,9 @@ type Tool struct {
 	maxOutputChars int
 	blocklist      []string
 	allowlist      []string
+	runner         Runner
+	envAllowlist   []string
+	extraEnv       []string
 
 	mu    sync.RWMutex
 	shell map[string]*backgroundShell
@@ -159,6 +162,7 @@ func New(options ...Option) (*Tool, error) {
 		defaultTimeout: DefaultTimeout,
 		maxTimeout:     MaxTimeout,
 		maxOutputChars: MaxOutputChars,
+		runner:         LocalRunner{},
 		shell:          map[string]*backgroundShell{},
 	}
 
@@ -221,6 +225,32 @@ func (t *Tool) KillTool() *llm.Tool {
 func WithWorkingDirectory(dir string) Option {
 	return func(t *Tool) {
 		t.workingDir = dir
+	}
+}
+
+// WithRunner sets how commands are launched: LocalRunner (the default) runs
+// them on the host; NewBubblewrapRunner runs them in a sandbox.
+func WithRunner(r Runner) Option {
+	return func(t *Tool) {
+		if r != nil {
+			t.runner = r
+		}
+	}
+}
+
+// WithEnvAllowlist limits the environment commands get to the variables
+// named, instead of the agent process's whole environment, which may hold
+// secrets such as API keys. DefaultEnvAllowlist is a sane choice.
+func WithEnvAllowlist(names ...string) Option {
+	return func(t *Tool) {
+		t.envAllowlist = append([]string{}, names...)
+	}
+}
+
+// WithEnv adds KEY=VALUE entries to the environment of every command.
+func WithEnv(entries ...string) Option {
+	return func(t *Tool) {
+		t.extraEnv = append(t.extraEnv, entries...)
 	}
 }
 
@@ -332,13 +362,10 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(runCtx, "bash", "-c", input.Command) //nolint:gosec,lll // intentional: bash tool executes arbitrary commands by design
-	if t.workingDir != "" {
-		cmd.Dir = t.workingDir
+	cmd, err := t.newCommand(runCtx, input.Command)
+	if err != nil {
+		return nil, err
 	}
-
-	cmd.WaitDelay = waitDelay
-	setProcessGroup(cmd)
 
 	combined, err := cmd.CombinedOutput()
 	out, truncated := t.truncateOutput(string(combined))
@@ -572,9 +599,13 @@ func (t *Tool) startBackground(command string, timeout time.Duration) (string, e
 		baseCtx, cancel = context.WithTimeout(context.Background(), timeout)
 	}
 
-	cmd := exec.CommandContext(baseCtx, "bash", "-c", command) //nolint:gosec,lll // intentional: bash tool executes arbitrary commands by design
-	if t.workingDir != "" {
-		cmd.Dir = t.workingDir
+	cmd, err := t.newCommand(baseCtx, command)
+	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
+
+		return "", err
 	}
 
 	shell := &backgroundShell{
@@ -588,8 +619,6 @@ func (t *Tool) startBackground(command string, timeout time.Duration) (string, e
 	writer := &lockedWriter{shell: shell}
 	cmd.Stdout = writer
 	cmd.Stderr = writer
-	cmd.WaitDelay = waitDelay
-	setProcessGroup(cmd)
 
 	if startErr := cmd.Start(); startErr != nil {
 		return "", startErr
