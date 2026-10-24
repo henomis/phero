@@ -41,7 +41,8 @@ type Option func(*Tool)
 
 // Input defines the JSON input schema accepted by the tool.
 type Input struct {
-	Command string `json:"command" jsonschema:"description=The skill name to load (no arguments)."`
+	Command   string `json:"command" jsonschema:"description=The skill name to load (no arguments)."`
+	Arguments string `json:"arguments,omitempty" jsonschema_description:"Arguments for the skill, or an empty string"` //nolint:lll
 }
 
 // AvailableSkill contains frontmatter metadata surfaced in the tool catalog.
@@ -60,6 +61,8 @@ type Output struct {
 	Instructions    string           `json:"instructions"`
 	Expansion       string           `json:"expansion"`
 	AvailableSkills []AvailableSkill `json:"available_skills"`
+	// AllowedTools lists the tools the skill pre-approves (its allowed-tools).
+	AllowedTools []string `json:"allowed_tools,omitempty"`
 }
 
 // Tool wraps an llm.Tool that dispatches skill instruction loading.
@@ -68,12 +71,32 @@ type Tool struct {
 	parser   Parser
 	catalog  []catalogEntry
 	commands map[string]catalogEntry
+	onLoad   func(ctx context.Context, skill *skillpkg.Skill)
 }
 
 type catalogEntry struct {
 	dir       string
 	skillPath string
 	skill     AvailableSkill
+}
+
+// WithRoots reads skills from several roots, such as the user's own and the
+// project's; when two hold a skill directory of the same name, the later
+// root wins. It replaces the root given to New.
+func WithRoots(roots ...string) Option {
+	return func(t *Tool) {
+		t.parser = skillpkg.NewMulti(roots...)
+	}
+}
+
+// WithOnLoad calls fn each time the model loads a skill, for example to
+// pre-approve the skill's allowed tools in a permission policy:
+//
+//	skilltool.WithOnLoad(func(_ context.Context, s *skill.Skill) { _ = policy.Allow(s.Tools()...) })
+func WithOnLoad(fn func(ctx context.Context, skill *skillpkg.Skill)) Option {
+	return func(t *Tool) {
+		t.onLoad = fn
+	}
 }
 
 // WithParser injects a custom parser, useful for tests.
@@ -150,6 +173,9 @@ func (t *Tool) buildCatalog(skillsRootPath string) ([]catalogEntry, map[string]c
 		}
 
 		skillPath := filepath.Clean(filepath.Join(skillsRootPath, dir))
+		if skillItem.RootPath != "" {
+			skillPath = skillItem.RootPath
+		}
 
 		entry := catalogEntry{
 			dir:       dir,
@@ -192,7 +218,8 @@ func (t *Tool) buildDescription() string {
 	b.WriteString("<skills_instructions>\n")
 	b.WriteString("When users ask you to perform tasks, check if any available skill " +
 		"can help complete the task more effectively.\n")
-	b.WriteString("Invoke this tool with the skill name only, using the command field.\n")
+	b.WriteString("Invoke this tool with the skill name only in the command field, " +
+		"and any arguments for the skill in the arguments field.\n")
 	b.WriteString("Do not pass arguments inside command.\n")
 	b.WriteString("After invocation, use the returned base path and instructions " +
 		"to execute the task in the same conversation.\n")
@@ -219,7 +246,7 @@ func (t *Tool) buildDescription() string {
 	return b.String()
 }
 
-func (t *Tool) handle(_ context.Context, input *Input) (*Output, error) {
+func (t *Tool) handle(ctx context.Context, input *Input) (*Output, error) {
 	if input == nil {
 		return nil, ErrNilInput
 	}
@@ -249,8 +276,12 @@ func (t *Tool) handle(_ context.Context, input *Input) (*Output, error) {
 		basePath = entry.skillPath
 	}
 
-	instructions := strings.TrimSpace(skillItem.Body)
+	instructions := withArguments(strings.TrimSpace(skillItem.Body), strings.TrimSpace(input.Arguments))
 	expansion := fmt.Sprintf("Base Path: %s\n\n%s", basePath, instructions)
+
+	if t.onLoad != nil {
+		t.onLoad(ctx, skillItem)
+	}
 
 	available := make([]AvailableSkill, 0, len(t.catalog))
 	for _, item := range t.catalog {
@@ -265,7 +296,25 @@ func (t *Tool) handle(_ context.Context, input *Input) (*Output, error) {
 		Instructions:    instructions,
 		Expansion:       expansion,
 		AvailableSkills: available,
+		AllowedTools:    skillItem.Tools(),
 	}, nil
+}
+
+// argumentsPlaceholder is replaced by the skill's arguments in its body.
+const argumentsPlaceholder = "$ARGUMENTS"
+
+// withArguments puts args into a skill's instructions: in place of
+// $ARGUMENTS when the body has it, else after the body.
+func withArguments(instructions, args string) string {
+	if strings.Contains(instructions, argumentsPlaceholder) {
+		return strings.ReplaceAll(instructions, argumentsPlaceholder, args)
+	}
+
+	if args == "" {
+		return instructions
+	}
+
+	return instructions + "\n\nARGUMENTS: " + args
 }
 
 func escapeXML(s string) string {

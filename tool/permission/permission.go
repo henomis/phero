@@ -162,6 +162,29 @@ func New(opts ...Option) (*Policy, error) {
 	return p, nil
 }
 
+// Allow adds allow rules while the Policy is in use, for example the tools a
+// skill pre-approves when it is loaded. It returns ErrInvalidRule for a rule
+// it cannot parse, and then adds none.
+func (p *Policy) Allow(specs ...string) error {
+	rules := make([]rule, 0, len(specs))
+
+	for _, spec := range specs {
+		r, err := parseRule(spec, Allow)
+		if err != nil {
+			return err
+		}
+
+		rules = append(rules, r)
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.rules = append(p.rules, rules...)
+
+	return nil
+}
+
 // Apply installs the Policy on tools, as a tool middleware.
 func (p *Policy) Apply(tools ...*llm.Tool) {
 	for _, t := range tools {

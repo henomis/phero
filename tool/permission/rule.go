@@ -72,9 +72,12 @@ func parseRule(spec string, decision Decision) (rule, error) {
 		return rule{}, fmt.Errorf("%w %q: missing tool name", ErrInvalidRule, spec)
 	}
 
-	r := rule{spec: spec, decision: decision, tool: compileWildcard(name)}
+	// Tool names match case-insensitively, so rules written for other agents
+	// ("Bash", "Read", as in skills' allowed-tools) apply too.
+	r := rule{spec: spec, decision: decision, tool: compileWildcard("(?i)", name)}
 	if hasPattern {
-		r.subject = compileWildcard(pattern)
+		// "git:*" is the older prefix form of "git*".
+		r.subject = compileWildcard("", strings.TrimSuffix(pattern, ":*")+suffixWildcard(pattern))
 	}
 
 	return r, nil
@@ -85,13 +88,23 @@ func (r rule) matches(tool, subject string) bool {
 	return r.tool.MatchString(tool) && (r.subject == nil || r.subject.MatchString(subject))
 }
 
+// suffixWildcard returns the "*" that replaces a trailing ":*".
+func suffixWildcard(pattern string) string {
+	if strings.HasSuffix(pattern, ":*") {
+		return "*"
+	}
+
+	return ""
+}
+
 // compileWildcard compiles a pattern where * matches any run of characters,
-// slashes included, and everything else matches itself.
-func compileWildcard(pattern string) *regexp.Regexp {
+// slashes included, and everything else matches itself; flags are regexp
+// flags such as "(?i)".
+func compileWildcard(flags, pattern string) *regexp.Regexp {
 	parts := strings.Split(pattern, "*")
 	for i, p := range parts {
 		parts[i] = regexp.QuoteMeta(p)
 	}
 
-	return regexp.MustCompile("^" + strings.Join(parts, ".*") + "$")
+	return regexp.MustCompile(flags + "^" + strings.Join(parts, ".*") + "$")
 }

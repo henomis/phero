@@ -96,13 +96,29 @@ Use this skill when the user asks for a random quote (inspirational, motivationa
     </section>
 
     <section>
-      <h2>Default tools available to skills</h2>
+      <h2>Arguments, allowed tools and several roots</h2>
       <p>
-        Each skill is executed by an internal agent. The agent automatically gets a small built-in toolbox rooted at the skill directory:
-        <code>read</code>, <code>write</code>, <code>edit</code>, and <code>bash</code>.
+        The model loads a skill through the <code>skill</code> tool (<code>tool/skill</code>), giving its name in
+        <code>command</code> and, when the skill takes any, its <code>arguments</code>. A <code>$ARGUMENTS</code>
+        placeholder in the body is replaced with them; without one, they are appended after the body.
       </p>
       <p>
-        That means a skill can inspect local files, edit them, or run commands without extra setup in your application code.
+        The <code>allowed-tools</code> frontmatter field lists the tools a skill pre-approves, in the space-separated form
+        of the Agent Skills spec (<code>Read Grep</code>) or the comma-separated form with patterns
+        (<code>Bash(git:*), Read</code>). <code>Skill.Tools()</code> returns the entries, the <code>skill</code> tool
+        returns them to the model, and <code>WithOnLoad</code> lets the application grant them, for example in a
+        <a href="tool.html">permission policy</a>:
+      </p>
+      <pre><code class="language-go">skillTool, err := skilltool.New("",
+    skilltool.WithRoots(userSkillsDir, "./skills"), // later roots win on the same skill name
+    skilltool.WithOnLoad(func(_ context.Context, s *skill.Skill) {
+        _ = policy.Allow(s.Tools()...) // pre-approve the skill's allowed tools
+    }),
+)</code></pre>
+      <p>
+        <code>skill.NewMulti(roots...)</code> is the parser behind <code>WithRoots</code>: a user's own skills and a
+        project's, with the project's winning when both have a skill directory of the same name. A missing root holds no
+        skills.
       </p>
     </section>
 

@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -171,5 +172,67 @@ func TestParser_Parse_MissingSkillFile(t *testing.T) {
 	_, err := p.Parse("does-not-exist")
 	if err == nil {
 		t.Fatalf("expected error, got nil")
+	}
+}
+
+func TestSkill_Tools(t *testing.T) {
+	cases := map[string][]string{
+		"Read Grep Glob":                   {"Read", "Grep", "Glob"},
+		"Bash(git status), Read":           {"Bash(git status)", "Read"},
+		"Bash(git:*),Edit(/repo/*)  Write": {"Bash(git:*)", "Edit(/repo/*)", "Write"},
+		"":                                 nil,
+	}
+
+	for in, want := range cases {
+		if got := (&skill.Skill{AllowedTools: in}).Tools(); !slices.Equal(got, want) {
+			t.Errorf("Tools(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestMultiParser_LaterRootWins(t *testing.T) {
+	user, project := t.TempDir(), t.TempDir()
+
+	write := func(root, dir, description string) {
+		t.Helper()
+
+		path := filepath.Join(root, dir)
+		if err := os.MkdirAll(path, 0o750); err != nil {
+			t.Fatal(err)
+		}
+
+		content := "---\nname: " + dir + "\ndescription: " + description + "\n---\nbody"
+		if err := os.WriteFile(filepath.Join(path, "SKILL.md"), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write(user, "review", "user review")
+	write(user, "notes", "user notes")
+	write(project, "review", "project review")
+
+	m := skill.NewMulti(user, filepath.Join(t.TempDir(), "missing"), project)
+
+	names, err := m.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	slices.Sort(names)
+
+	if !slices.Equal(names, []string{"notes", "review"}) {
+		t.Fatalf("List = %v", names)
+	}
+
+	if sk, parseErr := m.Parse("review"); parseErr != nil || sk.Description != "project review" {
+		t.Fatalf("Parse(review) = %+v, %v; want the project's", sk, parseErr)
+	}
+
+	if sk, parseErr := m.Parse("notes"); parseErr != nil || sk.Description != "user notes" {
+		t.Fatalf("Parse(notes) = %+v, %v; want the user's", sk, parseErr)
+	}
+
+	if _, parseErr := m.Parse("none"); !errors.Is(parseErr, os.ErrNotExist) {
+		t.Fatalf("Parse(none) err = %v", parseErr)
 	}
 }

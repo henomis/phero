@@ -265,3 +265,28 @@ func TestPolicy_DenialReachesTheModel(t *testing.T) {
 		t.Fatalf("model saw %q, want the denial", got)
 	}
 }
+
+func TestPolicy_AllowAtRuntimeAndForeignSyntax(t *testing.T) {
+	p := mustPolicy(t)
+
+	if got, _ := p.Decide("bash", bashArgs("git status")); got != permission.Ask {
+		t.Fatalf("before Allow: %s", got)
+	}
+
+	// The form skills use in allowed-tools.
+	if err := p.Allow("Bash(git:*)", "Read"); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, _ := p.Decide("bash", bashArgs("git status && git diff")); got != permission.Allow {
+		t.Fatalf("after Allow: bash = %s", got)
+	}
+
+	if got, _ := p.Decide("read", `{"file_path":"/x"}`); got != permission.Allow {
+		t.Fatalf("after Allow: read = %s", got)
+	}
+
+	if err := p.Allow("bash(oops"); !errors.Is(err, permission.ErrInvalidRule) {
+		t.Fatalf("err = %v, want ErrInvalidRule", err)
+	}
+}

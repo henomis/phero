@@ -17,6 +17,7 @@ package skill
 import (
 	"context"
 	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -336,5 +337,85 @@ func TestBasePathFallsBackToRootPlusSkillName(t *testing.T) {
 
 	if out.BasePath != "skills/pdf" {
 		t.Fatalf("BasePath = %q, want %q", out.BasePath, "skills/pdf")
+	}
+}
+
+// oneSkill returns a parser serving a single skill with body and allowed tools.
+func oneSkill(body, allowed string) *stubParser {
+	return &stubParser{
+		list: func() ([]string, error) { return []string{"review"}, nil },
+		parse: func(string) (*skillpkg.Skill, error) {
+			return &skillpkg.Skill{Name: "review", Description: "Review code", Body: body, AllowedTools: allowed, RootPath: "/skills/review"}, nil
+		},
+	}
+}
+
+func TestHandleArguments(t *testing.T) {
+	cases := []struct{ body, args, want string }{
+		{"Review $ARGUMENTS carefully.", "main.go", "Review main.go carefully."},
+		{"Review the code.", "main.go", "Review the code.\n\nARGUMENTS: main.go"},
+		{"Review the code.", "", "Review the code."},
+	}
+
+	for _, tc := range cases {
+		tool, err := New("", WithParser(oneSkill(tc.body, "")))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		out, err := tool.handle(context.Background(), &Input{Command: "review", Arguments: tc.args})
+		if err != nil || out.Instructions != tc.want {
+			t.Errorf("body %q, args %q: instructions = %q, %v; want %q", tc.body, tc.args, out.Instructions, err, tc.want)
+		}
+	}
+}
+
+func TestHandleAllowedToolsAndOnLoad(t *testing.T) {
+	var loaded []string
+
+	tool, err := New("", WithParser(oneSkill("body", "Bash(git:*), Read")), WithOnLoad(func(_ context.Context, s *skillpkg.Skill) {
+		loaded = s.Tools()
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := tool.handle(context.Background(), &Input{Command: "review"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"Bash(git:*)", "Read"}
+	if !reflect.DeepEqual(out.AllowedTools, want) || !reflect.DeepEqual(loaded, want) {
+		t.Fatalf("allowed tools = %v, loaded = %v; want %v", out.AllowedTools, loaded, want)
+	}
+
+	if out.BasePath != "/skills/review" {
+		t.Fatalf("base path = %q", out.BasePath)
+	}
+}
+
+func TestWithRoots(t *testing.T) {
+	user, project := t.TempDir(), t.TempDir()
+
+	for root, description := range map[string]string{user: "user version", project: "project version"} {
+		dir := root + "/review"
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+
+		content := "---\nname: review\ndescription: " + description + "\n---\nbody"
+		if err := os.WriteFile(dir+"/SKILL.md", []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tool, err := New("", WithRoots(user, project))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(tool.Tool().Description(), "project version") || strings.Contains(tool.Tool().Description(), "user version") {
+		t.Fatalf("catalog = %s, want the project's skill only", tool.Tool().Description())
 	}
 }

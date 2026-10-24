@@ -362,9 +362,16 @@ if err := a.AddTool(dispatcher.Tool()); err != nil {
       </p>
       <p>Available options:</p>
       <ul>
-        <li><code>WithAvailableSkillsLocation(loc)</code>: override the location string shown in the skill catalog</li>
+        <li><code>WithRoots(roots...)</code>: read skills from several roots (user and project); later roots win</li>
+        <li><code>WithOnLoad(fn)</code>: called each time the model loads a skill, for example to pre-approve its
+          <code>allowed-tools</code> in a permission policy</li>
         <li><code>WithParser(parser)</code>: inject a custom <code>Parser</code> implementation (useful for testing)</li>
       </ul>
+      <p>
+        The model passes arguments for a skill in the <code>arguments</code> field: they replace <code>$ARGUMENTS</code>
+        in the skill's body, or are appended after it. The result lists the skill's allowed tools.
+      </p>
+
     </section>
 
     <section>
