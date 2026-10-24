@@ -89,3 +89,15 @@ func (e *ToolExecutionError) Error() string {
 func (e *ToolExecutionError) Unwrap() error {
 	return e.Err
 }
+
+// ToolPanicError is the error of a tool whose handler panicked. The agent
+// recovers the panic and reports it to the model as a failed tool call, so
+// one faulty tool does not crash the process.
+type ToolPanicError struct {
+	Name  string
+	Value any
+}
+
+func (e *ToolPanicError) Error() string {
+	return fmt.Sprintf("tool %s panicked: %v", e.Name, e.Value)
+}

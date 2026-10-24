@@ -382,6 +382,40 @@ func TestRun_ToolCall_ToolErrors_AgentContinues(t *testing.T) {
 	}
 }
 
+func TestRun_ToolCall_PanicIsRecovered(t *testing.T) {
+	// A tool that panics produces an error tool result and the run goes on,
+	// instead of crashing the process.
+	panicTool := mustTool(t, "panic_tool", func(_ context.Context, _ *struct{}) (string, error) {
+		panic("boom")
+	})
+
+	stub := &stubLLM{
+		responses: []*llm.Result{
+			toolCallResult("panic_tool", "call-1", "{}"),
+			textResult("recovered"),
+		},
+		errs: []error{nil, nil},
+	}
+
+	a := mustNew(t, stub, "agent", "desc")
+	if err := a.AddTool(panicTool); err != nil {
+		t.Fatalf("AddTool: %v", err)
+	}
+
+	result, err := a.Run(context.Background(), llm.Text("panic"))
+	if err != nil {
+		t.Fatalf("Run: unexpected error: %v", err)
+	}
+
+	if result.TextContent() != "recovered" {
+		t.Fatalf("expected %q, got %q", "recovered", result.TextContent())
+	}
+
+	if result.Summary == nil || result.Summary.ToolErrors != 1 {
+		t.Fatalf("summary = %+v, want 1 tool error", result.Summary)
+	}
+}
+
 func TestRun_Memory_ReadAndWrite(t *testing.T) {
 	prevMessages := []llm.Message{
 		llm.UserMessage(llm.Text("old message")),

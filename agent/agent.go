@@ -795,11 +795,21 @@ func nonBlankParts(parts []llm.ContentPart) []llm.ContentPart {
 }
 
 // executeToolCall executes a tool call and returns the result as content parts.
-func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall) ([]llm.ContentPart, error) {
+// A panic in the tool's handler is recovered and returned as a ToolPanicError.
+func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall) (parts []llm.ContentPart, err error) {
 	tool, found := a.getTool(tc.Function.Name)
 	if !found {
 		return nil, &ToolUnknownError{Name: tc.Function.Name}
 	}
+
+	defer func() {
+		if v := recover(); v != nil {
+			parts, err = nil, &ToolExecutionError{
+				Name: tc.Function.Name,
+				Err:  &ToolPanicError{Name: tc.Function.Name, Value: v},
+			}
+		}
+	}()
 
 	result, err := tool.Handle(ctx, tc.Function.Arguments)
 	if err != nil {
