@@ -344,3 +344,19 @@ func TestBashTool_SafeMode_AllowsSafeCommand(t *testing.T) {
 		t.Fatalf("unexpected output: %q", out.Output)
 	}
 }
+
+// TestSchema_DescriptionsAreComplete guards against jsonschema tags cutting a
+// description at its first comma.
+func TestSchema_DescriptionsAreComplete(t *testing.T) {
+	tool, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	props, _ := tool.Tool().InputSchema()["properties"].(map[string]any)
+	desc, _ := props["description"].(map[string]any)
+
+	if got, want := desc["description"], "Clear, concise command description (5-10 words)."; got != want {
+		t.Fatalf("description = %q, want %q", got, want)
+	}
+}

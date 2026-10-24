@@ -57,7 +57,7 @@ type RunSummaryInput struct {
 }
 
 type GoRunInput struct {
-	Args []string `json:"args" jsonschema:"description=Arguments to pass to the 'go' command (e.g. ['test','./...'])."`
+	Args []string `json:"args" jsonschema_description:"Arguments to pass to the 'go' command (e.g. ['test','./...'])."`
 }
 
 type GoRunResult struct {

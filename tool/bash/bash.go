@@ -36,7 +36,7 @@ import (
 // Command is the bash command to execute. Description provides context on why the command is being run.
 type Input struct {
 	Command         string `json:"command" jsonschema:"description=The command to execute."`
-	Description     string `json:"description,omitempty" jsonschema:"description=Clear, concise command description (5-10 words)."` //nolint:lll
+	Description     string `json:"description,omitempty" jsonschema_description:"Clear, concise command description (5-10 words)."` //nolint:lll
 	Timeout         int    `json:"timeout,omitempty" jsonschema:"description=Optional timeout in milliseconds (max 600000)."`       //nolint:lll
 	RunInBackground bool   `json:"run_in_background,omitempty" jsonschema:"description=Set true to run the command in background."` //nolint:lll
 }

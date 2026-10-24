@@ -35,11 +35,11 @@ const (
 
 // GrepInput is the input schema for the grep tool.
 type GrepInput struct {
-	Pattern    string `json:"pattern" jsonschema:"description=The regular expression pattern to search for in file contents"`                                 //nolint:lll
-	Path       string `json:"path,omitempty" jsonschema:"description=File or directory to search in. Defaults to current working directory"`                  //nolint:lll
-	OutputMode string `json:"output_mode,omitempty" jsonschema:"description=Output mode: content, files_with_matches, count. Defaults to files_with_matches"` //nolint:lll
+	Pattern    string `json:"pattern" jsonschema:"description=The regular expression pattern to search for in file contents"`                                                                                                //nolint:lll
+	Path       string `json:"path,omitempty" jsonschema:"description=File or directory to search in. Defaults to current working directory"`                                                                                 //nolint:lll
+	OutputMode string `json:"output_mode,omitempty" jsonschema:"enum=content,enum=files_with_matches,enum=count" jsonschema_description:"Output mode: content, files_with_matches or count. Defaults to files_with_matches"` //nolint:lll
 	Glob       string `json:"glob,omitempty" jsonschema:"description=Glob pattern to filter files"`
-	Type       string `json:"type,omitempty" jsonschema:"description=File type to search (go, js, py, etc.)"`
+	Type       string `json:"type,omitempty" jsonschema_description:"File type to search (go, js, py, etc.)"`
 	I          bool   `json:"-i,omitempty" jsonschema:"description=Case insensitive search"`
 	N          bool   `json:"-n,omitempty" jsonschema:"description=Show line numbers in output (content mode only)"`
 	A          int    `json:"-A,omitempty" jsonschema:"description=Lines after each match (content mode only)"`

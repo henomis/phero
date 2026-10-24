@@ -857,7 +857,7 @@ func anyToContentParts(v any) []llm.ContentPart {
 // Tool arguments schema: {"input": "..."}.
 func (a *Agent) AsTool(toolName, toolDescription string) (*llm.Tool, error) {
 	type ToolInput struct {
-		Input string `json:"input" jsonschema:"description=Instructions for the agent. Describe the task, question, or problem the agent should solve."` //nolint:lll
+		Input string `json:"input" jsonschema_description:"Instructions for the agent. Describe the task, question, or problem the agent should solve."` //nolint:lll
 	}
 
 	type ToolOutput struct {

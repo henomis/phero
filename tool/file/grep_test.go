@@ -16,6 +16,7 @@ package file
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -98,5 +99,30 @@ func TestGrepTool_CountMode(t *testing.T) {
 
 	if len(out.Output) != 1 || !strings.HasSuffix(out.Output[0], ":2") {
 		t.Fatalf("unexpected count output: %v", out.Output)
+	}
+}
+
+// TestGrepSchema_OutputModeEnum checks that output_mode lists its values as an
+// enum and keeps its full description.
+func TestGrepSchema_OutputModeEnum(t *testing.T) {
+	tool, err := NewGrepTool()
+	if err != nil {
+		t.Fatalf("new grep tool: %v", err)
+	}
+
+	props, _ := tool.Tool().InputSchema()["properties"].(map[string]any)
+	mode, _ := props["output_mode"].(map[string]any)
+
+	if got := fmt.Sprint(mode["enum"]); got != "[content files_with_matches count]" {
+		t.Fatalf("enum = %s", got)
+	}
+
+	if got, want := mode["description"], "Output mode: content, files_with_matches or count. Defaults to files_with_matches"; got != want {
+		t.Fatalf("description = %q, want %q", got, want)
+	}
+
+	typ, _ := props["type"].(map[string]any)
+	if got, want := typ["description"], "File type to search (go, js, py, etc.)"; got != want {
+		t.Fatalf("type description = %q, want %q", got, want)
 	}
 }
