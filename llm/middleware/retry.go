@@ -54,14 +54,19 @@ func WithMaxBackoff(d time.Duration) RetryOption {
 	return func(c *retryConfig) { c.maxBackoff = d }
 }
 
-// WithShouldRetry replaces the default retry predicate. By default every
-// non-nil error triggers a retry.
+// WithShouldRetry replaces the default retry predicate. By default only
+// errors a retry can fix are retried, as reported by llm.IsRetryable: rate
+// limits, timeouts, server and overload errors and network failures. A bad
+// request, a bad API key or a prompt too long for the context window is
+// returned at once.
 func WithShouldRetry(fn func(error) bool) RetryOption {
 	return func(c *retryConfig) { c.shouldRetry = fn }
 }
 
 // NewRetry returns an llm.Middleware that automatically retries failed
 // Execute calls up to maxAttempts times using exponential back-off with jitter.
+// Only errors that llm.IsRetryable reports as retryable are retried, unless
+// WithShouldRetry says otherwise.
 //
 // Context cancellation is honoured between retries: if ctx is cancelled while
 // sleeping before a retry, the middleware returns immediately.
@@ -78,7 +83,7 @@ func NewRetry(maxAttempts int, opts ...RetryOption) (llm.Middleware, error) {
 		maxAttempts:    maxAttempts,
 		initialBackoff: defaultInitialBackoff,
 		maxBackoff:     defaultMaxBackoff,
-		shouldRetry:    func(error) bool { return true },
+		shouldRetry:    llm.IsRetryable,
 	}
 	for _, o := range opts {
 		o(cfg)

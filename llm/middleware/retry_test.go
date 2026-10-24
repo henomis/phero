@@ -56,7 +56,7 @@ func TestNewRetry_SuccessOnFirstAttempt(t *testing.T) {
 // and the eventual success is returned.
 func TestNewRetry_RetriesAndSucceeds(t *testing.T) {
 	callCount := 0
-	transient := errors.New("transient")
+	transient := &llm.ProviderError{Provider: "p", StatusCode: 503, Err: errors.New("transient")}
 
 	inner := &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []llm.CallOption) (*llm.Result, error) {
 		callCount++
@@ -98,7 +98,7 @@ func TestNewRetry_ExhaustsAttempts(t *testing.T) {
 		t.Fatalf("NewRetry: %v", err)
 	}
 
-	client := llm.Use(errLLM(sentinel), mw)
+	client := llm.Use(errLLM(&llm.ProviderError{Provider: "p", StatusCode: 500, Err: sentinel}), mw)
 	_, execErr := client.Execute(context.Background(), nil)
 
 	var maxErr *MaxAttemptsExceededError
@@ -157,7 +157,7 @@ func TestNewRetry_ContextCancellation(t *testing.T) {
 
 		cancel() // cancel after first attempt
 
-		return nil, errors.New("transient")
+		return nil, &llm.ProviderError{Provider: "p", StatusCode: 503, Err: errors.New("transient")}
 	}}
 
 	mw, err := NewRetry(5, WithInitialBackoff(10*time.Millisecond))
@@ -174,5 +174,44 @@ func TestNewRetry_ContextCancellation(t *testing.T) {
 
 	if callCount != 1 {
 		t.Fatalf("callCount=%d, want 1", callCount)
+	}
+}
+
+// TestNewRetry_DefaultSkipsPermanentErrors verifies that by default errors a
+// retry cannot fix are returned after one attempt, and retryable ones are not.
+func TestNewRetry_DefaultSkipsPermanentErrors(t *testing.T) {
+	cases := []struct {
+		name  string
+		err   error
+		calls int
+	}{
+		{"bad request", &llm.ProviderError{Provider: "p", StatusCode: 400, Err: errors.New("bad")}, 1},
+		{"unauthorized", &llm.ProviderError{Provider: "p", StatusCode: 401, Err: errors.New("key")}, 1},
+		{"context length", &llm.ProviderError{Provider: "p", StatusCode: 400, ContextLengthExceeded: true, Err: errors.New("long")}, 1},
+		{"unknown", errors.New("local validation"), 1},
+		{"rate limit", &llm.ProviderError{Provider: "p", StatusCode: 429, Err: errors.New("slow down")}, 3},
+		{"unavailable", &llm.ProviderError{Provider: "p", StatusCode: 503, Err: errors.New("down")}, 3},
+	}
+
+	for _, tc := range cases {
+		calls := 0
+		inner := &stubLLM{fn: func(_ context.Context, _ []llm.Message, _ []llm.CallOption) (*llm.Result, error) {
+			calls++
+			return nil, tc.err
+		}}
+
+		mw, err := NewRetry(3, WithInitialBackoff(0))
+		if err != nil {
+			t.Fatalf("NewRetry: %v", err)
+		}
+
+		_, execErr := llm.Use(inner, mw).Execute(context.Background(), nil)
+		if !errors.Is(execErr, tc.err) {
+			t.Errorf("%s: got %v, want the provider error", tc.name, execErr)
+		}
+
+		if calls != tc.calls {
+			t.Errorf("%s: calls = %d, want %d", tc.name, calls, tc.calls)
+		}
 	}
 }

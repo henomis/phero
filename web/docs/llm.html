@@ -396,7 +396,7 @@ wrapped := llm.Use(base, loggingMiddleware)</code></pre>
       </p>
 
       <p>
-        The <code>llm/middleware</code> package ships ready-made middlewares: <code>NewRetry</code> (exponential back-off),
+        The <code>llm/middleware</code> package ships ready-made middlewares: <code>NewRetry</code> (exponential back-off; by default it retries only errors <code>llm.IsRetryable</code> accepts),
         <code>NewRateLimit</code>, <code>NewGuardrails</code>, and <code>NewSemanticCache</code>.
       </p>
     </section>
