@@ -151,3 +151,23 @@ func TestToolCallInput(t *testing.T) {
 		}
 	}
 }
+
+func TestAnthropicTools_Strictness(t *testing.T) {
+	type input struct {
+		Path  string `json:"path"`
+		Limit int    `json:"limit,omitempty"`
+	}
+
+	tool, err := llm.NewTool("read", "read a file", func(context.Context, input) (string, error) { return "", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := anthropicTools([]*llm.Tool{tool}, false)[0].OfTool; !got.Strict.Valid() || len(got.InputSchema.Required) != 2 {
+		t.Fatalf("default tool = %+v, want strict with every field required", got)
+	}
+
+	if got := anthropicTools([]*llm.Tool{tool}, true)[0].OfTool; got.Strict.Valid() || len(got.InputSchema.Required) != 1 {
+		t.Fatalf("non-strict tool = %+v, want no strict flag and only path required", got)
+	}
+}

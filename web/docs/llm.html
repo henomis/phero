@@ -558,6 +558,16 @@ if err != nil {
       <p>
         Tools are added to an agent with <code>AddTool</code>, and the agent will run them when the model requests a tool call.
       </p>
+
+      <p>
+        Tools are offered in strict mode by default: every property is required and no other is allowed, as OpenAI and
+        Anthropic strict tool use need, so the model always sends every field. <code>tool.SetStrict(false)</code> offers
+        the schema as reflected instead, where a field tagged <code>omitempty</code> is optional, and the provider sends
+        the tool without strict mode. <code>openai.WithStrictTools(false)</code> and
+        <code>anthropic.WithStrictTools(false)</code> do the same for every tool of a client, for local servers that
+        mishandle strict schemas. Put a description containing commas in a <code>jsonschema_description</code> tag:
+        the <code>jsonschema</code> tag splits on commas.
+      </p>
     </section>
 
     <section>

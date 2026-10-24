@@ -42,6 +42,7 @@ type Client struct {
 	apiKey          string
 	temperature     float32
 	reasoningEffort string
+	noStrictTools   bool
 	maxTokens       int64
 	legacyMaxTokens bool
 	config          openai.ClientConfig
@@ -419,13 +420,16 @@ func messageFromOpenAI(m openai.ChatCompletionMessage) llm.Message {
 func (c *Client) openaiTools(tools []*llm.Tool) []openai.Tool {
 	openaiTools := make([]openai.Tool, len(tools))
 	for i, tool := range tools {
+		// Strict JSON schema by default, for reliability; a tool or the client
+		// can turn it off.
+		strict := tool.Strict() && !c.noStrictTools
 		openaiTools[i] = openai.Tool{
 			Type: openai.ToolTypeFunction,
 			Function: &openai.FunctionDefinition{
 				Name:        tool.Name(),
-				Parameters:  tool.InputSchema(),
+				Parameters:  tool.Schema(strict),
 				Description: tool.Description(),
-				Strict:      true, // default to strict JSON schema for better performance and reliability
+				Strict:      strict,
 			},
 		}
 	}
@@ -460,6 +464,16 @@ func WithOllamaBaseURL() Option {
 func WithTemperature(temp float32) Option {
 	return func(c *Client) {
 		c.temperature = temp
+	}
+}
+
+// WithStrictTools chooses whether tools are sent in strict mode; they are by
+// default. With false, every tool goes without strict mode and with its schema
+// as reflected, where omitempty fields are optional (see llm.Tool.SetStrict),
+// for OpenAI-compatible servers that mishandle strict schemas.
+func WithStrictTools(strict bool) Option {
+	return func(c *Client) {
+		c.noStrictTools = !strict
 	}
 }
 

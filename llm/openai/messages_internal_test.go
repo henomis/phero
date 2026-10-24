@@ -15,6 +15,7 @@
 package openai
 
 import (
+	"context"
 	"testing"
 
 	"github.com/sashabaranov/go-openai"
@@ -110,5 +111,41 @@ func TestMessagesToOpenAI_SkipsReasoningOnlyAnswer(t *testing.T) {
 
 	if len(out) != 2 || out[0].Role != llm.RoleUser || out[1].Role != llm.RoleUser {
 		t.Fatalf("out = %+v, want the two user messages", out)
+	}
+}
+
+func TestOpenAITools_Strictness(t *testing.T) {
+	type input struct {
+		Path  string `json:"path"`
+		Limit int    `json:"limit,omitempty"`
+	}
+
+	newTool := func() *llm.Tool {
+		tool, err := llm.NewTool("read", "read a file", func(context.Context, input) (string, error) { return "", nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return tool
+	}
+
+	requiredLen := func(def *openai.FunctionDefinition) int {
+		list, _ := def.Parameters.(map[string]any)["required"].([]any)
+		return len(list)
+	}
+
+	strict := New("key").openaiTools([]*llm.Tool{newTool()})[0].Function
+	if !strict.Strict || requiredLen(strict) != 2 {
+		t.Fatalf("default: strict = %v, required = %d; want strict with every field", strict.Strict, requiredLen(strict))
+	}
+
+	perTool := New("key").openaiTools([]*llm.Tool{newTool().SetStrict(false)})[0].Function
+	if perTool.Strict || requiredLen(perTool) != 1 {
+		t.Fatalf("SetStrict(false): strict = %v, required = %d; want loose", perTool.Strict, requiredLen(perTool))
+	}
+
+	perClient := New("key", WithStrictTools(false)).openaiTools([]*llm.Tool{newTool()})[0].Function
+	if perClient.Strict || requiredLen(perClient) != 1 {
+		t.Fatalf("WithStrictTools(false): strict = %v, required = %d; want loose", perClient.Strict, requiredLen(perClient))
 	}
 }

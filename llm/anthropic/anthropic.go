@@ -85,6 +85,7 @@ type Client struct {
 	maxTokens        int64
 	promptCaching    bool
 	cacheTTL         CacheTTL
+	noStrictTools    bool
 	thinkingbudget   int64
 	thinkingAdaptive bool
 	effort           Effort
@@ -262,7 +263,7 @@ func (c *Client) buildParams(messages []llm.Message, opts []llm.CallOption) (ant
 	// tool_choice goes only with tools: Validate already rejects required and
 	// forced choices without them, and with no tools auto and none hold anyway.
 	if len(cfg.Tools) > 0 {
-		params.Tools = anthropicTools(cfg.Tools)
+		params.Tools = anthropicTools(cfg.Tools, c.noStrictTools)
 
 		if cfg.ToolChoice != nil {
 			params.ToolChoice = toolChoiceToAnthropic(cfg.ToolChoice)
@@ -656,21 +657,25 @@ func normalizeToolArguments(input json.RawMessage) string {
 	return normalized
 }
 
-func anthropicTools(tools []*llm.Tool) []anthropicapi.ToolUnionParam {
+func anthropicTools(tools []*llm.Tool, noStrict bool) []anthropicapi.ToolUnionParam {
 	out := make([]anthropicapi.ToolUnionParam, 0, len(tools))
 	for _, t := range tools {
 		if t == nil {
 			continue
 		}
 
-		inputSchema := anthropicToolInputSchema(t.InputSchema())
+		strict := t.Strict() && !noStrict
+		inputSchema := anthropicToolInputSchema(t.Schema(strict))
 
 		tool := anthropicapi.ToolParam{
 			Name:        t.Name(),
 			Description: anthropicapi.String(t.Description()),
-			Strict:      anthropicapi.Bool(true),
 			InputSchema: inputSchema,
 		}
+		if strict {
+			tool.Strict = anthropicapi.Bool(true)
+		}
+
 		out = append(out, anthropicapi.ToolUnionParam{OfTool: &tool})
 	}
 
@@ -767,6 +772,16 @@ func WithTemperature(temp float32) Option {
 func WithPromptCaching() Option {
 	return func(c *Client) {
 		c.promptCaching = true
+	}
+}
+
+// WithStrictTools chooses whether tools are sent in strict mode; they are by
+// default. With false, every tool goes without strict mode and with its schema
+// as reflected, where omitempty fields are optional (see llm.Tool.SetStrict),
+// for Anthropic-compatible servers that mishandle strict schemas.
+func WithStrictTools(strict bool) Option {
+	return func(c *Client) {
+		c.noStrictTools = !strict
 	}
 }
 
