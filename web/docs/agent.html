@@ -369,8 +369,10 @@ a.SetCompaction(agent.NewSummaryCompactor(cheapLLM, agent.WithKeepRecent(20)), 1
           user request word for word, so the task is not lost.</li>
         <li>Any <code>agent.Compactor</code> (or <code>agent.CompactorFunc</code>) can replace it. The result must
           stay a valid conversation: no tool result without its call before it.</li>
-        <li>A run that compacted saves the compacted session to memory (the summary and the messages kept), so the
-          next run does not start over the limit. Each compaction is traced as a memory span with op
+        <li>Compaction does not change what memory holds. Memory only appends, so before compacting the run saves
+          the messages it has not saved yet, and after it only the messages added later. Each message is stored
+          once and the summary is not stored: the next run compacts again when it needs to, and a memory backend's
+          own summarization keeps the stored history short. Each compaction is traced as a memory span with op
           <code>compact</code>; a failure returns an <code>*agent.CompactionError</code>.</li>
       </ul>
     </section>

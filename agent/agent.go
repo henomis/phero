@@ -282,10 +282,11 @@ func (a *Agent) SetResponseFormat(format *llm.ResponseFormat) {
 //     ends the run.
 //
 // Each compaction is traced as a memory span with op trace.MemoryCompact.
-// When the agent has memory, a run that compacted saves the compacted session
-// (for a SummaryCompactor: the summary and the messages kept after it) instead
-// of the full turn, so the next run does not start over the limit; kept
-// messages that were loaded from memory are saved again.
+// Compaction does not change what memory holds: before compacting, the run
+// saves the messages it has not saved yet, and after it, only the messages
+// added later. Each message is stored once and the summary is not stored, so
+// the next run loads the full history and compacts again when it needs to (a
+// memory backend's own summarization keeps the stored history short).
 //
 // Pass a nil Compactor to disable compaction.
 func (a *Agent) SetCompaction(c Compactor, atTokens int) {
@@ -368,6 +369,16 @@ func (a *Agent) compactSession(
 		return session, sessionIndex, err
 	}
 
+	// Memory only appends: the messages not saved yet are saved now, as they
+	// are, and the compacted ones are never saved. Each message is then stored
+	// once, and the summary lives only in this run.
+	if err = a.saveSession(context.WithoutCancel(ctx), session, rs.savedTo); err != nil {
+		err = fmt.Errorf("%w: %w", ErrSessionSaveFailed, err)
+		span.End(err)
+
+		return session, sessionIndex, err
+	}
+
 	payload.Messages = compacted
 	payload.Count = len(compacted)
 
@@ -382,12 +393,7 @@ func (a *Agent) compactSession(
 	rs.contextTokens = 0
 	rs.promptLen = 0
 
-	// Without checkpoints the run saves the compacted session. With them,
-	// memory already holds what was compacted: only later messages are saved.
-	rs.savedTo = 1
-	if a.checkpoint {
-		rs.savedTo = len(newSession)
-	}
+	rs.savedTo = len(newSession)
 
 	return newSession, 1, nil
 }

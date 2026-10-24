@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -210,7 +211,7 @@ func TestRun_CompactsAndRetriesOnContextLengthError(t *testing.T) {
 	a := mustNew(t, client, "agent", "desc")
 	addEchoTool(t, a)
 
-	mem := &stubMemory{}
+	mem := &appendMemory{}
 	a.SetMemory(mem)
 
 	compactions := 0
@@ -227,10 +228,98 @@ func TestRun_CompactsAndRetriesOnContextLengthError(t *testing.T) {
 
 	assertValidConversation(t, client.prompts[2])
 
-	// The compacted session is what is saved: the marker, the kept tool
-	// result's turn and the answer.
-	if len(mem.saved) == 0 || mem.saved[0].TextContent() != "compacted" {
-		t.Fatalf("saved = %+v, want the compacted session", mem.saved)
+	// The summary stays in the run: memory gets the turn as it happened.
+	assertRoles(t, mem.msgs, llm.RoleUser, llm.RoleAssistant, llm.RoleTool, llm.RoleAssistant)
+}
+
+// storedHistory is a past turn with a tool call, as memory returns it.
+func storedHistory() []llm.Message {
+	return []llm.Message{
+		llm.UserMessage(llm.Text("u1")),
+		llm.AssistantMessage(nil, llm.ToolCall{ID: "c1", Type: llm.ToolTypeFunction, Function: llm.FunctionCall{Name: "echo", Arguments: "{}"}}),
+		llm.ToolResultMessage("c1", llm.Text("ok")),
+		llm.AssistantMessage([]llm.ContentPart{llm.Text("a1")}),
+	}
+}
+
+// assertRoles fails unless msgs has exactly the given roles, in order.
+func assertRoles(t *testing.T, msgs []llm.Message, roles ...string) {
+	t.Helper()
+
+	got := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		got = append(got, m.Role)
+	}
+
+	if !slices.Equal(got, roles) {
+		t.Fatalf("roles = %v, want %v", got, roles)
+	}
+}
+
+func TestRun_CompactionSavesEachMessageOnce(t *testing.T) {
+	client := &scriptedLLM{fn: func(call int, _ []llm.Message) (*llm.Result, error) {
+		if call == 1 {
+			return toolCallResultWithUsage("echo", "c2", "{}", &llm.Usage{InputTokens: 5000}), nil
+		}
+
+		return textResult("done"), nil
+	}}
+
+	a := mustNew(t, client, "agent", "desc")
+	addEchoTool(t, a)
+
+	mem := &appendMemory{msgs: storedHistory()}
+	a.SetMemory(mem)
+
+	compactions := 0
+	a.SetCompaction(keepLastCompactor(&compactions), 1000)
+
+	if _, err := a.Run(context.Background(), llm.Text("u2")); err != nil {
+		t.Fatal(err)
+	}
+
+	if compactions != 1 {
+		t.Fatalf("compactions = %d, want 1", compactions)
+	}
+
+	// The stored history, then this run's turn: no summary, no message twice.
+	assertRoles(t, mem.msgs,
+		llm.RoleUser, llm.RoleAssistant, llm.RoleTool, llm.RoleAssistant,
+		llm.RoleUser, llm.RoleAssistant, llm.RoleTool, llm.RoleAssistant)
+	assertValidConversation(t, mem.msgs)
+}
+
+func TestRun_CompactionWithCheckpointKeepsUnsavedMessages(t *testing.T) {
+	tooLong := &llm.ProviderError{Provider: "p", StatusCode: 400, ContextLengthExceeded: true, Err: errors.New("prompt is too long")}
+
+	client := &scriptedLLM{fn: func(call int, _ []llm.Message) (*llm.Result, error) {
+		if call == 1 {
+			return nil, tooLong
+		}
+
+		return textResult("done"), nil
+	}}
+
+	a := mustNew(t, client, "agent", "desc")
+
+	mem := &appendMemory{msgs: storedHistory()}
+	a.SetMemory(mem)
+	a.SetCheckpoint(true)
+
+	compactions := 0
+	a.SetCompaction(keepLastCompactor(&compactions), 0)
+
+	if _, err := a.Run(context.Background(), llm.Text("u2")); err != nil {
+		t.Fatal(err)
+	}
+
+	// The user message was not saved before the compaction: it must be now.
+	assertRoles(t, mem.msgs,
+		llm.RoleUser, llm.RoleAssistant, llm.RoleTool, llm.RoleAssistant,
+		llm.RoleUser, llm.RoleAssistant)
+
+	if got := mem.msgs[4].TextContent(); got != "u2" {
+		t.Fatalf("stored user message = %q, want u2", got)
 	}
 }
 
