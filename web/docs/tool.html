@@ -57,7 +57,7 @@
 
       <ul>
         <li><strong>Agent tool</strong> (<code>tool/agent</code>): create and run a sub-agent at runtime with a given name, role, and instructions</li>
-        <li><strong>Filesystem tools</strong> (<code>tool/file</code>): five separate tools — <code>read</code>, <code>write</code>, <code>edit</code>, <code>glob</code>, <code>grep</code></li>
+        <li><strong>Filesystem tools</strong> (<code>tool/file</code>): six separate tools — <code>read</code>, <code>write</code>, <code>edit</code>, <code>multi_edit</code>, <code>glob</code>, <code>grep</code></li>
         <li><strong>Bash tool</strong> (<code>tool/bash</code>): run bash commands with optional guardrails (blocklist, allowlist, timeout, safe mode) and background execution</li>
         <li><strong>Human tool</strong> (<code>tool/human</code>): present structured questions and collect user answers mid-run</li>
         <li><strong>Skill dispatcher</strong> (<code>tool/skill</code>): load a named <code>SKILL.md</code> into the current conversation</li>
@@ -132,13 +132,25 @@ if err := a.AddTool(readTool.Tool()); err != nil {
       <p>Available options:</p>
       <ul>
         <li><code>WithWorkingDirectory(dir)</code>: confine all operations to a directory; paths are validated against it to prevent traversal</li>
-        <li><code>WithMaxFileSize(bytes)</code>: limit the file size the read tool will return (0 = unlimited)</li>
+        <li><code>WithMaxFileSize(bytes)</code>: limit the file size the read and edit tools accept (default
+          <code>file.DefaultMaxFileSize</code>, 10 MiB; 0 = unlimited)</li>
+        <li><code>WithReadTracker(tracker)</code>: share a <code>file.NewReadTracker()</code> between the tools so that
+          write, edit and multi_edit refuse to change an existing file the model has not read
+          (<code>ErrFileNotRead</code>), or that changed on disk since it read it (<code>*ChangedError</code>).
+          New files need no read, and the tools' own changes count as seen</li>
         <li><code>WithNoOverwrite()</code>: configure write to return <code>ErrFileExists</code> when the target already exists</li>
         <li><code>WithMaxResults(n)</code>: how many paths <code>glob</code>, and entries <code>grep</code>, return at most
           (default <code>file.DefaultMaxResults</code>, 1000; 0 removes the cap). A cut result sets <code>Truncated</code></li>
         <li><code>WithNoIgnore()</code>: search everything, including what <code>.gitignore</code> ignores and
           <code>node_modules</code></li>
       </ul>
+
+      <p>
+        <code>multi_edit</code> (<code>file.NewMultiEditTool</code>) applies a list of exact replacements to one file, in
+        order, each seeing the result of the ones before it. Either every edit applies or none does, so a failed edit
+        never leaves the file half changed. <code>edit</code>, <code>multi_edit</code> and <code>write</code> are
+        exclusive tools: when the model calls several at once, they run one at a time, in call order.
+      </p>
 
       <p>
         <code>glob</code> and <code>grep</code> are built for real repositories. They skip <code>.git</code>,

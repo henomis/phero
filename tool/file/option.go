@@ -20,7 +20,12 @@ type toolOptions struct {
 	noOverwrite bool
 	maxResults  int
 	noIgnore    bool
+	tracker     *ReadTracker
 }
+
+// DefaultMaxFileSize is the read tool's size limit when WithMaxFileSize is not
+// given: 10 MiB, beyond which a file would not fit a model's context anyway.
+const DefaultMaxFileSize = 10 << 20
 
 // Option configures fs tools.
 type Option func(*toolOptions)
@@ -33,7 +38,7 @@ func WithWorkingDirectory(dir string) Option {
 }
 
 // WithMaxFileSize sets the maximum file size in bytes for read operations.
-// A value of 0 disables the limit.
+// The default is DefaultMaxFileSize; a value of 0 disables the limit.
 func WithMaxFileSize(bytes int64) Option {
 	return func(o *toolOptions) {
 		o.maxFileSize = bytes
@@ -65,8 +70,18 @@ func WithNoIgnore() Option {
 	}
 }
 
+// WithReadTracker shares tracker between the read, write, edit and
+// multi_edit tools: read records the files it reads, and the others refuse to
+// change an existing file that was not read, or that changed since. Give the
+// same tracker to every tool of an agent.
+func WithReadTracker(tracker *ReadTracker) Option {
+	return func(o *toolOptions) {
+		o.tracker = tracker
+	}
+}
+
 func applyOptions(opts ...Option) *toolOptions {
-	o := &toolOptions{maxResults: DefaultMaxResults}
+	o := &toolOptions{maxResults: DefaultMaxResults, maxFileSize: DefaultMaxFileSize}
 	for _, opt := range opts {
 		opt(o)
 	}

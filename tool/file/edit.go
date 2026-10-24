@@ -39,15 +39,17 @@ type EditOutput struct {
 
 // EditTool performs precise string replacements in files.
 type EditTool struct {
-	tool       *llm.Tool
-	workingDir string
+	tool        *llm.Tool
+	workingDir  string
+	maxFileSize int64
+	tracker     *ReadTracker
 }
 
 // NewEditTool creates a new edit tool.
 func NewEditTool(opts ...Option) (*EditTool, error) {
 	o := applyOptions(opts...)
 
-	e := &EditTool{workingDir: o.workingDir}
+	e := &EditTool{workingDir: o.workingDir, maxFileSize: o.maxFileSize, tracker: o.tracker}
 
 	tool, err := llm.NewTool(
 		"edit",
@@ -78,56 +80,95 @@ func (e *EditTool) edit(_ context.Context, input *EditInput) (*EditOutput, error
 		return nil, ErrPathRequired
 	}
 
-	if input.OldString == "" {
-		return nil, ErrOldStringRequired
-	}
-
-	if input.OldString == input.NewString {
-		return nil, fmt.Errorf("new_string must differ from old_string")
-	}
-
-	resolvedPath, err := resolveToolPath(e.workingDir, input.FilePath)
+	replacements, err := editFile(e.workingDir, e.maxFileSize, e.tracker, input.FilePath, []EditOperation{{
+		OldString: input.OldString, NewString: input.NewString, ReplaceAll: input.ReplaceAll,
+	}})
 	if err != nil {
 		return nil, err
+	}
+
+	return &EditOutput{Replacements: replacements}, nil
+}
+
+// editFile applies edits, in order, to the file at path, and writes the result
+// only when every edit applies. It returns the number of replacements made.
+func editFile(
+	workingDir string, maxFileSize int64, tracker *ReadTracker, path string, edits []EditOperation,
+) (int, error) {
+	resolvedPath, err := resolveToolPath(workingDir, path)
+	if err != nil {
+		return 0, err
+	}
+
+	if err = tracker.check(resolvedPath); err != nil {
+		return 0, err
 	}
 
 	info, err := os.Stat(resolvedPath)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 
-	mode := info.Mode().Perm()
+	if maxFileSize > 0 && info.Size() > maxFileSize {
+		return 0, &TooLargeError{Path: resolvedPath, Size: info.Size(), Limit: maxFileSize}
+	}
 
 	content, err := os.ReadFile(resolvedPath) //nolint:gosec // path is resolved and validated above
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 
-	needle := []byte(input.OldString)
-	replacement := []byte(input.NewString)
+	total := 0
+
+	for i, edit := range edits {
+		var n int
+
+		if content, n, err = applyEdit(content, edit, resolvedPath); err != nil {
+			if len(edits) > 1 {
+				return 0, fmt.Errorf("edit %d of %d: %w (no edit was applied)", i+1, len(edits), err)
+			}
+
+			return 0, err
+		}
+
+		total += n
+	}
+
+	if err = atomicWriteFile(resolvedPath, content, info.Mode().Perm()); err != nil {
+		return 0, err
+	}
+
+	// The model knows what it changed: it may edit the file again.
+	tracker.record(resolvedPath)
+
+	return total, nil
+}
+
+// applyEdit replaces edit.OldString with edit.NewString in content: once, and
+// then it must appear exactly once, or everywhere with ReplaceAll.
+func applyEdit(content []byte, edit EditOperation, path string) ([]byte, int, error) {
+	if edit.OldString == "" {
+		return nil, 0, ErrOldStringRequired
+	}
+
+	if edit.OldString == edit.NewString {
+		return nil, 0, fmt.Errorf("new_string must differ from old_string")
+	}
+
+	needle := []byte(edit.OldString)
 
 	count := bytes.Count(content, needle)
 	if count == 0 {
-		return nil, fmt.Errorf("old_string not found in %s", resolvedPath)
+		return nil, 0, fmt.Errorf("old_string not found in %s", path)
 	}
 
-	if !input.ReplaceAll && count != 1 {
-		return nil, fmt.Errorf("old_string found %d times in %s", count, resolvedPath)
+	if !edit.ReplaceAll && count != 1 {
+		return nil, 0, fmt.Errorf("old_string found %d times in %s", count, path)
 	}
 
-	maxReplacements := count
-	if !input.ReplaceAll {
-		maxReplacements = 1
+	if !edit.ReplaceAll {
+		count = 1
 	}
 
-	updated := bytes.Replace(content, needle, replacement, maxReplacements)
-	if writeErr := atomicWriteFile(resolvedPath, updated, mode); writeErr != nil {
-		return nil, writeErr
-	}
-
-	if !input.ReplaceAll {
-		return &EditOutput{Replacements: 1}, nil
-	}
-
-	return &EditOutput{Replacements: count}, nil
+	return bytes.Replace(content, needle, []byte(edit.NewString), count), count, nil
 }

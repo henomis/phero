@@ -36,12 +36,13 @@ const (
 // defaultSubjects names the argument that is the subject of the built-in
 // tools' calls.
 var defaultSubjects = map[string]string{
-	bashTool: "command",
-	"read":   argFilePath,
-	"write":  argFilePath,
-	"edit":   argFilePath,
-	"glob":   argPath,
-	"grep":   argPath,
+	bashTool:     "command",
+	"read":       argFilePath,
+	"write":      argFilePath,
+	"edit":       argFilePath,
+	"multi_edit": argFilePath,
+	"glob":       argPath,
+	"grep":       argPath,
 }
 
 // Answer is a human's answer to a permission question.

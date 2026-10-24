@@ -46,6 +46,7 @@ type ReadTool struct {
 	tool        *llm.Tool
 	workingDir  string
 	maxFileSize int64
+	tracker     *ReadTracker
 }
 
 // NewReadTool creates a new read tool.
@@ -55,6 +56,7 @@ func NewReadTool(opts ...Option) (*ReadTool, error) {
 	r := &ReadTool{
 		workingDir:  o.workingDir,
 		maxFileSize: o.maxFileSize,
+		tracker:     o.tracker,
 	}
 
 	tool, err := llm.NewTool(
@@ -107,6 +109,8 @@ func (r *ReadTool) read(_ context.Context, input *ReadInput) (*ReadOutput, error
 	if err != nil {
 		return nil, err
 	}
+
+	r.tracker.record(resolvedPath)
 
 	content := bytesToUTF8WithHexEscapes(contentBytes)
 	lines := strings.Split(content, "\n")

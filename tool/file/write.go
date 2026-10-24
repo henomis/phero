@@ -43,6 +43,7 @@ type WriteTool struct {
 	tool        *llm.Tool
 	workingDir  string
 	noOverwrite bool
+	tracker     *ReadTracker
 }
 
 // NewWriteTool creates a new write tool.
@@ -52,6 +53,7 @@ func NewWriteTool(opts ...Option) (*WriteTool, error) {
 	w := &WriteTool{
 		workingDir:  o.workingDir,
 		noOverwrite: o.noOverwrite,
+		tracker:     o.tracker,
 	}
 
 	tool, err := llm.NewTool(
@@ -88,6 +90,10 @@ func (w *WriteTool) write(_ context.Context, input *WriteInput) (*WriteOutput, e
 		return nil, err
 	}
 
+	if err = w.tracker.check(resolvedPath); err != nil {
+		return nil, err
+	}
+
 	perm := os.FileMode(defaultFileMode)
 
 	if info, statErr := os.Stat(resolvedPath); statErr == nil {
@@ -107,6 +113,9 @@ func (w *WriteTool) write(_ context.Context, input *WriteInput) (*WriteOutput, e
 	if writeErr := atomicWriteFile(resolvedPath, []byte(input.Content), perm); writeErr != nil {
 		return nil, writeErr
 	}
+
+	// The model knows the content it wrote: it may change it again.
+	w.tracker.record(resolvedPath)
 
 	return &WriteOutput{BytesWritten: len(input.Content)}, nil
 }
