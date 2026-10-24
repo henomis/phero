@@ -454,7 +454,8 @@ policy.Apply(readTool.Tool(), bashTool.Tool(), editTool.Tool())</code></pre>
         <li>File paths are matched as the file tools open them: cleaned, made absolute against the working directory
           (<code>WithWorkingDir</code>, the process's by default; set it to the file tools' working directory) and
           resolved through symlinks. Path patterns in rules are resolved the same way, so <code>/repo/src/../secrets/k</code>
-          and a symlink into <code>secrets</code> both meet <code>read(/repo/secrets/*)</code>.</li>
+          and a symlink into <code>secrets</code> both meet <code>read(/repo/secrets/*)</code>. Deny and ask rules also
+          match the path as written, so <code>read(/repo/*/.env)</code> still covers a symlinked package.</li>
         <li>Arguments that give the subject twice (<code>{"command":"go test","COMMAND":"rm -rf ~"}</code>) are denied:
           the tool's handler decodes keys case-insensitively and keeps the last one, so the rules could otherwise see a
           different value from the one that runs.</li>

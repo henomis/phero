@@ -369,6 +369,15 @@ func TestDecide_RedirectionsAreAsked(t *testing.T) {
 		{"cat a >| b", permission.Ask},
 		{"cat a <> b", permission.Ask},
 		{"cat a 2>b", permission.Ask},
+		// ">&" before a word that is not just a descriptor redirects to a file.
+		{"cat a >&1x", permission.Ask},
+		{"cat a >&2file", permission.Ask},
+		{"cat a 2>&1x", permission.Ask},
+		{"cat a >&-x", permission.Ask},
+		{"cat a >&2$X", permission.Ask},
+		{"cat a >/dev/null.x", permission.Ask},
+		{"cat a >&10", permission.Allow},
+		{"cat a 2>&1; cat b", permission.Allow},
 		// Duplicating a descriptor or discarding output writes no file.
 		{"go test ./... 2>&1", permission.Allow},
 		{"go test ./... >/dev/null 2>&1", permission.Allow},
@@ -378,6 +387,46 @@ func TestDecide_RedirectionsAreAsked(t *testing.T) {
 	for _, tc := range cases {
 		if got, subjects := p.Decide("bash", bashArgs(tc.command)); got != tc.want {
 			t.Errorf("Decide(%q) = %s (subjects %q), want %s", tc.command, got, subjects, tc.want)
+		}
+	}
+}
+
+func TestDecide_DenyMatchesThePathAsWritten(t *testing.T) {
+	root := t.TempDir()
+	repo, vault := filepath.Join(root, "repo"), filepath.Join(root, "vault")
+
+	for _, dir := range []string{repo, vault} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// repo/sv and repo/lnk lead out of the repo.
+	for _, link := range []string{"sv", "lnk"} {
+		if err := os.Symlink(vault, filepath.Join(repo, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	p := mustPolicy(t,
+		permission.WithAllow("read"),
+		permission.WithDeny("read("+repo+"/s*/k)", "rea*("+repo+"/lnk/*)"),
+		permission.WithAsk("read("+repo+"/*/ask)"),
+	)
+
+	cases := []struct {
+		path string
+		want permission.Decision
+	}{
+		{repo + "/sv/k", permission.Deny},  // the wildcard is in the symlinked directory
+		{repo + "/lnk/k", permission.Deny}, // the rule's tool name is a wildcard
+		{repo + "/sv/ask", permission.Ask}, // ask rules too
+		{vault + "/other", permission.Allow},
+	}
+
+	for _, tc := range cases {
+		if got, subjects := p.Decide("read", `{"file_path":"`+tc.path+`"}`); got != tc.want {
+			t.Errorf("Decide(%s) = %s (subjects %q), want %s", tc.path, got, subjects, tc.want)
 		}
 	}
 }

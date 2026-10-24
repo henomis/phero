@@ -24,8 +24,12 @@ import (
 var shellOperators = []string{"&&", "||", ";", "|", "&", "\n"}
 
 // harmlessRedirects write no file: duplicating or closing a descriptor
-// ("2>&1", ">&-") and discarding output (">/dev/null", "&>/dev/null").
-var harmlessRedirects = regexp.MustCompile(`[0-9]*>&([0-9]+|-)|(&|[0-9]*)>>?[ \t]*/dev/null\b`)
+// ("2>&1", ">&-") and discarding output (">/dev/null", "&>/dev/null"). The
+// target must end the word: bash reads ">&1x" as a redirection to the file
+// "1x". The character that ends it is kept, as it may be an operator.
+var harmlessRedirects = regexp.MustCompile(
+	`(?:[0-9]*>&(?:[0-9]+|-)|(?:&|[0-9]*)>>?[ \t]*/dev/null)(?P<end>[\s;&|<>()]|$)`,
+)
 
 // splitShell returns the commands of a shell command line, split on its
 // operators. It reports false when the line runs commands it cannot see
@@ -38,7 +42,7 @@ func splitShell(line string) ([]string, bool) {
 		}
 	}
 
-	line = harmlessRedirects.ReplaceAllString(line, " ")
+	line = harmlessRedirects.ReplaceAllString(line, " ${end}")
 	if strings.Contains(line, ">") {
 		return nil, false
 	}

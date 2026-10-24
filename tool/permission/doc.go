@@ -34,7 +34,9 @@
 // File paths, in subjects and in rule patterns, are matched as the file tools
 // open them: cleaned, made absolute against the working directory
 // (WithWorkingDir, the process's by default) and resolved through symlinks,
-// so "/repo/src/../secrets/k" meets read(/repo/secrets/*). Arguments that
+// so "/repo/src/../secrets/k" meets read(/repo/secrets/*). Deny and ask rules
+// also match the path as written, before its symlinks are resolved, so
+// read(/repo/*/.env) still covers a symlinked package. Arguments that
 // give the subject argument twice, in any letter case, are denied: the tool's
 // handler would decode the last one, which the rules might not have seen.
 //

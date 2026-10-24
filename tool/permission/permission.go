@@ -252,20 +252,28 @@ func (p *Policy) Middleware() llm.ToolMiddleware {
 // Decide returns what the Policy does with a call of tool with arguments,
 // before asking anyone, and the subjects it decided on.
 func (p *Policy) Decide(tool, arguments string) (Decision, []string) {
-	subjects, ambiguous := p.subjects(tool, arguments)
+	decision, subjects, _ := p.evaluate(tool, arguments)
+
+	return decision, subjects
+}
+
+// evaluate is Decide, and also returns the subjects as written (see
+// subjects).
+func (p *Policy) evaluate(tool, arguments string) (Decision, []string, []string) {
+	subjects, written, ambiguous := p.subjects(tool, arguments)
 	if ambiguous {
-		return Deny, subjects
+		return Deny, subjects, written
 	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	return p.decide(tool, subjects), subjects
+	return p.decide(tool, subjects, written), subjects, written
 }
 
 // check enforces the Policy on one call.
 func (p *Policy) check(ctx context.Context, tool, arguments string) error {
-	decision, subjects := p.Decide(tool, arguments)
+	decision, subjects, written := p.evaluate(tool, arguments)
 
 	subject := joinSubjects(subjects)
 	if subjects == nil {
@@ -289,7 +297,7 @@ func (p *Policy) check(ctx context.Context, tool, arguments string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.decide(tool, subjects) == Allow {
+	if p.decide(tool, subjects, written) == Allow {
 		return nil
 	}
 
@@ -320,16 +328,22 @@ func (p *Policy) check(ctx context.Context, tool, arguments string) error {
 }
 
 // decide combines the decisions of every subject: deny wins over ask, which
-// wins over allow. The caller holds p.mu.
-func (p *Policy) decide(tool string, subjects []string) Decision {
+// wins over allow. written holds the subjects as written, when they differ
+// (see subjects). The caller holds p.mu.
+func (p *Policy) decide(tool string, subjects, written []string) Decision {
 	if subjects == nil {
 		return Ask // a command line it cannot see through
 	}
 
 	result := Allow
 
-	for _, subject := range subjects {
-		switch d := p.decideOne(tool, subject); d {
+	for i, subject := range subjects {
+		var asWritten string
+		if i < len(written) {
+			asWritten = written[i]
+		}
+
+		switch d := p.decideOne(tool, subject, asWritten); d {
 		case Deny:
 			return Deny
 		case Ask:
@@ -341,12 +355,16 @@ func (p *Policy) decide(tool string, subjects []string) Decision {
 	return result
 }
 
-// decideOne applies the rules to one subject.
-func (p *Policy) decideOne(tool, subject string) Decision {
+// decideOne applies the rules to one subject. Deny and ask rules also apply
+// to the subject as written, when given: a rule that names a path through a
+// symlink, with a wildcard the resolution cannot see through ("/repo/*/.env",
+// or a tool name pattern), still matches. Allow rules apply to the resolved
+// subject only, which is what the tool opens.
+func (p *Policy) decideOne(tool, subject, written string) Decision {
 	matched := map[Decision]bool{}
 
 	for _, r := range p.rules {
-		if r.matches(tool, subject) {
+		if r.matches(tool, subject) || (written != "" && r.decision != Allow && r.matches(tool, written)) {
 			matched[r.decision] = true
 		}
 	}
@@ -364,36 +382,40 @@ func (p *Policy) decideOne(tool, subject string) Decision {
 }
 
 // subjects returns what a call touches: the commands of a bash command line
-// (nil when it cannot be split safely), or the subject argument's value. It
-// reports true when the arguments give the subject argument more than once.
-func (p *Policy) subjects(tool, arguments string) ([]string, bool) {
+// (nil when it cannot be split safely), or the subject argument's value. For
+// a file tool, it also returns the path as written, cleaned and absolute but
+// with its symlinks unresolved. It reports true when the arguments give the
+// subject argument more than once.
+func (p *Policy) subjects(tool, arguments string) ([]string, []string, bool) {
 	value, ok, ambiguous := p.subjectValue(tool, arguments)
 	if ambiguous {
-		return nil, true
+		return nil, nil, true
 	}
 
 	if !ok {
-		return []string{""}, false
+		return []string{""}, nil, false
 	}
 
 	if isPathTool(tool) {
-		return []string{p.resolvePath(value)}, false
+		written := p.absPath(value)
+
+		return []string{resolveSymlinks(written)}, []string{written}, false
 	}
 
 	if tool != bashTool {
-		return []string{value}, false
+		return []string{value}, nil, false
 	}
 
 	commands, ok := splitShell(value)
 	if !ok {
-		return nil, false
+		return nil, nil, false
 	}
 
 	if len(commands) == 0 {
-		return []string{""}, false
+		return []string{""}, nil, false
 	}
 
-	return commands, false
+	return commands, nil, false
 }
 
 // subjectValue returns the value of the subject argument of a call of tool,
@@ -468,6 +490,12 @@ func (p *Policy) parseRule(spec string, decision Decision) (rule, error) {
 // and resolves the symlinks of its longest existing prefix, as the file tools
 // do before they open it. An empty path is the working directory.
 func (p *Policy) resolvePath(path string) string {
+	return resolveSymlinks(p.absPath(path))
+}
+
+// absPath cleans path and makes it absolute against the working directory.
+// An empty path is the working directory.
+func (p *Policy) absPath(path string) string {
 	if path == "" {
 		path = p.workingDir
 	}
@@ -476,7 +504,12 @@ func (p *Policy) resolvePath(path string) string {
 		path = filepath.Join(p.workingDir, path)
 	}
 
-	path = filepath.Clean(path)
+	return filepath.Clean(path)
+}
+
+// resolveSymlinks resolves the symlinks of the longest existing prefix of an
+// absolute path. Any other path is returned as is.
+func resolveSymlinks(path string) string {
 	if !filepath.IsAbs(path) {
 		return path
 	}
