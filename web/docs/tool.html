@@ -170,7 +170,8 @@ if err := a.AddTool(writeTool.Tool()); err != nil {
       </p>
       <ul>
         <li><code>Tool()</code>: the main <code>bash</code> tool — execute a command, optionally in the background</li>
-        <li><code>OutputTool()</code>: <code>bash_output</code> — retrieve incremental output from a running background shell</li>
+        <li><code>OutputTool()</code>: <code>bash_output</code> — retrieve incremental output from a running background
+          shell. Once a finished shell's output has been read in full, its ID is forgotten.</li>
         <li><code>KillTool()</code>: <code>kill_shell</code> — terminate a background shell by ID</li>
       </ul>
 
@@ -215,6 +216,11 @@ if err := a.AddTool(bashTool.KillTool());   err != nil { panic(err) }</code></pr
         A command killed at its timeout is not an error: the result holds what it printed until then, followed by
         "command timed out after …", with <code>TimedOut</code> set, so the model sees how far it got. A cancelled
         caller context still returns the context's error.
+      </p>
+      <p>
+        On Unix, each command runs in its own process group. A timeout, a cancelled context or
+        <code>kill_shell</code> kills the whole group, so processes the command started (a dev server, a
+        test runner's workers) do not outlive it.
       </p>
     </section>
 

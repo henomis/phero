@@ -338,6 +338,7 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 	}
 
 	cmd.WaitDelay = waitDelay
+	setProcessGroup(cmd)
 
 	combined, err := cmd.CombinedOutput()
 	out, truncated := t.truncateOutput(string(combined))
@@ -422,6 +423,13 @@ func (t *Tool) output(_ context.Context, input *OutputInput) (*OutputOutput, err
 	running := shell.running
 	shell.mu.Unlock()
 
+	// A finished shell whose output has now been read in full is forgotten.
+	if !running {
+		t.mu.Lock()
+		delete(t.shell, input.BashID)
+		t.mu.Unlock()
+	}
+
 	if re != nil && incremental != "" {
 		lines := strings.Split(incremental, "\n")
 
@@ -466,7 +474,7 @@ func (t *Tool) kill(_ context.Context, input *KillShellInput) (*KillShellOutput,
 		return &KillShellOutput{Killed: false}, nil
 	}
 
-	if err := proc.Kill(); err != nil {
+	if err := killProcessGroup(proc); err != nil {
 		return nil, err
 	}
 
@@ -580,6 +588,8 @@ func (t *Tool) startBackground(command string, timeout time.Duration) (string, e
 	writer := &lockedWriter{shell: shell}
 	cmd.Stdout = writer
 	cmd.Stderr = writer
+	cmd.WaitDelay = waitDelay
+	setProcessGroup(cmd)
 
 	if startErr := cmd.Start(); startErr != nil {
 		return "", startErr
