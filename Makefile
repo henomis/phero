@@ -15,6 +15,7 @@ E2E_ANTHROPIC_BASE_URL ?= http://localhost:11434
 E2E_ANTHROPIC_AUTH_TOKEN ?= ollama
 E2E_ANTHROPIC_MODEL ?= llama3.2:latest
 E2E_EMBEDDING_MODEL ?= nomic-embed-text
+E2E_EMBEDDING_BASE_URL ?= $(E2E_OPENAI_BASE_URL)
 
 # Default target
 all: test lint
@@ -74,6 +75,7 @@ e2e:
 	ANTHROPIC_AUTH_TOKEN=$(E2E_ANTHROPIC_AUTH_TOKEN) \
 	ANTHROPIC_MODEL=$(E2E_ANTHROPIC_MODEL) \
 	EMBEDDING_MODEL=$(E2E_EMBEDDING_MODEL) \
+	EMBEDDING_BASE_URL=$(E2E_EMBEDDING_BASE_URL) \
 	$(GO) test $(GOFLAGS) -tags=e2e -timeout 20m ./tests/e2e
 
 ## lint: Run golangci-lint
