@@ -17,6 +17,7 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -123,5 +124,150 @@ func TestSummaryCompactor_ErrorIsCompactionError(t *testing.T) {
 	var cErr *agent.CompactionError
 	if !errors.As(err, &cErr) || !errors.Is(err, cause) {
 		t.Fatalf("err = %v, want a CompactionError wrapping the cause", err)
+	}
+}
+
+// scriptedLLM answers from fn and records the prompt of every call.
+type scriptedLLM struct {
+	prompts [][]llm.Message
+	fn      func(call int, msgs []llm.Message) (*llm.Result, error)
+}
+
+func (s *scriptedLLM) Execute(_ context.Context, msgs []llm.Message, _ ...llm.CallOption) (*llm.Result, error) {
+	s.prompts = append(s.prompts, msgs)
+
+	return s.fn(len(s.prompts), msgs)
+}
+
+// keepLastCompactor replaces everything but the last message with a marker
+// and counts its calls.
+func keepLastCompactor(calls *int) agent.Compactor {
+	return agent.CompactorFunc(func(_ context.Context, msgs []llm.Message) ([]llm.Message, error) {
+		*calls++
+
+		split := memory.SplitPoint(msgs, len(msgs)-1)
+
+		return append([]llm.Message{llm.SystemMessage("compacted")}, msgs[split:]...), nil
+	})
+}
+
+func addEchoTool(t *testing.T, a *agent.Agent) {
+	t.Helper()
+
+	if err := a.AddTool(mustTool(t, "echo", func(context.Context, *struct{}) (string, error) { return "ok", nil })); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRun_CompactsAtTokenThreshold(t *testing.T) {
+	client := &scriptedLLM{fn: func(call int, _ []llm.Message) (*llm.Result, error) {
+		if call < 4 {
+			return toolCallResultWithUsage("echo", fmt.Sprintf("c%d", call), "{}", &llm.Usage{InputTokens: 900, OutputTokens: 200}), nil
+		}
+
+		return textResult("done"), nil
+	}}
+
+	a := mustNew(t, client, "agent", "desc")
+	addEchoTool(t, a)
+
+	compactions := 0
+	a.SetCompaction(keepLastCompactor(&compactions), 1000)
+
+	res, err := a.Run(context.Background(), llm.Text("go"))
+	if err != nil || res.TextContent() != "done" {
+		t.Fatalf("Run = %v, %v", res, err)
+	}
+
+	// Calls 1-3 report 1100 tokens, so calls 2-4 are each preceded by a compaction.
+	if compactions != 3 {
+		t.Fatalf("compactions = %d, want 3", compactions)
+	}
+
+	for i, prompt := range client.prompts[1:] {
+		assertValidConversation(t, prompt)
+
+		if prompt[1].TextContent() != "compacted" {
+			t.Fatalf("call %d prompt = %+v, want the compacted session", i+2, prompt)
+		}
+	}
+}
+
+func TestRun_CompactsAndRetriesOnContextLengthError(t *testing.T) {
+	tooLong := &llm.ProviderError{Provider: "p", StatusCode: 400, ContextLengthExceeded: true, Err: errors.New("prompt is too long")}
+
+	client := &scriptedLLM{fn: func(call int, _ []llm.Message) (*llm.Result, error) {
+		switch call {
+		case 1:
+			return toolCallResult("echo", "c1", "{}"), nil
+		case 2:
+			return nil, tooLong
+		default:
+			return textResult("done"), nil
+		}
+	}}
+
+	a := mustNew(t, client, "agent", "desc")
+	addEchoTool(t, a)
+
+	mem := &stubMemory{}
+	a.SetMemory(mem)
+
+	compactions := 0
+	a.SetCompaction(keepLastCompactor(&compactions), 0)
+
+	res, err := a.Run(context.Background(), llm.Text("go"))
+	if err != nil || res.TextContent() != "done" {
+		t.Fatalf("Run = %v, %v", res, err)
+	}
+
+	if compactions != 1 || len(client.prompts) != 3 {
+		t.Fatalf("compactions = %d, calls = %d; want 1 and 3", compactions, len(client.prompts))
+	}
+
+	assertValidConversation(t, client.prompts[2])
+
+	// The compacted session is what is saved: the marker, the kept tool
+	// result's turn and the answer.
+	if len(mem.saved) == 0 || mem.saved[0].TextContent() != "compacted" {
+		t.Fatalf("saved = %+v, want the compacted session", mem.saved)
+	}
+}
+
+func TestRun_SecondContextLengthErrorEndsRun(t *testing.T) {
+	tooLong := &llm.ProviderError{Provider: "p", StatusCode: 400, ContextLengthExceeded: true, Err: errors.New("prompt is too long")}
+	client := &scriptedLLM{fn: func(int, []llm.Message) (*llm.Result, error) { return nil, tooLong }}
+
+	a := mustNew(t, client, "agent", "desc")
+
+	compactions := 0
+	a.SetCompaction(keepLastCompactor(&compactions), 0)
+
+	_, err := a.Run(context.Background(), llm.Text("go"))
+	if !errors.Is(err, llm.ErrContextLengthExceeded) {
+		t.Fatalf("err = %v, want ErrContextLengthExceeded", err)
+	}
+
+	if compactions != 1 || len(client.prompts) != 2 {
+		t.Fatalf("compactions = %d, calls = %d; want 1 and 2", compactions, len(client.prompts))
+	}
+}
+
+func TestRun_CompactionErrorEndsRun(t *testing.T) {
+	client := &scriptedLLM{fn: func(int, []llm.Message) (*llm.Result, error) {
+		return toolCallResultWithUsage("echo", "c", "{}", &llm.Usage{InputTokens: 5000}), nil
+	}}
+
+	a := mustNew(t, client, "agent", "desc")
+	addEchoTool(t, a)
+
+	cause := errors.New("summary model down")
+	a.SetCompaction(agent.NewSummaryCompactor(&summaryLLM{err: cause}, agent.WithKeepRecent(1)), 1000)
+
+	_, err := a.Run(context.Background(), llm.Text("go"))
+
+	var cErr *agent.CompactionError
+	if !errors.As(err, &cErr) || !errors.Is(err, cause) {
+		t.Fatalf("err = %v, want a CompactionError", err)
 	}
 }

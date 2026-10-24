@@ -48,6 +48,9 @@ type Agent struct {
 	memory         memory.Memory
 	tracing        *trace.Provider
 	handoffs       map[string]*Agent
+
+	compactor       Compactor
+	compactAtTokens int
 }
 
 // Result represents the final output of an agent after processing user input and executing any tool calls.
@@ -244,6 +247,119 @@ func (a *Agent) SetResponseFormat(format *llm.ResponseFormat) {
 	a.responseFormat = format
 }
 
+// SetCompaction makes the agent compact its session during a run, so a long
+// run keeps fitting the model's context window. The session, without the
+// system prompt, is handed to c (NewSummaryCompactor is the default choice):
+//   - before an LLM call, when the previous call's prompt and output tokens,
+//     as the provider reported them, reached atTokens; 0 disables this check;
+//   - when a call fails with llm.ErrContextLengthExceeded: the session is
+//     compacted and the call made again, once. A second such error in a row
+//     ends the run.
+//
+// Each compaction is traced as a memory span with op trace.MemoryCompact.
+// When the agent has memory, a run that compacted saves the compacted session
+// (for a SummaryCompactor: the summary and the messages kept after it) instead
+// of the full turn, so the next run does not start over the limit; kept
+// messages that were loaded from memory are saved again.
+//
+// Pass a nil Compactor to disable compaction.
+func (a *Agent) SetCompaction(c Compactor, atTokens int) {
+	a.compactor = c
+	a.compactAtTokens = max(atTokens, 0)
+}
+
+// compactIfNeeded compacts the session before the next LLM call when the
+// previous call reached the compaction threshold.
+func (a *Agent) compactIfNeeded(ctx context.Context, rs *runState, session *[]llm.Message, sessionIndex *int) error {
+	if a.compactor == nil || a.compactAtTokens <= 0 || rs.contextTokens < a.compactAtTokens {
+		return nil
+	}
+
+	var err error
+
+	*session, *sessionIndex, err = a.compactSession(ctx, rs, *session, *sessionIndex)
+
+	return err
+}
+
+// iterationFailed decides how the run goes on after an iteration failed with
+// iterErr. It returns true when the call should be made again, after the
+// session was compacted for a prompt too long for the context window, and
+// otherwise the error the run ends with: the cancellation when ctx is done (an
+// LLM that honours ctx fails on cancellation), else iterErr.
+func (a *Agent) iterationFailed(
+	ctx context.Context, rs *runState, session *[]llm.Message, sessionIndex *int, iterErr error,
+) (bool, error) {
+	if ctx.Err() != nil {
+		return false, cancellationError(ctx)
+	}
+
+	retry, compactErr := a.compactAfterError(ctx, rs, session, sessionIndex, iterErr)
+	if retry {
+		return true, nil
+	}
+
+	if compactErr != nil {
+		return false, errors.Join(iterErr, compactErr)
+	}
+
+	return false, iterErr
+}
+
+// compactAfterError compacts the session after a call failed because its
+// prompt is too long for the context window, once in a row, and reports
+// whether the call should be made again. It returns the compaction's error
+// when compacting failed.
+func (a *Agent) compactAfterError(
+	ctx context.Context, rs *runState, session *[]llm.Message, sessionIndex *int, callErr error,
+) (bool, error) {
+	if a.compactor == nil || rs.compactedOnError || !errors.Is(callErr, llm.ErrContextLengthExceeded) {
+		return false, nil
+	}
+
+	rs.compactedOnError = true
+
+	var err error
+
+	*session, *sessionIndex, err = a.compactSession(ctx, rs, *session, *sessionIndex)
+
+	return err == nil, err
+}
+
+// compactSession replaces the session after its system prompt with what the
+// compactor returns, inside a memory span, and returns the new session and
+// the index from which it is saved to memory at the end of the run. On error
+// the session is returned unchanged.
+func (a *Agent) compactSession(
+	ctx context.Context, rs *runState, session []llm.Message, sessionIndex int,
+) ([]llm.Message, int, error) {
+	payload := &trace.Memory{Op: trace.MemoryCompact}
+	ctx, span := trace.Start(ctx, string(trace.KindMemory)+" compact", payload)
+
+	compacted, err := a.compactor.Compact(ctx, slices.Clone(session[1:]))
+	if err != nil {
+		span.End(err)
+
+		return session, sessionIndex, err
+	}
+
+	payload.Messages = compacted
+	payload.Count = len(compacted)
+
+	span.End(nil)
+
+	newSession := make([]llm.Message, 0, 1+len(compacted))
+	newSession = append(newSession, session[0])
+	newSession = append(newSession, compacted...)
+
+	// The next call's prompt size is unknown until the provider reports it,
+	// and its trace payload records the whole new session.
+	rs.contextTokens = 0
+	rs.promptLen = 0
+
+	return newSession, 1, nil
+}
+
 // callOptions returns the per-call LLM options every iteration of the loop sends.
 func (a *Agent) callOptions() []llm.CallOption {
 	opts := []llm.CallOption{llm.WithTools(a.tools...)}
@@ -288,6 +404,13 @@ type runState struct {
 	// promptLen is the prompt length of the previous LLM call, where the next
 	// call's message delta starts.
 	promptLen int
+	// contextTokens estimates the tokens of the next prompt: the previous
+	// call's prompt and output tokens, as the provider reported them. It is 0
+	// when unknown, as after a compaction.
+	contextTokens int
+	// compactedOnError is set when the session was compacted after a
+	// context-length error, so a second such error in a row ends the run.
+	compactedOnError bool
 }
 
 // run executes the agent loop, optionally emitting streaming Events.
@@ -333,19 +456,22 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 			return partialResultFromSession(session[sessionIndex:]), ErrMaxIterationsReached
 		}
 
+		if err = a.compactIfNeeded(ctx, rs, &session, &sessionIndex); err != nil {
+			return partialResultFromSession(session[sessionIndex:]), err
+		}
+
 		iteration++
 
 		iterationResult, iterErr := a.handleAgentIteration(ctx, session, iteration, rs, emit)
 		if iterErr != nil {
-			// An LLM that honours ctx fails on cancellation: report it as a
-			// cancelled run, with its partial result and Summary.
-			if ctx.Err() != nil {
-				return partialResultFromSession(session[sessionIndex:]), cancellationError(ctx)
+			if retry, failErr := a.iterationFailed(ctx, rs, &session, &sessionIndex, iterErr); !retry {
+				return partialResultFromSession(session[sessionIndex:]), failErr
 			}
 
-			return partialResultFromSession(session[sessionIndex:]), iterErr
+			continue
 		}
 
+		rs.compactedOnError = false
 		session = iterationResult.session
 
 		if iterationResult.stop != nil {
@@ -527,6 +653,10 @@ func (a *Agent) handleAgentIteration(
 		if err != nil {
 			return agentIteration{session: session}, err
 		}
+	}
+
+	if u := msg.Usage; u != nil {
+		rs.contextTokens = u.InputTokens + u.CacheReadTokens + u.CacheWriteTokens + u.OutputTokens
 	}
 
 	session = append(session, *msg.Message)

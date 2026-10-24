@@ -336,6 +336,33 @@ a.SetMaxIterations(10)</code></pre>
     </section>
 
     <section>
+      <h2>Compaction: long runs</h2>
+      <p>
+        Every tool call and result stays in the session, so a run with many iterations, such as a coding agent
+        reading files and running tests, eventually outgrows the model's context window. <code>SetCompaction</code>
+        shortens the session during the run:
+      </p>
+
+      <pre><code class="language-go">// Summarize with a cheaper model; keep the last 20 messages whole.
+a.SetCompaction(agent.NewSummaryCompactor(cheapLLM, agent.WithKeepRecent(20)), 150_000)</code></pre>
+
+      <ul>
+        <li>Before an LLM call, once the previous call's prompt and output tokens reached the threshold (here
+          150k), the session is handed to the compactor. Pass 0 to skip this check.</li>
+        <li>When a call fails with <code>llm.ErrContextLengthExceeded</code>, the session is compacted and the call
+          made again, once. A second such error in a row ends the run.</li>
+        <li><code>NewSummaryCompactor</code> replaces the older messages with one summary, written from a prompt that
+          lists tool calls and results. It never separates a tool call from its results, and it keeps the latest
+          user request word for word, so the task is not lost.</li>
+        <li>Any <code>agent.Compactor</code> (or <code>agent.CompactorFunc</code>) can replace it. The result must
+          stay a valid conversation: no tool result without its call before it.</li>
+        <li>A run that compacted saves the compacted session to memory (the summary and the messages kept), so the
+          next run does not start over the limit. Each compaction is traced as a memory span with op
+          <code>compact</code>; a failure returns an <code>*agent.CompactionError</code>.</li>
+      </ul>
+    </section>
+
+    <section>
       <h2>Stopping a run</h2>
       <p>
         Every agent has an iteration limit of <code>agent.DefaultMaxIterations</code> (25 LLM calls per run). When it
