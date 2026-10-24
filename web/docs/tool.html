@@ -61,6 +61,7 @@
         <li><strong>Bash tool</strong> (<code>tool/bash</code>): run bash commands with optional guardrails (blocklist, allowlist, timeout, safe mode) and background execution</li>
         <li><strong>Human tool</strong> (<code>tool/human</code>): present structured questions and collect user answers mid-run</li>
         <li><strong>Skill dispatcher</strong> (<code>tool/skill</code>): load a named <code>SKILL.md</code> into the current conversation</li>
+        <li><strong>Task list</strong> (<code>tool/todo</code>): let the agent write, track and tick off the steps of a long task</li>
         <li><strong>Permissions</strong> (<code>tool/permission</code>): allow, deny or ask a human before any tool call, with rules such as <code>bash(go test *)</code></li>
       </ul>
 
@@ -363,6 +364,24 @@ if err := a.AddTool(dispatcher.Tool()); err != nil {
         <li><code>WithAvailableSkillsLocation(loc)</code>: override the location string shown in the skill catalog</li>
         <li><code>WithParser(parser)</code>: inject a custom <code>Parser</code> implementation (useful for testing)</li>
       </ul>
+    </section>
+
+    <section>
+      <h2>Task list (<code>tool/todo</code>)</h2>
+      <p>
+        Over many turns an agent loses track of a long task. The <code>todo_write</code> tool lets it write the steps
+        down, mark the one it is on and tick them off. Each call replaces the whole list; at most one item is
+        <code>in_progress</code>. The tool answers with the list as a checklist.
+      </p>
+      <pre><code class="language-go">list := todo.New(todo.WithOnChange(func(items []todo.Item) {
+    fmt.Println(todo.Render(items)) // or update a UI
+}))
+
+todoTool, err := list.Tool()
+if err != nil { panic(err) }
+
+if err := a.AddTool(todoTool); err != nil { panic(err) }</code></pre>
+      <p><code>list.Items()</code> returns the current items, for example to show them after the run.</p>
     </section>
 
     <section>
