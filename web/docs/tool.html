@@ -206,7 +206,33 @@ if err := a.AddTool(bashTool.KillTool());   err != nil { panic(err) }</code></pr
         <li><code>WithBlocklist(patterns...)</code>: any command containing a pattern (case-insensitive) returns <code>ErrCommandBlocked</code></li>
         <li><code>WithAllowlist(patterns...)</code>: when set, the command must match at least one pattern or <code>ErrCommandNotAllowed</code> is returned</li>
         <li><code>WithWorkingDirectory(dir)</code>: directory in which commands run</li>
+        <li><code>WithRunner(r)</code>: how commands are launched; <code>bash.LocalRunner</code> (the default) runs
+          them on the host, <code>bash.NewBubblewrapRunner</code> in a sandbox (below)</li>
+        <li><code>WithEnvAllowlist(names...)</code>: pass only these environment variables to commands instead of the
+          whole process environment; <code>bash.DefaultEnvAllowlist</code> keeps what common tools need and no secrets</li>
+        <li><code>WithEnv(entries...)</code>: add <code>KEY=VALUE</code> entries to every command's environment</li>
       </ul>
+      <h3>Sandbox (Linux)</h3>
+      <p>
+        The blocklist and allowlist match substrings of the command and are easy to get around: they are not a
+        security boundary. On Linux, <code>NewBubblewrapRunner</code> runs every command in a
+        <a href="https://github.com/containers/bubblewrap">bubblewrap</a> sandbox: the host file system is read-only
+        except the workspace, <code>/tmp</code> is private, there is no network, the environment is limited to
+        <code>DefaultEnvAllowlist</code>, and the sandbox has its own PID namespace, so a timeout kills everything a
+        command started.
+      </p>
+      <pre><code class="language-go">runner, err := bash.NewBubblewrapRunner(repoDir,
+    bash.WithWritablePaths(goBuildCache, goModCache), // tools that write outside the workspace
+    // bash.WithNetwork(true),                         // only if commands need it
+)
+if err != nil { panic(err) } // bash.ErrBubblewrapNotFound when bwrap is not installed
+
+bashTool, err := bash.New(bash.WithRunner(runner), bash.WithWorkingDirectory(repoDir))</code></pre>
+      <p>
+        Any type implementing <code>bash.Runner</code> can replace it, for example one that runs commands in a
+        container: it only builds the <code>*exec.Cmd</code>, and the tool keeps timeouts, process groups, background
+        shells and output handling.
+      </p>
       <p>Background execution fields in <code>Input</code>:</p>
       <ul>
         <li><code>RunInBackground bool</code>: start the command in the background; the tool returns a <code>bash_id</code> immediately</li>

@@ -17,19 +17,24 @@
 //
 // # Security Warning
 //
-// This tool executes arbitrary shell commands supplied by the language model
-// with the full privileges of the running process. There is no sandboxing,
-// capability restriction, or command allowlist enforced by the tool itself.
+// This tool executes arbitrary shell commands supplied by the language model.
+// With the default LocalRunner they run with the full privileges of the
+// running process and inherit its whole environment, secrets included.
+// WithBlocklist and WithAllowlist match substrings of the command and are
+// easy to get around: they are not a security boundary.
 //
 // Before using this tool in any agent, consider the following precautions:
 //
+//   - Run commands in a sandbox: WithRunner(NewBubblewrapRunner(workspace))
+//     on Linux makes the host read-only except the workspace, cuts the
+//     network and limits the environment. For stronger isolation, write a
+//     Runner that runs commands in a container or a VM.
+//   - Limit the environment with WithEnvAllowlist(DefaultEnvAllowlist...)
+//     so API keys and tokens do not reach the commands.
 //   - Run the agent process under a dedicated low-privilege OS user.
-//   - Use OS-level sandboxing (e.g. seccomp, Linux namespaces, Docker) to
-//     limit what the process can access.
-//   - Restrict the working directory via WithWorkingDirectory so the agent
-//     cannot trivially navigate to sensitive paths.
-//   - Apply a ToolMiddleware that validates or allowlists commands before
-//     they reach the underlying exec call.
+//   - Restrict the working directory via WithWorkingDirectory.
+//   - Apply a ToolMiddleware that asks a human before running commands it
+//     does not recognize.
 //   - Never expose this tool to untrusted or adversarial prompt inputs without
 //     human-in-the-loop approval.
 //

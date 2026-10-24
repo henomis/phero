@@ -45,3 +45,7 @@ var ErrShellNotFound = errors.New("bash: shell not found")
 // ErrInvalidOutputFilter is returned when a OutputInput filter is not a
 // valid regular expression.
 var ErrInvalidOutputFilter = errors.New("bash: invalid output filter")
+
+// ErrBubblewrapNotFound is returned by NewBubblewrapRunner when the bwrap
+// executable is not on PATH.
+var ErrBubblewrapNotFound = errors.New("bash: bubblewrap (bwrap) not found")
