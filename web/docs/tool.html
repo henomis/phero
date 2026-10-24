@@ -61,6 +61,7 @@
         <li><strong>Bash tool</strong> (<code>tool/bash</code>): run bash commands with optional guardrails (blocklist, allowlist, timeout, safe mode) and background execution</li>
         <li><strong>Human tool</strong> (<code>tool/human</code>): present structured questions and collect user answers mid-run</li>
         <li><strong>Skill dispatcher</strong> (<code>tool/skill</code>): load a named <code>SKILL.md</code> into the current conversation</li>
+        <li><strong>Web fetch</strong> (<code>tool/web</code>): fetch a page as text, with a size cap, a timeout and private networks refused</li>
         <li><strong>Task list</strong> (<code>tool/todo</code>): let the agent write, track and tick off the steps of a long task</li>
         <li><strong>Permissions</strong> (<code>tool/permission</code>): allow, deny or ask a human before any tool call, with rules such as <code>bash(go test *)</code></li>
       </ul>
@@ -364,6 +365,29 @@ if err := a.AddTool(dispatcher.Tool()); err != nil {
         <li><code>WithAvailableSkillsLocation(loc)</code>: override the location string shown in the skill catalog</li>
         <li><code>WithParser(parser)</code>: inject a custom <code>Parser</code> implementation (useful for testing)</li>
       </ul>
+    </section>
+
+    <section>
+      <h2>Web fetch (<code>tool/web</code>)</h2>
+      <p>
+        The <code>web_fetch</code> tool fetches a page and returns it as text: HTML becomes readable text with headings,
+        lists and links (as <code>text [url]</code>), without script or style; other text and JSON come back as they
+        are; binary content is refused. Responses are capped (<code>WithMaxBytes</code>, <code>WithMaxChars</code>,
+        <code>WithTimeout</code>) and the result says when it was truncated.
+      </p>
+      <pre><code class="language-go">fetcher := web.New(web.WithAllowedHosts("go.dev", "*.go.dev", "github.com"))
+
+fetchTool, err := fetcher.Tool()
+if err != nil { panic(err) }
+
+if err := a.AddTool(fetchTool); err != nil { panic(err) }</code></pre>
+      <p>
+        The URL comes from the model, so the tool refuses addresses on loopback, private and link-local networks,
+        including cloud metadata endpoints. The check runs on the address it connects to, so a redirect or a DNS answer
+        cannot get around it. <code>WithPrivateNetworks(true)</code> allows them, for example to read a local dev server.
+        <code>WithAllowedHosts</code> limits the hosts, redirects included; only <code>http</code> and <code>https</code>
+        URLs are fetched.
+      </p>
     </section>
 
     <section>

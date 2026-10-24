@@ -25,8 +25,8 @@
 //
 // In a pattern, * matches any run of characters, slashes included. The subject
 // is the argument that says what a call touches: the command for bash, the
-// file path for read, write and edit, the search path for glob and grep;
-// WithSubject sets it for other tools. A rule with no pattern matches every
+// file path for read, write, edit and multi_edit, the search path for glob
+// and grep, the URL for web_fetch; WithSubject sets it for other tools. A rule with no pattern matches every
 // call of its tool.
 //
 // A call is denied when a deny rule matches, else asked when an ask rule

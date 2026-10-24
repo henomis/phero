@@ -43,6 +43,7 @@ var defaultSubjects = map[string]string{
 	"multi_edit": argFilePath,
 	"glob":       argPath,
 	"grep":       argPath,
+	"web_fetch":  "url",
 }
 
 // Answer is a human's answer to a permission question.
