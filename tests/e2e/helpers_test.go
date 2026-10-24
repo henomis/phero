@@ -19,7 +19,6 @@ package e2e_test
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"net"
 	"os"
 	"strconv"
@@ -153,7 +152,7 @@ func requirePostgres(t *testing.T) *sql.DB {
 func requireQdrant(t *testing.T) *qdrantapi.Client {
 	t.Helper()
 
-	addr := fmt.Sprintf("%s:%d", qdrantHostEnv(), qdrantPortEnv())
+	addr := net.JoinHostPort(qdrantHostEnv(), strconv.Itoa(qdrantPortEnv()))
 
 	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	if err != nil {
