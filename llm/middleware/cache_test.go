@@ -326,3 +326,42 @@ func TestSemanticCache_ToolChoiceContractIsStable(t *testing.T) {
 		t.Fatalf("contract = %v, want %s", store.points[0].Payload["contract"], want)
 	}
 }
+
+func TestSemanticCache_StreamMissThenHit(t *testing.T) {
+	emb := mapEmbedder{fn: func(string) embedding.Vector { return embedding.Vector{1, 0, 0} }}
+	inner := &countingLLM{text: "streamed answer"}
+
+	mw, err := middleware.NewSemanticCache(emb, &memStore{})
+	if err != nil {
+		t.Fatalf("NewSemanticCache: %v", err)
+	}
+
+	client, ok := llm.Use(inner, mw).(llm.StreamingLLM)
+	if !ok {
+		t.Fatal("semantic cache does not stream")
+	}
+
+	msgs := []llm.Message{llm.UserMessage(llm.Text("hello"))}
+
+	for i := range 2 {
+		var text string
+
+		for chunk, chunkErr := range client.ExecuteStream(context.Background(), msgs) {
+			if chunkErr != nil {
+				t.Fatalf("stream %d: %v", i, chunkErr)
+			}
+
+			if chunk.Done {
+				text = chunk.Message.TextContent()
+			}
+		}
+
+		if text != "streamed answer" {
+			t.Fatalf("stream %d: final text = %q", i, text)
+		}
+	}
+
+	if inner.calls != 1 {
+		t.Fatalf("inner calls = %d, want 1: the second stream should be a cache hit", inner.calls)
+	}
+}

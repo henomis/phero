@@ -413,7 +413,14 @@ wrapped := llm.Use(base, loggingMiddleware)</code></pre>
 
       <p>
         The <code>llm/middleware</code> package ships ready-made middlewares: <code>NewRetry</code> (exponential back-off; by default it retries only errors <code>llm.IsRetryable</code> accepts),
-        <code>NewRateLimit</code>, <code>NewGuardrails</code>, and <code>NewSemanticCache</code>.
+        <code>NewLimiter</code>, <code>NewGuardrails</code>, and <code>NewSemanticCache</code>.
+      </p>
+
+      <p>
+        All four keep streaming: they implement <code>llm.StreamingLLM</code>, so an agent's <code>RunStream</code>
+        still gets deltas through them. A retry happens only before the first chunk reaches the caller, the limiter
+        holds its slot until the stream ends, guardrails check the result on the terminal chunk (a failing result
+        guard replaces it with its error), and the cache serves a hit as one chunk and stores a streamed miss.
       </p>
     </section>
 

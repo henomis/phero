@@ -17,6 +17,7 @@ package middleware
 import (
 	"context"
 	"fmt"
+	"iter"
 
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/trace"
@@ -127,10 +128,8 @@ type guardrailsLLM struct {
 func (g *guardrailsLLM) Execute(
 	ctx context.Context, messages []llm.Message, opts ...llm.CallOption,
 ) (*llm.Result, error) {
-	for _, guard := range g.cfg.messageGuards {
-		if err := guard.guard(ctx, messages); err != nil {
-			return nil, blocked(ctx, &GuardrailError{Stage: stageInput, Name: guard.name, Err: err})
-		}
+	if err := g.checkInput(ctx, messages); err != nil {
+		return nil, err
 	}
 
 	result, err := g.inner.Execute(ctx, messages, opts...)
@@ -138,13 +137,60 @@ func (g *guardrailsLLM) Execute(
 		return nil, err
 	}
 
-	for _, guard := range g.cfg.resultGuards {
-		if guardErr := guard.guard(ctx, result); guardErr != nil {
-			return nil, blocked(ctx, &GuardrailError{Stage: stageOutput, Name: guard.name, Err: guardErr})
-		}
+	if guardErr := g.checkResult(ctx, result); guardErr != nil {
+		return nil, guardErr
 	}
 
 	return result, nil
+}
+
+// ExecuteStream validates input messages before the stream starts, and the
+// assembled result when the terminal chunk arrives. The deltas before it have
+// already reached the caller: a result guard that fails replaces the terminal
+// chunk with its GuardrailError, so the caller never gets the result.
+func (g *guardrailsLLM) ExecuteStream(
+	ctx context.Context, messages []llm.Message, opts ...llm.CallOption,
+) iter.Seq2[llm.StreamChunk, error] {
+	if err := g.checkInput(ctx, messages); err != nil {
+		return errorStream(err)
+	}
+
+	return func(yield func(llm.StreamChunk, error) bool) {
+		for chunk, err := range llm.StreamOrBuffer(ctx, g.inner, messages, opts...) {
+			if err == nil && chunk.Done {
+				if guardErr := g.checkResult(ctx, resultFromChunk(chunk)); guardErr != nil {
+					yield(llm.StreamChunk{}, guardErr)
+					return
+				}
+			}
+
+			if !yield(chunk, err) || err != nil {
+				return
+			}
+		}
+	}
+}
+
+// checkInput runs the message guards in order and returns the first failure.
+func (g *guardrailsLLM) checkInput(ctx context.Context, messages []llm.Message) error {
+	for _, guard := range g.cfg.messageGuards {
+		if err := guard.guard(ctx, messages); err != nil {
+			return blocked(ctx, &GuardrailError{Stage: stageInput, Name: guard.name, Err: err})
+		}
+	}
+
+	return nil
+}
+
+// checkResult runs the result guards in order and returns the first failure.
+func (g *guardrailsLLM) checkResult(ctx context.Context, result *llm.Result) error {
+	for _, guard := range g.cfg.resultGuards {
+		if err := guard.guard(ctx, result); err != nil {
+			return blocked(ctx, &GuardrailError{Stage: stageOutput, Name: guard.name, Err: err})
+		}
+	}
+
+	return nil
 }
 
 // blocked records a guardrail.blocked event on the current span and returns e.

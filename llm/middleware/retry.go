@@ -17,6 +17,7 @@ package middleware
 import (
 	"context"
 	"errors"
+	"iter"
 	"math/rand"
 	"time"
 
@@ -161,6 +162,130 @@ func (r *retryLLM) Execute(ctx context.Context, messages []llm.Message, opts ...
 	}
 
 	return nil, &MaxAttemptsExceededError{Attempts: r.cfg.maxAttempts, Err: err}
+}
+
+// ExecuteStream streams from inner, retrying as Execute does while no chunk
+// has reached the caller yet. Once a chunk was yielded, a failure is returned
+// as it is: the caller has already consumed part of the answer, and a retry
+// would deliver it twice.
+func (r *retryLLM) ExecuteStream(
+	ctx context.Context, messages []llm.Message, opts ...llm.CallOption,
+) iter.Seq2[llm.StreamChunk, error] {
+	return func(yield func(llm.StreamChunk, error) bool) {
+		backoff := r.cfg.initialBackoff
+
+		var lastErr error
+
+		for attempt := 1; ; attempt++ {
+			attemptCtx, span, payload, err := r.beginAttempt(ctx, attempt, backoff, lastErr)
+			if err != nil {
+				yield(llm.StreamChunk{}, err)
+				return
+			}
+
+			if attempt > 1 {
+				backoff = min(backoff*backoffFactor, r.cfg.maxBackoff)
+			}
+
+			yielded, err := r.streamAttempt(attemptCtx, messages, opts, yield)
+			endAttempt(span, payload, err)
+
+			if stop, final := r.streamOutcome(attempt, yielded, err); stop {
+				if final != nil {
+					yield(llm.StreamChunk{}, final)
+				}
+
+				return
+			}
+
+			lastErr = err
+		}
+	}
+}
+
+// beginAttempt prepares a stream attempt. The first one runs under ctx; a
+// later one waits its back-off under a retry span, as Execute does, and runs
+// under that span. It returns ctx's error when ctx is done.
+func (r *retryLLM) beginAttempt(
+	ctx context.Context, attempt int, backoff time.Duration, lastErr error,
+) (context.Context, *trace.Span, *trace.Middleware, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, nil, err
+	}
+
+	if attempt == 1 {
+		return ctx, nil, nil, nil
+	}
+
+	payload := &trace.Middleware{
+		Name: middlewareRetry, Attempt: attempt, Wait: r.sleepFor(backoff, lastErr), Reason: lastErr.Error(),
+	}
+	attemptCtx, span := trace.Start(ctx, middlewareRetry, payload)
+
+	select {
+	case <-ctx.Done():
+		span.End(ctx.Err())
+
+		return nil, nil, nil, ctx.Err()
+	case <-time.After(payload.Wait):
+	}
+
+	return attemptCtx, span, payload, nil
+}
+
+// endAttempt ends the retry span of an attempt, when it has one.
+func endAttempt(span *trace.Span, payload *trace.Middleware, err error) {
+	if span == nil {
+		return
+	}
+
+	payload.Outcome = outcomeOK
+	if err != nil {
+		payload.Outcome = outcomeError
+	}
+
+	span.End(err)
+}
+
+// streamOutcome reports whether a stream ends after an attempt that ended
+// with err, and the error to yield when it does, if any: none when it
+// succeeded or the caller stopped reading; err when a chunk already reached
+// the caller or err cannot be retried; MaxAttemptsExceededError when no
+// attempt is left.
+func (r *retryLLM) streamOutcome(attempt int, yielded bool, err error) (bool, error) {
+	switch {
+	case err == nil || errors.Is(err, errStreamStopped):
+		return true, nil
+	case yielded || !r.cfg.shouldRetry(err):
+		return true, err
+	case attempt >= r.cfg.maxAttempts:
+		return true, &MaxAttemptsExceededError{Attempts: r.cfg.maxAttempts, Err: err}
+	default:
+		return false, nil
+	}
+}
+
+// streamAttempt streams one attempt to yield. It reports whether any chunk
+// reached the caller, and the attempt's error: errStreamStopped when the
+// caller stopped reading.
+func (r *retryLLM) streamAttempt(
+	ctx context.Context, messages []llm.Message, opts []llm.CallOption, yield func(llm.StreamChunk, error) bool,
+) (bool, error) {
+	yielded := false
+
+	for chunk, err := range llm.StreamOrBuffer(ctx, r.inner, messages, opts...) {
+		if err != nil {
+			return yielded, err
+		}
+
+		yielded = true
+
+		if !yield(chunk, nil) {
+			return true, errStreamStopped
+		}
+	}
+
+	return yielded, nil
 }
 
 // sleepFor returns the jittered back-off, raised to the provider's RetryAfter

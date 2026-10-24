@@ -61,3 +61,7 @@ func (e *MaxAttemptsExceededError) Error() string {
 func (e *MaxAttemptsExceededError) Unwrap() error {
 	return e.Err
 }
+
+// errStreamStopped reports that the caller stopped reading a stream. It never
+// reaches the caller: it only ends a retried stream without another attempt.
+var errStreamStopped = errors.New("stream stopped by the caller")

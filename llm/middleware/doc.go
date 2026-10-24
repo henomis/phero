@@ -19,7 +19,7 @@
 //
 //	retryMW, err := middleware.NewRetry(3)
 //	if err != nil { ... }
-//	rateLimitMW, stop, err := middleware.NewRateLimit(2.0, 10)
+//	rateLimitMW, stop, err := middleware.NewLimiter(2.0, 10)
 //	if err != nil { ... }
 //	defer stop()
 //	guardrailsMW := middleware.NewGuardrails()
