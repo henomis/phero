@@ -101,3 +101,17 @@ type ToolPanicError struct {
 func (e *ToolPanicError) Error() string {
 	return fmt.Sprintf("tool %s panicked: %v", e.Name, e.Value)
 }
+
+// CompactionError is returned when compacting a running session fails, for
+// example because the summary model's call failed.
+type CompactionError struct {
+	Err error
+}
+
+func (e *CompactionError) Error() string {
+	return fmt.Sprintf("session compaction failed: %v", e.Err)
+}
+
+func (e *CompactionError) Unwrap() error {
+	return e.Err
+}

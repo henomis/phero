@@ -205,6 +205,9 @@ const (
 	MemoryRetrieve MemoryOp = "retrieve"
 	// MemorySave persists messages to memory.
 	MemorySave MemoryOp = "save"
+	// MemoryCompact replaces older messages of a running session with a
+	// shorter version, such as a summary, to fit the model's context window.
+	MemoryCompact MemoryOp = "compact"
 )
 
 // Memory is the payload of a memory span.
