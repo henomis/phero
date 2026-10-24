@@ -74,3 +74,29 @@ func TestProviderError(t *testing.T) {
 		}
 	}
 }
+
+// TestProviderError_ContextLength verifies that the context-window errors of
+// OpenAI and OpenAI-compatible servers match llm.ErrContextLengthExceeded.
+func TestProviderError_ContextLength(t *testing.T) {
+	bodies := map[string]string{
+		"openai":    `{"error":{"message":"This model's maximum context length is 8192 tokens.","type":"invalid_request_error","code":"context_length_exceeded"}}`,
+		"llama.cpp": `{"error":{"code":400,"message":"the request exceeds the available context size, try increasing it","type":"exceed_context_size_error"}}`,
+		"other":     `{"error":{"message":"invalid model","type":"invalid_request_error","code":"model_not_found"}}`,
+	}
+
+	for name, body := range bodies {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(body))
+		}))
+		t.Cleanup(srv.Close)
+
+		c := openai.New("key", openai.WithBaseURL(srv.URL+"/v1"))
+		_, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))})
+
+		if got, want := errors.Is(err, llm.ErrContextLengthExceeded), name != "other"; got != want {
+			t.Errorf("%s: errors.Is(ErrContextLengthExceeded) = %v, want %v (err %v)", name, got, want, err)
+		}
+	}
+}

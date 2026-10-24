@@ -420,6 +420,23 @@ wrapped := llm.Use(base, loggingMiddleware)</code></pre>
         Errors that never reached the API, such as a network failure or an invalid request built locally, are
         returned as they are.
       </p>
+
+      <p>
+        A prompt too long for the model's context window sets <code>ContextLengthExceeded</code>, and the error
+        matches <code>llm.ErrContextLengthExceeded</code> with <code>errors.Is</code>. Each backend recognizes
+        its provider's wording: OpenAI's <code>context_length_exceeded</code> (and OpenAI-compatible servers
+        such as vLLM and llama.cpp), Anthropic's "prompt is too long", and Gemini's input token count error.
+        <code>llm.IsRetryable(err)</code> tells whether retrying can help: rate limits, timeouts, server and
+        overload errors and network failures can; bad requests, bad API keys, context-length errors and
+        guardrail blocks cannot.
+      </p>
+
+      <pre><code class="language-go">switch {
+case errors.Is(err, llm.ErrContextLengthExceeded):
+    // shorten the conversation, then call again
+case llm.IsRetryable(err):
+    // wait and retry
+}</code></pre>
     </section>
 
     <section>

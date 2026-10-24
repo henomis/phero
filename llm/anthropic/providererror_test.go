@@ -116,3 +116,22 @@ func TestRetryAfter(t *testing.T) {
 		}
 	}
 }
+
+func TestIsContextLengthError(t *testing.T) {
+	cases := []struct {
+		status  int
+		message string
+		want    bool
+	}{
+		{http.StatusBadRequest, "prompt is too long: 210000 tokens > 200000 maximum", true},
+		{http.StatusRequestEntityTooLarge, "request_too_large", true},
+		{http.StatusBadRequest, "messages: field required", false},
+		{http.StatusTooManyRequests, "prompt is too long", false},
+	}
+
+	for _, tc := range cases {
+		if got := isContextLengthError(tc.status, tc.message); got != tc.want {
+			t.Errorf("isContextLengthError(%d, %q) = %v, want %v", tc.status, tc.message, got, tc.want)
+		}
+	}
+}
