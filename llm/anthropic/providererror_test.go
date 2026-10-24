@@ -135,3 +135,19 @@ func TestIsContextLengthError(t *testing.T) {
 		}
 	}
 }
+
+func TestToolCallInput(t *testing.T) {
+	cases := map[string]int{
+		`{"path": "a.go"}`: 1,
+		`{"path": "a.go"`:  0, // cut off at the token limit
+		`[1, 2]`:           0,
+		`null`:             0,
+		``:                 0,
+	}
+
+	for args, want := range cases {
+		if got := toolCallInput(args); got == nil || len(got) != want {
+			t.Errorf("toolCallInput(%q) = %v, want an object with %d keys", args, got, want)
+		}
+	}
+}

@@ -234,12 +234,7 @@ func contentsFromMessages(messages []llm.Message) (*genai.Content, []*genai.Cont
 			add(genai.RoleUser, parts...)
 
 		case llm.RoleAssistant:
-			parts, err := assistantParts(m, callNames)
-			if err != nil {
-				return nil, nil, err
-			}
-
-			add(genai.RoleModel, parts...)
+			add(genai.RoleModel, assistantParts(m, callNames)...)
 
 		case llm.RoleTool:
 			id := strings.TrimSpace(m.ToolCallID)
@@ -275,7 +270,7 @@ func contentsFromMessages(messages []llm.Message) (*genai.Content, []*genai.Cont
 // assistantParts rebuilds the model turn of an assistant message, putting
 // each stored thought signature back on the part Gemini attached it to, and
 // records the message's tool calls in callNames.
-func assistantParts(m llm.Message, callNames map[string]string) ([]*genai.Part, error) {
+func assistantParts(m llm.Message, callNames map[string]string) []*genai.Part {
 	sigs := signaturesFromParts(m.Parts)
 
 	var parts []*genai.Part
@@ -291,10 +286,14 @@ func assistantParts(m llm.Message, callNames map[string]string) ([]*genai.Part, 
 	}
 
 	for _, tc := range m.ToolCalls {
+		// Arguments that are not a JSON object (a model's output cut off at the
+		// token limit, or a call made by another provider) are sent as an empty
+		// object: the call already got an error result, and failing the whole
+		// request would make the conversation unusable.
 		args := map[string]any{}
 		if raw := strings.TrimSpace(tc.Function.Arguments); raw != "" {
-			if err := json.Unmarshal([]byte(raw), &args); err != nil {
-				return nil, &ToolArgumentsParseError{ToolName: tc.Function.Name, Err: err}
+			if err := json.Unmarshal([]byte(raw), &args); err != nil || args == nil {
+				args = map[string]any{}
 			}
 		}
 
@@ -308,7 +307,7 @@ func assistantParts(m llm.Message, callNames map[string]string) ([]*genai.Part, 
 		parts = append(parts, &genai.Part{FunctionCall: fc, ThoughtSignature: sigs.calls[tc.ID]})
 	}
 
-	return parts, nil
+	return parts
 }
 
 // functionResponse converts a tool result: its text becomes the response's

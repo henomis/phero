@@ -325,6 +325,23 @@ func applyPromptCaching(params *anthropicapi.MessageNewParams) {
 	}
 }
 
+// toolCallInput decodes a stored tool call's arguments into the JSON object a
+// tool_use block needs. Arguments that are empty, not valid JSON or not an
+// object (a model's output cut off at the token limit, or a call made by
+// another provider) become an empty object: the tool call already got an
+// error result, and failing the whole request would make the conversation
+// unusable.
+func toolCallInput(arguments string) map[string]any {
+	input := map[string]any{}
+	if args := strings.TrimSpace(arguments); args != "" {
+		if err := json.Unmarshal([]byte(args), &input); err != nil || input == nil {
+			return map[string]any{}
+		}
+	}
+
+	return input
+}
+
 // messagesToAnthropic converts Phero messages to Anthropic wire types.
 //
 // System messages are collected and returned separately as required by the Anthropic API.
@@ -428,18 +445,7 @@ func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam,
 					id = uuid.NewString()
 				}
 
-				var input any
-
-				args := strings.TrimSpace(tc.Function.Arguments)
-				if args == "" {
-					input = map[string]any{}
-				} else {
-					if err := json.Unmarshal([]byte(args), &input); err != nil {
-						return nil, nil, &ToolArgumentsParseError{ToolName: tc.Function.Name, Err: err}
-					}
-				}
-
-				blocks = append(blocks, anthropicapi.NewToolUseBlock(id, input, tc.Function.Name))
+				blocks = append(blocks, anthropicapi.NewToolUseBlock(id, toolCallInput(tc.Function.Arguments), tc.Function.Name))
 			}
 
 			add(llm.RoleAssistant, blocks...)

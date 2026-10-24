@@ -446,12 +446,6 @@ func TestExecute_InvalidInputFailsBeforeRequest(t *testing.T) {
 			nil,
 			func(err error) bool { return errors.Is(err, google.ErrImageURLUnsupported) },
 		},
-		{
-			"invalid tool arguments",
-			[]llm.Message{user, llm.AssistantMessage(nil, llm.ToolCall{ID: "c", Function: llm.FunctionCall{Name: "f", Arguments: "{"}})},
-			nil,
-			func(err error) bool { var e *google.ToolArgumentsParseError; return errors.As(err, &e) },
-		},
 	}
 
 	for _, tt := range tests {
@@ -511,5 +505,30 @@ func TestNew_WithoutKey(t *testing.T) {
 	var e *google.ClientInitError
 	if !errors.As(err, &e) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// TestExecute_InvalidStoredToolArgumentsSentAsEmptyObject checks that a stored
+// tool call whose arguments are not a JSON object does not fail the request.
+func TestExecute_InvalidStoredToolArgumentsSentAsEmptyObject(t *testing.T) {
+	f := newFake(t)
+	client := newClient(f)
+
+	for _, args := range []string{`{"path": "a.go"`, `[1, 2]`, `null`} {
+		msgs := []llm.Message{
+			llm.UserMessage(llm.Text("q")),
+			llm.AssistantMessage(nil, llm.ToolCall{ID: "c", Function: llm.FunctionCall{Name: "f", Arguments: args}}),
+			llm.ToolResultMessage("c", llm.Text("Error executing tool 'f': bad arguments")),
+		}
+
+		if _, err := client.Execute(context.Background(), msgs); err != nil {
+			t.Fatalf("args %q: %v", args, err)
+		}
+
+		// The SDK leaves an empty args object out of the request.
+		fc, _ := get(t, f.request(t, f.count()-1), "contents", 1, "parts", 0, "functionCall").(map[string]any)
+		if got, ok := fc["args"].(map[string]any); fc["name"] != "f" || (ok && len(got) != 0) {
+			t.Errorf("args %q: functionCall = %v, want no args", args, fc)
+		}
 	}
 }
