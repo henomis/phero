@@ -16,6 +16,7 @@ package memory
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/henomis/phero/v2/llm"
 )
@@ -33,6 +34,8 @@ Analyze the dialogue below and generate a concise summary based on these four pi
 2. **User Preferences:** Explicit or implicit likes, dislikes, and stylistic requirements
 (e.g., "Prefers Go over Python," "Dislikes verbose explanations").
 3. **Current Progress:** What was achieved in this window? What problems were solved?
+Include the tool calls that mattered and their outcome: files read or changed, commands
+run, errors met.
 4. **Open Loops:** What are the pending questions, tasks, or follow-up items the user is expecting?
 
 # Constraints
@@ -50,6 +53,12 @@ Analyze the dialogue below and generate a concise summary based on these four pi
 const (
 	SummarySystemMessagePrefix = "Summary of previous conversation:\n"
 	summaryDefaultHalve        = 2
+
+	// summaryToolArgsLimit and summaryToolTextLimit cap, in runes, the
+	// arguments of a tool call and the text of a tool result in the summary
+	// prompt.
+	summaryToolArgsLimit = 500
+	summaryToolTextLimit = 4000
 )
 
 // ClampSummarySize validates and normalises a (summarizeThreshold, summarySize)
@@ -81,11 +90,48 @@ func ClampSummarySize(summarizeThreshold, summarySize uint) uint {
 // FormatSummaryPrompt builds the summarization request message sent to the LLM
 // when a memory backend needs to condense its conversation history. The returned
 // message has the user role so that the model treats it as a regular user turn.
+//
+// Tool calls are listed with their arguments and tool results with their
+// text, both cut to a few hundred or thousand characters, so the summary can
+// record what the agent did and not only what it said.
 func FormatSummaryPrompt(conversation []llm.Message) llm.Message {
-	var formatted string
+	var formatted strings.Builder
+
 	for _, msg := range conversation {
-		formatted += "## " + msg.Role + "\n" + msg.TextContent() + "\n\n"
+		text := msg.TextContent()
+
+		formatted.WriteString("## " + msg.Role)
+
+		if msg.Role == llm.RoleTool {
+			status := "result"
+			if msg.ToolError {
+				status = "error"
+			}
+
+			formatted.WriteString(" " + status + " (call " + msg.ToolCallID + ")")
+
+			text = clip(text, summaryToolTextLimit)
+		}
+
+		formatted.WriteString("\n" + text + "\n")
+
+		for _, tc := range msg.ToolCalls {
+			formatted.WriteString("- tool call " + tc.ID + ": " + tc.Function.Name + "(" +
+				clip(tc.Function.Arguments, summaryToolArgsLimit) + ")\n")
+		}
+
+		formatted.WriteString("\n")
 	}
 
-	return llm.UserMessage(llm.Text(fmt.Sprintf(summaryPrompt, formatted)))
+	return llm.UserMessage(llm.Text(fmt.Sprintf(summaryPrompt, formatted.String())))
+}
+
+// clip returns s cut to at most limit runes, marking the cut.
+func clip(s string, limit int) string {
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+
+	return string(runes[:limit]) + " […]"
 }

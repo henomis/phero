@@ -314,8 +314,10 @@ func (m *Memory) maybeSummarize(ctx context.Context) error {
 		return nil
 	}
 
-	toSummarize := msgs[:m.summarySize]
-	toAppend := msgs[m.summarySize:]
+	// Split past tool results so none is kept without its tool call.
+	split := memory.SplitPoint(msgs, int(m.summarySize))
+	toSummarize := msgs[:split]
+	toAppend := msgs[split:]
 
 	history := memory.FormatSummaryPrompt(toSummarize)
 

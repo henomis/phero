@@ -255,8 +255,10 @@ func (m *Memory) merge(
 		return merged, nil
 	}
 
-	toSummarize := merged[:m.summarySize]
-	toAppend := merged[m.summarySize:]
+	// Split past tool results so none is kept without its tool call.
+	split := memory.SplitPoint(merged, int(m.summarySize))
+	toSummarize := merged[:split]
+	toAppend := merged[split:]
 
 	key, err := json.Marshal(toSummarize)
 	if err != nil {

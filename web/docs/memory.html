@@ -109,6 +109,15 @@ conversationMemory := memory.New(
 )
 
 a.SetMemory(conversationMemory)</code></pre>
+
+      <p>
+        <code>WithSummarization(llm, threshold, size)</code> summarizes once <code>threshold</code> messages are stored:
+        the oldest <code>size</code> messages are replaced by one summary system message, and the newer ones are kept.
+        The split never separates a tool call from its results: it moves forward past tool results, because providers
+        reject a tool result whose call is missing. The summary prompt lists tool calls with their arguments and tool
+        results with their text (both clipped), so the summary records what the agent did, not only what it said.
+        <code>memory/simple</code> also leaves out tool results whose call was evicted from its buffer.
+      </p>
     </section>
 
     <section>

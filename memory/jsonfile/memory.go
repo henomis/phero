@@ -67,6 +67,9 @@ func New(filePath string, options ...Option) (*Memory, error) {
 
 // WithSummarization enables automatic summarization of memory when the number of stored
 // messages exceeds summarizeThreshold.
+//
+// This mirrors the behavior of memory/simple.WithSummarization: the oldest summarySize
+// messages, moved past tool results, are replaced by a summary.
 func WithSummarization(summaryLLM llm.LLM, summarizeThreshold, summarySize uint) Option {
 	return func(m *Memory) {
 		m.llm = summaryLLM
@@ -155,9 +158,10 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 	m.messages = append(m.messages, messages...)
 
 	if m.needSummarization() {
-		toSummarize := m.messages
-		toAppend := toSummarize[m.summarySize:]
-		toSummarize = toSummarize[:m.summarySize]
+		// Split past tool results so none is kept without its tool call.
+		split := memory.SplitPoint(m.messages, int(m.summarySize))
+		toSummarize := m.messages[:split]
+		toAppend := m.messages[split:]
 
 		history := memory.FormatSummaryPrompt(toSummarize)
 

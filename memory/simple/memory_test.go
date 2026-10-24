@@ -69,3 +69,69 @@ func TestMemorySave_SummarizationReplacesHistory(t *testing.T) {
 		}
 	}
 }
+
+// toolTurn returns an assistant message calling tool id and its result.
+func toolTurn(id string) []llm.Message {
+	return []llm.Message{
+		llm.AssistantMessage(nil, llm.ToolCall{ID: id, Function: llm.FunctionCall{Name: "f", Arguments: "{}"}}),
+		llm.ToolResultMessage(id, llm.Text("result "+id)),
+	}
+}
+
+// assertNoOrphans fails when a tool result's call is not before it.
+func assertNoOrphans(t *testing.T, msgs []llm.Message) {
+	t.Helper()
+
+	calls := map[string]bool{}
+
+	for i, m := range msgs {
+		for _, tc := range m.ToolCalls {
+			calls[tc.ID] = true
+		}
+
+		if m.Role == llm.RoleTool && !calls[m.ToolCallID] {
+			t.Fatalf("message %d answers tool call %q, which is not before it", i, m.ToolCallID)
+		}
+	}
+}
+
+func TestMemorySave_SummarizationKeepsToolPairs(t *testing.T) {
+	ctx := context.Background()
+
+	// Summarizing the oldest 2 messages would split the first tool turn.
+	mem := New(20, WithSummarization(&mockSummaryLLM{}, 5, 2))
+
+	msgs := append([]llm.Message{llm.UserMessage(llm.Text("go"))}, toolTurn("a")...)
+	msgs = append(msgs, toolTurn("b")...)
+
+	if err := mem.Save(ctx, msgs); err != nil {
+		t.Fatal(err)
+	}
+
+	got, _ := mem.Retrieve(ctx, "")
+	assertNoOrphans(t, got)
+
+	if len(got) != 3 || got[1].ToolCalls[0].ID != "b" {
+		t.Fatalf("got %d messages, want summary + tool turn b", len(got))
+	}
+}
+
+func TestMemoryRetrieve_EvictionDropsOrphanedResults(t *testing.T) {
+	ctx := context.Background()
+	mem := New(3)
+
+	msgs := append([]llm.Message{llm.UserMessage(llm.Text("go"))}, toolTurn("a")...)
+	msgs = append(msgs, toolTurn("b")...)
+
+	if err := mem.Save(ctx, msgs); err != nil {
+		t.Fatal(err)
+	}
+
+	// The buffer holds [tool a, assistant b, tool b]; tool a lost its call.
+	got, _ := mem.Retrieve(ctx, "")
+	assertNoOrphans(t, got)
+
+	if len(got) != 2 {
+		t.Fatalf("got %d messages, want tool turn b only", len(got))
+	}
+}

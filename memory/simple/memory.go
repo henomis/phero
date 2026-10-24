@@ -55,8 +55,9 @@ func New(maxItems uint, options ...Option) *Memory {
 //
 // When enabled, the Memory will use the provided summaryLLM to generate a summary of the
 // conversation history once the number of stored messages exceeds summarizeThreshold. The
-// summary will be stored as a system message in memory, and the most recent messages up to
-// summarySize will be retained alongside the summary.
+// oldest summarySize messages are replaced by the summary, stored as a system message, and
+// the newer messages are kept after it. The split moves forward past tool results, so a
+// tool call and its results are summarized or kept together.
 //
 // If summarizeThreshold is set to 0 or greater than capacity, summarization will trigger when
 // the buffer is full. If summarySize is set to 0, it will default to half of
@@ -88,10 +89,12 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 	}
 
 	if m.needSummarization() {
-		// get messages to summarize (all but the most recent summarySize)
-		toSummarize := m.buffer.Get()
-		toAppend := toSummarize[m.summarySize:]
-		toSummarize = toSummarize[:m.summarySize]
+		// Summarize the oldest summarySize messages, moved past tool results
+		// so none is kept without its tool call.
+		toSummarize := memory.TrimOrphanToolResults(m.buffer.Get())
+		split := memory.SplitPoint(toSummarize, int(m.summarySize))
+		toAppend := toSummarize[split:]
+		toSummarize = toSummarize[:split]
 
 		history := memory.FormatSummaryPrompt(toSummarize)
 
@@ -113,8 +116,10 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 }
 
 // Retrieve returns all messages currently in memory, ordered from oldest to newest.
+// Tool results at the start, whose tool call was evicted from the buffer, are
+// left out: providers reject a tool result without its call.
 func (m *Memory) Retrieve(_ context.Context, _ string) ([]llm.Message, error) {
-	return m.buffer.Get(), nil
+	return memory.TrimOrphanToolResults(m.buffer.Get()), nil
 }
 
 // Clear removes all messages from memory.
