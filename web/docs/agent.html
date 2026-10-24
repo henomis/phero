@@ -434,6 +434,15 @@ if errors.Is(err, errAskedHuman) {
       <p>
         Tool handlers can return any Go value; non-string results are JSON-marshaled before being added to the chat.
       </p>
+
+      <p>
+        When the model calls several tools at once, the calls run concurrently. <code>a.SetMaxParallelTools(n)</code>
+        caps how many run at the same time. A tool marked with <code>tool.SetExclusive(true)</code> runs alone, in call
+        order: after the calls before it and before the calls after it. The built-in <code>edit</code> and
+        <code>write</code> tools are exclusive, so two edits of the same file in one round apply in order. A panic in a
+        tool is recovered and reported to the model as a failed call. A handler can read its call (ID, name,
+        arguments) with <code>llm.ToolCallFromContext(ctx)</code>.
+      </p>
     </section>
 
     <section>

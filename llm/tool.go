@@ -71,6 +71,23 @@ type Tool struct {
 	// middlewares wraps the tool handler to provide cross-cutting behavior
 	// (e.g., input validation, permission checks, logging).
 	middlewares []ToolMiddleware
+
+	// exclusive marks a tool whose calls must not overlap any other call.
+	exclusive bool
+}
+
+// SetExclusive marks the tool as exclusive: when the model calls several
+// tools at once, an agent runs each call of this tool alone, in call order,
+// after the calls before it and before the calls after it. Use it for tools
+// whose calls depend on each other, such as edits of the same file.
+func (t *Tool) SetExclusive(exclusive bool) *Tool {
+	t.exclusive = exclusive
+	return t
+}
+
+// Exclusive reports whether the tool is exclusive (see SetExclusive).
+func (t *Tool) Exclusive() bool {
+	return t.exclusive
 }
 
 // Name returns the stable name used to identify this tool to the LLM.

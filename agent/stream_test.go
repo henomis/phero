@@ -17,8 +17,10 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"iter"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -257,5 +259,90 @@ func TestRunStream_EmitsUsagePerIteration(t *testing.T) {
 	// textResult reports 10 input tokens.
 	if len(usage) != 4 || usage[0] != 1 || usage[1] != 100 || usage[2] != 2 || usage[3] != 10 {
 		t.Fatalf("usage events (iteration, input tokens) = %v", usage)
+	}
+}
+
+// trackingTool records how many calls run at once and the order calls start.
+type tracking struct {
+	mu          sync.Mutex
+	inFlight    int
+	maxInFlight int
+	starts      []string
+}
+
+func (tr *tracking) tool(t *testing.T, name string) *llm.Tool {
+	t.Helper()
+
+	return mustTool(t, name, func(context.Context, *struct{}) (string, error) {
+		tr.mu.Lock()
+		tr.inFlight++
+		tr.maxInFlight = max(tr.maxInFlight, tr.inFlight)
+		tr.starts = append(tr.starts, name)
+		tr.mu.Unlock()
+
+		time.Sleep(20 * time.Millisecond)
+
+		tr.mu.Lock()
+		tr.inFlight--
+		tr.mu.Unlock()
+
+		return name, nil
+	})
+}
+
+// roundOf returns an LLM result calling the named tools in one round.
+func roundOf(names ...string) *llm.Result {
+	res := toolCallResult(names[0], "c0", "{}")
+	for i, n := range names[1:] {
+		res.Message.ToolCalls = append(res.Message.ToolCalls, toolCallResult(n, fmt.Sprintf("c%d", i+1), "{}").Message.ToolCalls...)
+	}
+
+	return res
+}
+
+func TestRun_MaxParallelTools(t *testing.T) {
+	tr := &tracking{}
+	stub := &stubLLM{responses: []*llm.Result{roundOf("a", "b", "c", "d"), textResult("done")}, errs: []error{nil, nil}}
+
+	a := mustNew(t, stub, "agent", "desc")
+	for _, n := range []string{"a", "b", "c", "d"} {
+		if err := a.AddTool(tr.tool(t, n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	a.SetMaxParallelTools(2)
+
+	if _, err := a.Run(context.Background(), llm.Text("go")); err != nil {
+		t.Fatal(err)
+	}
+
+	if tr.maxInFlight != 2 {
+		t.Fatalf("max calls at once = %d, want 2", tr.maxInFlight)
+	}
+}
+
+func TestRun_ExclusiveToolRunsAloneInOrder(t *testing.T) {
+	tr := &tracking{}
+	stub := &stubLLM{responses: []*llm.Result{roundOf("a", "b", "x", "c"), textResult("done")}, errs: []error{nil, nil}}
+
+	a := mustNew(t, stub, "agent", "desc")
+	for _, n := range []string{"a", "b", "c"} {
+		if err := a.AddTool(tr.tool(t, n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := a.AddTool(tr.tool(t, "x").SetExclusive(true)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := a.Run(context.Background(), llm.Text("go")); err != nil {
+		t.Fatal(err)
+	}
+
+	// a and b may overlap; x starts third and alone; c starts last.
+	if len(tr.starts) != 4 || tr.starts[2] != "x" || tr.starts[3] != "c" || tr.maxInFlight != 2 {
+		t.Fatalf("starts = %v, max at once = %d; want x third and alone, c last", tr.starts, tr.maxInFlight)
 	}
 }

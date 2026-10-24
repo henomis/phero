@@ -63,7 +63,8 @@ func NewWriteTool(opts ...Option) (*WriteTool, error) {
 		return nil, err
 	}
 
-	w.tool = tool
+	// Writes of one round run alone and in order: they may touch the same file.
+	w.tool = tool.SetExclusive(true)
 
 	return w, nil
 }

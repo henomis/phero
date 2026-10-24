@@ -51,6 +51,8 @@ type Agent struct {
 	compactor       Compactor
 	compactAtTokens int
 	checkpoint      bool
+
+	maxParallelTools int
 }
 
 // Result represents the final output of an agent after processing user input and executing any tool calls.
@@ -232,6 +234,13 @@ func (a *Agent) SetMemory(mem memory.Memory) {
 // It has no effect on an agent without memory.
 func (a *Agent) SetCheckpoint(enabled bool) {
 	a.checkpoint = enabled
+}
+
+// SetMaxParallelTools caps how many tool calls of one round run at once; 0
+// or less (the default) runs them all at once. Tools marked exclusive with
+// llm.Tool.SetExclusive always run alone.
+func (a *Agent) SetMaxParallelTools(n int) {
+	a.maxParallelTools = max(n, 0)
 }
 
 // SetMaxIterations sets a maximum number of iterations for the agent loop.
@@ -751,35 +760,7 @@ func (a *Agent) processToolCalls(
 		}
 	}
 
-	// Execute all tool calls concurrently; results keep the call order. Each
-	// result is emitted, on this goroutine, as soon as its call finishes.
-	results := make([]*llm.Message, len(toolCalls))
-	stops := make([]error, len(toolCalls))
-	finished := make(chan int, len(toolCalls))
-
-	for i, toolCall := range toolCalls {
-		go func() {
-			results[i], stops[i] = a.handleToolCall(ctx, toolCall, iteration)
-			finished <- i
-		}()
-	}
-
-	for range toolCalls {
-		i := <-finished
-
-		if emit == nil {
-			continue
-		}
-
-		emit(Event{
-			Type:       EventToolResult,
-			ToolCallID: toolCalls[i].ID,
-			ToolName:   toolCalls[i].Function.Name,
-			ToolResult: llm.TextContent(results[i].Parts...),
-			ToolError:  results[i].ToolError,
-			Iteration:  iteration,
-		})
-	}
+	results, stops := a.runToolCalls(ctx, toolCalls, iteration, emit)
 
 	// Append results in order; collect all handoffs (fan-out when more than one).
 	var handoffs []Handoff
@@ -870,6 +851,81 @@ func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, itera
 		ToolCallID: toolCall.ID,
 		ToolError:  err != nil,
 	}, stop
+}
+
+// runToolCalls runs the tool calls of one round and returns their results
+// and StopRun errors, in call order. Calls run concurrently, at most
+// maxParallelTools at once when set, except exclusive tools (see
+// llm.Tool.SetExclusive): each runs alone, after the calls before it and
+// before the calls after it. Each result is emitted, on this goroutine, as
+// soon as its call finishes.
+func (a *Agent) runToolCalls(
+	ctx context.Context, toolCalls []llm.ToolCall, iteration int, emit emitFunc,
+) ([]*llm.Message, []error) {
+	results := make([]*llm.Message, len(toolCalls))
+	stops := make([]error, len(toolCalls))
+
+	var batch []int
+
+	for i, tc := range toolCalls {
+		if tool, ok := a.getTool(tc.Function.Name); ok && tool.Exclusive() {
+			a.runToolBatch(ctx, toolCalls, batch, iteration, emit, results, stops)
+			a.runToolBatch(ctx, toolCalls, []int{i}, iteration, emit, results, stops)
+
+			batch = nil
+
+			continue
+		}
+
+		batch = append(batch, i)
+	}
+
+	a.runToolBatch(ctx, toolCalls, batch, iteration, emit, results, stops)
+
+	return results, stops
+}
+
+// runToolBatch runs the tool calls at indexes concurrently, at most
+// maxParallelTools at once when set, storing their results and stops.
+func (a *Agent) runToolBatch(
+	ctx context.Context, toolCalls []llm.ToolCall, indexes []int, iteration int, emit emitFunc,
+	results []*llm.Message, stops []error,
+) {
+	finished := make(chan int, len(indexes))
+
+	var slots chan struct{}
+	if a.maxParallelTools > 0 {
+		slots = make(chan struct{}, a.maxParallelTools)
+	}
+
+	for _, i := range indexes {
+		go func() {
+			if slots != nil {
+				slots <- struct{}{}
+				defer func() { <-slots }()
+			}
+
+			results[i], stops[i] = a.handleToolCall(ctx, toolCalls[i], iteration)
+			finished <- i
+		}()
+	}
+
+	for range indexes {
+		i := <-finished
+
+		if emit == nil {
+			continue
+		}
+
+		emit(Event{
+			Type:       EventToolResult,
+			ToolCallID: toolCalls[i].ID,
+			ToolName:   toolCalls[i].Function.Name,
+			ToolResult: llm.TextContent(results[i].Parts...),
+			ToolError:  results[i].ToolError,
+			Iteration:  iteration,
+		})
+	}
 }
 
 // prepareSession prepares the messages for the LLM call, including the system prompt, memory messages, and user input.

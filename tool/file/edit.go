@@ -58,7 +58,8 @@ func NewEditTool(opts ...Option) (*EditTool, error) {
 		return nil, err
 	}
 
-	e.tool = tool
+	// Edits of one round run alone and in order: each may depend on the last.
+	e.tool = tool.SetExclusive(true)
 
 	return e, nil
 }
