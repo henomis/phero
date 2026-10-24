@@ -26,8 +26,9 @@
 // Before using this tool in any agent, consider the following precautions:
 //
 //   - Run commands in a sandbox: WithRunner(NewBubblewrapRunner(workspace))
-//     on Linux makes the host read-only except the workspace, cuts the
-//     network and limits the environment. For stronger isolation, write a
+//     on Linux mounts only the system directories (read-only) and the
+//     workspace, so host sockets and files such as ~/.ssh are out of reach,
+//     cuts the network and limits the environment. For stronger isolation, write a
 //     Runner that runs commands in a container or a VM.
 //   - Limit the environment with WithEnvAllowlist(DefaultEnvAllowlist...)
 //     so API keys and tokens do not reach the commands.

@@ -248,13 +248,18 @@ if err := a.AddTool(bashTool.KillTool());   err != nil { panic(err) }</code></pr
       <p>
         The blocklist and allowlist match substrings of the command and are easy to get around: they are not a
         security boundary. On Linux, <code>NewBubblewrapRunner</code> runs every command in a
-        <a href="https://github.com/containers/bubblewrap">bubblewrap</a> sandbox: the host file system is read-only
-        except the workspace, <code>/tmp</code> is private, there is no network, the environment is limited to
+        <a href="https://github.com/containers/bubblewrap">bubblewrap</a> sandbox: of the host file system only the
+        system directories (<code>bash.SystemPaths()</code>: <code>/usr</code>, <code>/etc</code>, <code>/lib*</code>, …)
+        are mounted, read-only, plus the workspace. <code>/tmp</code>, <code>/run</code> and <code>$HOME</code> are
+        private and empty, so host Unix sockets (<code>docker.sock</code>, the D-Bus buses, agent sockets) and files
+        such as <code>~/.ssh</code> are out of reach: <code>connect()</code> on a socket ignores read-only mounts, so
+        the sandbox does not mount them at all. There is no network, the environment is limited to
         <code>DefaultEnvAllowlist</code>, and the sandbox has its own PID namespace, so a timeout kills everything a
         command started.
       </p>
       <pre><code class="language-go">runner, err := bash.NewBubblewrapRunner(repoDir,
     bash.WithWritablePaths(goBuildCache, goModCache), // tools that write outside the workspace
+    bash.WithReadOnlyPaths(toolchainDir),              // tools installed outside the system directories
     // bash.WithNetwork(true),                         // only if commands need it
 )
 if err != nil { panic(err) } // bash.ErrBubblewrapNotFound when bwrap is not installed

@@ -147,3 +147,57 @@ func TestBubblewrap_PersistentShell(t *testing.T) {
 		t.Fatalf("got %q, want the state carried inside the sandbox", got)
 	}
 }
+
+func TestBubblewrap_NoHostSockets(t *testing.T) {
+	tool := newSandboxedTool(t, t.TempDir())
+
+	// connect() ignores read-only mounts: a host socket such as docker.sock or
+	// the D-Bus session bus would let a command act outside the sandbox.
+	out, err := tool.run(context.Background(), &Input{
+		Command: `find / \( -path /proc -o -path /sys \) -prune -o -type s -print 2>/dev/null; true`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := strings.TrimSpace(out.Output); got != "" {
+		t.Fatalf("sockets visible in the sandbox:\n%s", got)
+	}
+}
+
+func TestBubblewrap_HostPathsHiddenUnlessReadOnlyPath(t *testing.T) {
+	// This package's directory is a host path outside the system directories
+	// and outside the workspace.
+	pkgDir, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, sys := range SystemPaths() {
+		if strings.HasPrefix(pkgDir, sys+"/") {
+			t.Skipf("the package lives under %s, which the sandbox mounts", sys)
+		}
+	}
+
+	source := filepath.Join(pkgDir, "runner_bwrap.go")
+	command := "cat " + source + " >/dev/null 2>&1 && echo read; touch " + filepath.Join(pkgDir, "x") + " 2>/dev/null || echo ro"
+
+	hidden := newSandboxedTool(t, t.TempDir())
+	if got := runOK(t, hidden, command); got != "ro" {
+		t.Fatalf("got %q, want the host path hidden", got)
+	}
+
+	shown := newSandboxedTool(t, t.TempDir(), WithReadOnlyPaths(pkgDir))
+	if got := runOK(t, shown, command); got != "read\nro" {
+		t.Fatalf("got %q, want the read-only path readable and not writable", got)
+	}
+}
+
+func TestBubblewrap_HomeIsPrivateAndWritable(t *testing.T) {
+	tool := newSandboxedTool(t, t.TempDir())
+
+	// Tools write caches under $HOME: it is an empty tmpfs, not the host's.
+	if got := runOK(t, tool, `mkdir -p "$HOME/.cache/x" && ls -A "$HOME"`); got != ".cache" {
+		t.Fatalf("got %q, want an empty, writable home", got)
+	}
+}
