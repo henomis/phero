@@ -132,6 +132,8 @@ type Tool struct {
 	runner         Runner
 	envAllowlist   []string
 	extraEnv       []string
+	persistent     bool
+	state          shellState
 
 	mu    sync.RWMutex
 	shell map[string]*backgroundShell
@@ -156,7 +158,6 @@ type Option func(*Tool)
 // New creates a new instance of the bash_tool.
 func New(options ...Option) (*Tool, error) {
 	name := "bash"
-	description := "Executes a given bash command in a persistent shell session with optional timeout and background execution." //nolint:lll
 
 	bashTool := &Tool{
 		defaultTimeout: DefaultTimeout,
@@ -168,6 +169,13 @@ func New(options ...Option) (*Tool, error) {
 
 	for _, option := range options {
 		option(bashTool)
+	}
+
+	description := "Executes a given bash command with optional timeout and background execution. " +
+		"Each command starts in a fresh shell: cd and exported variables do not carry over."
+	if bashTool.persistent {
+		description = "Executes a given bash command in a persistent shell session with optional timeout and " +
+			"background execution: the working directory and exported variables carry over between commands."
 	}
 
 	tool, err := llm.NewTool(
@@ -244,6 +252,19 @@ func WithRunner(r Runner) Option {
 func WithEnvAllowlist(names ...string) Option {
 	return func(t *Tool) {
 		t.envAllowlist = append([]string{}, names...)
+	}
+}
+
+// WithPersistentShell makes the working directory and the exported
+// environment variables carry over from one command to the next, as in an
+// interactive shell: after `cd sub`, the next command runs in sub. Each
+// command still runs in its own process. A command that calls exit, times out
+// or runs in the background does not change the carried state, and a
+// background command starts from it. Commands run concurrently update it in
+// the order they finish.
+func WithPersistentShell() Option {
+	return func(t *Tool) {
+		t.persistent = true
 	}
 }
 
@@ -353,6 +374,14 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 		return &Output{BashID: shellID, Running: true}, nil
 	}
 
+	return t.runForeground(ctx, input.Command, cmdTimeout)
+}
+
+// runForeground runs command and waits for it, killing it when timeout (if
+// any) expires. A command that times out returns what it printed so far, and
+// one that fails returns its output with its exit code; an error means the
+// command could not run or ctx ended.
+func (t *Tool) runForeground(ctx context.Context, command string, cmdTimeout time.Duration) (*Output, error) {
 	runCtx := ctx
 
 	if cmdTimeout > 0 {
@@ -362,12 +391,28 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 		defer cancel()
 	}
 
-	cmd, err := t.newCommand(runCtx, input.Command)
+	script := command
+	if t.persistent {
+		script = persistentScript(command)
+	}
+
+	cmd, err := t.newCommand(runCtx, script)
 	if err != nil {
 		return nil, err
 	}
 
+	var report *stateReport
+	if t.persistent {
+		if report, err = attachStateReport(cmd); err != nil {
+			return nil, err
+		}
+	}
+
 	combined, err := cmd.CombinedOutput()
+	if report != nil {
+		t.recordState(cmd, report, runCtx.Err() == nil)
+	}
+
 	out, truncated := t.truncateOutput(string(combined))
 
 	if err == nil {

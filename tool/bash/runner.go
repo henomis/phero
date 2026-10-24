@@ -93,13 +93,40 @@ func (t *Tool) commandEnv() []string {
 // newCommand builds the process for command with the tool's runner, and sets
 // what every command gets: the output wait delay and its own process group.
 func (t *Tool) newCommand(ctx context.Context, command string) (*exec.Cmd, error) {
-	cmd, err := t.runner.Command(ctx, command, RunOptions{Dir: t.workingDir, Env: t.commandEnv()})
+	opts := RunOptions{Dir: t.workingDir, Env: t.commandEnv()}
+	if t.persistent {
+		opts.Dir = t.state.dir(t.workingDir)
+	}
+
+	cmd, err := t.runner.Command(ctx, command, opts)
 	if err != nil {
 		return nil, err
+	}
+
+	if t.persistent {
+		cmd.Env = t.state.apply(startEnv(cmd))
 	}
 
 	cmd.WaitDelay = waitDelay
 	setProcessGroup(cmd)
 
 	return cmd, nil
+}
+
+// startEnv returns the environment cmd starts with.
+func startEnv(cmd *exec.Cmd) []string {
+	if cmd.Env != nil {
+		return cmd.Env
+	}
+
+	return os.Environ()
+}
+
+// recordState updates the persistent shell state from the report of cmd,
+// which has exited; completed is false when it was killed.
+func (t *Tool) recordState(cmd *exec.Cmd, report *stateReport, completed bool) {
+	cwd, env, ok := report.read()
+	if ok && completed {
+		t.state.update(cwd, startEnv(cmd), env)
+	}
 }

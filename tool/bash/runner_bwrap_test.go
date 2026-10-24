@@ -131,3 +131,19 @@ func TestBubblewrap_TimeoutKillsSandbox(t *testing.T) {
 		t.Fatal("a sandboxed process survived the timeout")
 	}
 }
+
+func TestBubblewrap_PersistentShell(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.Mkdir(filepath.Join(workspace, "sub"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := newSandboxedTool(t, workspace)
+	tool.persistent = true
+
+	runOK(t, tool, "cd sub && export PHERO_TEST_VAR=1")
+
+	if got := runOK(t, tool, `echo "$PWD $PHERO_TEST_VAR"`); got != filepath.Join(workspace, "sub")+" 1" {
+		t.Fatalf("got %q, want the state carried inside the sandbox", got)
+	}
+}

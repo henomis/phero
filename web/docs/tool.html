@@ -211,6 +211,11 @@ if err := a.AddTool(bashTool.KillTool());   err != nil { panic(err) }</code></pr
         <li><code>WithEnvAllowlist(names...)</code>: pass only these environment variables to commands instead of the
           whole process environment; <code>bash.DefaultEnvAllowlist</code> keeps what common tools need and no secrets</li>
         <li><code>WithEnv(entries...)</code>: add <code>KEY=VALUE</code> entries to every command's environment</li>
+        <li><code>WithPersistentShell()</code>: carry the working directory and exported variables from one command to
+          the next, as in an interactive shell (after <code>cd sub</code>, the next command runs in <code>sub</code>).
+          Each command still runs in its own process; one that exits, times out or runs in the background changes
+          nothing. Without it, every command starts fresh in the working directory, and the tool's description says
+          so to the model.</li>
       </ul>
       <h3>Sandbox (Linux)</h3>
       <p>
