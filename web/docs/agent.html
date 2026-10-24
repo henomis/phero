@@ -333,6 +333,13 @@ a.SetMaxIterations(10)</code></pre>
         The conversation is saved even when the run is cancelled: the save does not inherit the cancellation of the
         run's context, so a turn stopped from inside a tool is still recorded.
       </p>
+
+      <p>
+        By default the turn is saved once, when the run ends. For long runs, <code>a.SetCheckpoint(true)</code> saves
+        the new messages after every iteration that ran tool calls, so a process that crashes loses at most the
+        iteration in progress. An assistant message is always saved with the results of its tool calls, and
+        <code>Run</code> with no input continues from what memory holds.
+      </p>
     </section>
 
     <section>

@@ -51,6 +51,7 @@ type Agent struct {
 
 	compactor       Compactor
 	compactAtTokens int
+	checkpoint      bool
 }
 
 // Result represents the final output of an agent after processing user input and executing any tool calls.
@@ -218,6 +219,22 @@ func (a *Agent) SetMemory(mem memory.Memory) {
 	a.memory = mem
 }
 
+// SetCheckpoint makes the agent save the session to memory after every
+// iteration that ran tool calls, instead of only when the run ends, so a
+// process that crashes in a long run loses at most the iteration in progress.
+// Only the messages added since the previous save are saved; an assistant
+// message is always saved together with the results of its tool calls. The
+// next run continues from what memory holds (Run with no input picks up where
+// the last saved iteration left off).
+//
+// With compaction (SetCompaction), the messages already saved stay in memory
+// as they were, and only the messages added after a compaction are saved.
+//
+// It has no effect on an agent without memory.
+func (a *Agent) SetCheckpoint(enabled bool) {
+	a.checkpoint = enabled
+}
+
 // SetMaxIterations sets a maximum number of iterations for the agent loop.
 //
 // If the limit is reached, Run() returns ErrMaxIterationsReached together with
@@ -357,6 +374,13 @@ func (a *Agent) compactSession(
 	rs.contextTokens = 0
 	rs.promptLen = 0
 
+	// Without checkpoints the run saves the compacted session. With them,
+	// memory already holds what was compacted: only later messages are saved.
+	rs.savedTo = 1
+	if a.checkpoint {
+		rs.savedTo = len(newSession)
+	}
+
 	return newSession, 1, nil
 }
 
@@ -411,6 +435,8 @@ type runState struct {
 	// compactedOnError is set when the session was compacted after a
 	// context-length error, so a second such error in a row ends the run.
 	compactedOnError bool
+	// savedTo is the index of the first session message not saved to memory.
+	savedTo int
 }
 
 // run executes the agent loop, optionally emitting streaming Events.
@@ -439,13 +465,15 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 	)
 
 	defer func() {
-		err = a.finishRun(ctx, rs, session, sessionIndex, iteration, result, err)
+		err = a.finishRun(ctx, rs, session, iteration, result, err)
 	}()
 
 	session, sessionIndex, err = a.prepareSession(ctx, parts)
 	if err != nil {
 		return &Result{}, err
 	}
+
+	rs.savedTo = sessionIndex
 
 	for {
 		if ctx.Err() != nil {
@@ -474,21 +502,55 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 		rs.compactedOnError = false
 		session = iterationResult.session
 
-		if iterationResult.stop != nil {
-			return iterationResult.result, iterationResult.stop
-		}
-
-		// If result is nil, the agent executed tool calls and needs to call the LLM again.
-		if iterationResult.result != nil {
-			return iterationResult.result, nil
+		if done, doneResult, doneErr := a.afterIteration(ctx, rs, iterationResult, sessionIndex); done {
+			return doneResult, doneErr
 		}
 	}
+}
+
+// afterIteration reports whether the run ends after a successful iteration,
+// with its result and error: when a tool stopped the run, when the model
+// answered without tool calls, or when saving a checkpoint failed. Otherwise
+// the agent ran tool calls and calls the LLM again.
+func (a *Agent) afterIteration(
+	ctx context.Context, rs *runState, it agentIteration, sessionIndex int,
+) (bool, *Result, error) {
+	if it.stop != nil {
+		return true, it.result, it.stop
+	}
+
+	if it.result != nil {
+		return true, it.result, nil
+	}
+
+	if err := a.saveCheckpoint(ctx, rs, it.session); err != nil {
+		return true, partialResultFromSession(it.session[sessionIndex:]), err
+	}
+
+	return false, nil, nil
+}
+
+// saveCheckpoint saves the messages added since the previous save, when
+// checkpoints are enabled (SetCheckpoint).
+func (a *Agent) saveCheckpoint(ctx context.Context, rs *runState, session []llm.Message) error {
+	if !a.checkpoint || a.memory == nil {
+		return nil
+	}
+
+	// As at the end of a run, a cancelled run still records its iteration.
+	if err := a.saveSession(context.WithoutCancel(ctx), session, rs.savedTo); err != nil {
+		return fmt.Errorf("%w: %w", ErrSessionSaveFailed, err)
+	}
+
+	rs.savedTo = len(session)
+
+	return nil
 }
 
 // finishRun ends a run: it saves the session to memory, ends the run span and
 // attaches its Summary to result. It returns err joined with any save error.
 func (a *Agent) finishRun(
-	ctx context.Context, rs *runState, session []llm.Message, sessionIndex, iteration int,
+	ctx context.Context, rs *runState, session []llm.Message, iteration int,
 	result *Result, err error,
 ) error {
 	rs.run.StopReason = stopReason(ctx, result, err)
@@ -502,7 +564,7 @@ func (a *Agent) finishRun(
 
 	// A cancelled run still records its turn: saving must not inherit the cancellation.
 	if session != nil {
-		if saveErr := a.saveSession(context.WithoutCancel(ctx), session, sessionIndex); saveErr != nil {
+		if saveErr := a.saveSession(context.WithoutCancel(ctx), session, rs.savedTo); saveErr != nil {
 			saveErr = fmt.Errorf("%w: %w", ErrSessionSaveFailed, saveErr)
 			err = errors.Join(err, saveErr)
 			spanErr = errors.Join(spanErr, saveErr)
