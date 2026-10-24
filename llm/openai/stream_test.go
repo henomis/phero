@@ -172,3 +172,35 @@ func TestExecuteStream_ForwardsReasoningEffort(t *testing.T) {
 		t.Fatalf("reasoning_effort = %v, want %q", payload["reasoning_effort"], "low")
 	}
 }
+
+func TestExecuteStream_KeepsReasoningInFinalMessage(t *testing.T) {
+	srv := sseServer(t,
+		`{"id":"1","object":"chat.completion.chunk","model":"qwen","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"Think"}}]}`,
+		`{"choices":[{"index":0,"delta":{"reasoning_content":"ing."}}]}`,
+		`{"choices":[{"index":0,"delta":{"content":"Answer"}}]}`,
+		`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+	)
+	defer srv.Close()
+
+	c := openai.New("key", openai.WithBaseURL(srv.URL))
+
+	var final llm.StreamChunk
+
+	for chunk, err := range c.ExecuteStream(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))}, nil) {
+		if err != nil {
+			t.Fatalf("ExecuteStream: %v", err)
+		}
+
+		if chunk.Done {
+			final = chunk
+		}
+	}
+
+	if final.Message == nil || final.Message.ReasoningContent() != "Thinking." || final.Message.TextContent() != "Answer" {
+		t.Fatalf("final message = %+v, want reasoning and text", final.Message)
+	}
+
+	if final.Message.Parts[0].Type != llm.ContentTypeReasoning {
+		t.Fatalf("parts = %+v, want the reasoning first", final.Message.Parts)
+	}
+}

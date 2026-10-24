@@ -247,7 +247,16 @@ func messagesToOpenAI(messages []llm.Message) []openai.ChatCompletionMessage {
 			}
 		}
 
-		out = append(out, messageToOpenAI(m))
+		msg := messageToOpenAI(m)
+
+		// An assistant message holding only reasoning, which is not sent, would
+		// go out with no content and no tool call; some servers reject that
+		// (Ollama: "invalid message content type: <nil>").
+		if msg.Role == llm.RoleAssistant && len(msg.ToolCalls) == 0 && msg.Content == "" && len(msg.MultiContent) == 0 {
+			continue
+		}
+
+		out = append(out, msg)
 	}
 
 	if len(toolImages) > 0 {
@@ -395,6 +404,13 @@ func messageFromOpenAI(m openai.ChatCompletionMessage) llm.Message {
 		msg.Parts = parts
 	} else if strings.TrimSpace(m.Content) != "" {
 		msg.Parts = []llm.ContentPart{llm.Text(m.Content)}
+	}
+
+	// OpenAI-compatible servers (DeepSeek, Qwen on vLLM or llama.cpp) return
+	// the model's thinking in reasoning_content. It is kept as a reasoning part,
+	// first as on the other providers; it is not sent back to the server.
+	if strings.TrimSpace(m.ReasoningContent) != "" {
+		msg.Parts = append([]llm.ContentPart{llm.Reasoning(m.ReasoningContent, "")}, msg.Parts...)
 	}
 
 	return msg

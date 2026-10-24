@@ -292,6 +292,11 @@ llmClient := openai.New(
         <li><code>WithBaseURL(url)</code>: override the API base URL (e.g. point at a local proxy)</li>
         <li><code>WithOllamaBaseURL()</code>: shortcut to point at a local Ollama server</li>
       </ul>
+      <p>
+        OpenAI-compatible servers that return the model's thinking in <code>reasoning_content</code> (DeepSeek, Qwen
+        and others on vLLM or llama.cpp) get it as a reasoning part, first in the message, in buffered and streamed
+        calls; read it with <code>Message.ReasoningContent()</code>. It is not sent back to the server.
+      </p>
     </section>
 
     <section>

@@ -87,3 +87,28 @@ func TestMessagesToOpenAI_ToolImagesAtEnd(t *testing.T) {
 		t.Fatalf("out = %+v", out)
 	}
 }
+
+func TestMessageFromOpenAI_KeepsReasoningContent(t *testing.T) {
+	msg := messageFromOpenAI(openai.ChatCompletionMessage{
+		Role: llm.RoleAssistant, Content: "Answer", ReasoningContent: "Thinking.",
+	})
+
+	if msg.ReasoningContent() != "Thinking." || msg.TextContent() != "Answer" || msg.Parts[0].Type != llm.ContentTypeReasoning {
+		t.Fatalf("message = %+v, want the reasoning part first and the text", msg)
+	}
+}
+
+// TestMessagesToOpenAI_SkipsReasoningOnlyAnswer checks that an assistant
+// message with nothing to send but reasoning is left out, rather than sent
+// with no content.
+func TestMessagesToOpenAI_SkipsReasoningOnlyAnswer(t *testing.T) {
+	out := messagesToOpenAI([]llm.Message{
+		llm.UserMessage(llm.Text("q")),
+		llm.AssistantMessage([]llm.ContentPart{llm.Reasoning("Thinking.", "")}),
+		llm.UserMessage(llm.Text("again")),
+	})
+
+	if len(out) != 2 || out[0].Role != llm.RoleUser || out[1].Role != llm.RoleUser {
+		t.Fatalf("out = %+v, want the two user messages", out)
+	}
+}
