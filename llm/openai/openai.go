@@ -221,13 +221,67 @@ func (s jsonSchema) MarshalJSON() ([]byte, error) {
 }
 
 // messagesToOpenAI converts Phero messages to go-openai wire types.
+//
+// Chat Completions rejects images in tool messages, and every tool message
+// must follow the assistant message that made the calls. So the images of a
+// run of tool messages are moved into one user message sent right after the
+// run, and each tool message keeps only its text.
 func messagesToOpenAI(messages []llm.Message) []openai.ChatCompletionMessage {
 	out := make([]openai.ChatCompletionMessage, 0, len(messages))
+
+	var toolImages []llm.ContentPart
+
 	for _, m := range messages {
+		if m.Role != llm.RoleTool && len(toolImages) > 0 {
+			out = append(out, messageToOpenAI(llm.UserMessage(toolImages...)))
+			toolImages = nil
+		}
+
+		if m.Role == llm.RoleTool {
+			var images []llm.ContentPart
+
+			m, images = splitToolImages(m)
+			if len(images) > 0 {
+				toolImages = append(toolImages, llm.Text("Images returned by tool call "+m.ToolCallID+":"))
+				toolImages = append(toolImages, images...)
+			}
+		}
+
 		out = append(out, messageToOpenAI(m))
 	}
 
+	if len(toolImages) > 0 {
+		out = append(out, messageToOpenAI(llm.UserMessage(toolImages...)))
+	}
+
 	return out
+}
+
+// splitToolImages returns the tool message m without its image parts, and
+// those parts. A tool message left with no text says that its images follow.
+func splitToolImages(m llm.Message) (llm.Message, []llm.ContentPart) {
+	var text, images []llm.ContentPart
+
+	for _, p := range m.Parts {
+		switch p.Type {
+		case llm.ContentTypeImageURL, llm.ContentTypeImageBase64:
+			images = append(images, p)
+		case llm.ContentTypeText, llm.ContentTypeReasoning, llm.ContentTypeRedactedReasoning:
+			text = append(text, p)
+		}
+	}
+
+	if len(images) == 0 {
+		return m, nil
+	}
+
+	if strings.TrimSpace(llm.TextContent(text...)) == "" {
+		text = []llm.ContentPart{llm.Text("The tool returned images; they follow in the next message.")}
+	}
+
+	m.Parts = text
+
+	return m, images
 }
 
 // messageToOpenAI converts a single Phero Message to a go-openai ChatCompletionMessage.

@@ -364,6 +364,13 @@ fmt.Println(result.TextContent())</code></pre>
       <p>
         See <a href="https://github.com/henomis/phero/tree/main/examples/multimodal">examples/multimodal</a> for a complete working example.
       </p>
+
+      <p>
+        A tool can return images too, by returning <code>[]llm.ContentPart</code> (a screenshot, for example).
+        Anthropic and Gemini accept images in tool results directly. The OpenAI Chat Completions API does not, so
+        <code>llm/openai</code> keeps the text in the tool message and sends the images in a user message right
+        after the tool results.
+      </p>
     </section>
 
     <section>
