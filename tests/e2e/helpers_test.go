@@ -72,7 +72,8 @@ func anthropicKey() string     { return envOr("ANTHROPIC_AUTH_TOKEN", defaultAnt
 func anthropicBaseURL() string { return envOr("ANTHROPIC_BASE_URL", defaultAnthropicURL) }
 func anthropicModel() string   { return envOr("ANTHROPIC_MODEL", defaultAnthropicModel) }
 
-func embedModel() string { return envOr("EMBEDDING_MODEL", defaultEmbedModel) }
+func embedModel() string   { return envOr("EMBEDDING_MODEL", defaultEmbedModel) }
+func embedBaseURL() string { return envOr("EMBEDDING_BASE_URL", openAIBaseURL()) }
 
 func postgresDSN() string { return envOr("POSTGRES_DSN", defaultPostgresDSN) }
 
@@ -117,7 +118,7 @@ func buildAnthropicLLM() *llmanthropic.Client {
 func buildEmbedder() *embeddingOpenAI.Client {
 	return embeddingOpenAI.New(
 		openAIKey(),
-		embeddingOpenAI.WithBaseURL(openAIBaseURL()),
+		embeddingOpenAI.WithBaseURL(embedBaseURL()),
 		embeddingOpenAI.WithModel(embedModel()),
 	)
 }
