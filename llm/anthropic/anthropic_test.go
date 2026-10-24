@@ -97,6 +97,30 @@ func TestNew_WithMaxTokensOption(t *testing.T) {
 	}
 }
 
+func TestNew_DefaultMaxTokensIsSent(t *testing.T) {
+	var body []byte
+
+	srv := capturingServer(t, &body)
+	defer srv.Close()
+
+	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
+	if _, err := c.Execute(context.Background(), []llm.Message{llm.UserMessage(llm.Text("hi"))}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var req struct {
+		MaxTokens int64 `json:"max_tokens"`
+		Stream    bool  `json:"stream"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+
+	if req.MaxTokens != anthropic.DefaultMaxTokens || req.Stream {
+		t.Fatalf("request = %+v, want buffered with max_tokens %d", req, anthropic.DefaultMaxTokens)
+	}
+}
+
 // -- Execute tests -----------------------------------------------------------
 
 func TestExecute_TextResponse(t *testing.T) {

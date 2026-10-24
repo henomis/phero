@@ -31,6 +31,9 @@ import (
 const maxToolNameLength = 64
 
 // DefaultMaxIterations is the iteration limit of an agent created by New.
+// It suits short tool-using tasks; a long-running agent, such as a coding
+// agent that reads, edits and tests over many turns, needs a higher limit set
+// with SetMaxIterations.
 const DefaultMaxIterations = 25
 
 // Agent runs a chat loop using an llm.LLM, optionally with tools and memory.
@@ -217,7 +220,9 @@ func (a *Agent) SetMemory(mem memory.Memory) {
 // If the limit is reached, Run() returns ErrMaxIterationsReached together with
 // a non-nil result holding any partial text the model produced so far and the
 // run's Summary. The default is DefaultMaxIterations; zero or a negative value
-// removes the limit.
+// removes the limit. An agent that works for many turns, such as a coding
+// agent, should raise it (200 or more) or remove it and bound the run with a
+// context deadline instead.
 func (a *Agent) SetMaxIterations(maxIterations int) {
 	a.maxIterations = maxIterations
 }

@@ -148,6 +148,11 @@ llmClient := anthropic.New(
       <p>
         If you pass an empty API key, the underlying Anthropic SDK will fall back to its environment variable configuration.
       </p>
+
+      <p>
+        Without <code>WithMaxTokens</code>, requests use <code>anthropic.DefaultMaxTokens</code> (16384), enough for
+        long answers such as a file written in one tool call.
+      </p>
       <p>Available options:</p>
       <ul>
         <li><code>WithModel(m)</code>: Anthropic model name (e.g. <code>"claude-sonnet-4-6"</code>)</li>

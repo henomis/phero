@@ -39,8 +39,11 @@ const (
 	// too and will be mapped via OpenAIModelToAnthropic.
 	DefaultModel = "claude-sonnet-4-6"
 
-	// DefaultMaxTokens is the default max_tokens value used for requests.
-	DefaultMaxTokens int64 = 2048
+	// DefaultMaxTokens is the default max_tokens value used for requests. It
+	// leaves room for long answers, such as a file written by a coding agent's
+	// tool call, while staying low enough for a buffered (non-streaming)
+	// request.
+	DefaultMaxTokens int64 = 16384
 
 	// DefaultTemperature is the default sampling temperature used for requests.
 	//

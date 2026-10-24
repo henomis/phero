@@ -341,7 +341,9 @@ a.SetMaxIterations(10)</code></pre>
         Every agent has an iteration limit of <code>agent.DefaultMaxIterations</code> (25 LLM calls per run). When it
         is reached, <code>Run</code> returns <code>ErrMaxIterationsReached</code> together with a non-nil result
         holding any text the model produced so far and the run's <code>Summary</code>. Change the limit with
-        <code>SetMaxIterations(n)</code>; <code>SetMaxIterations(0)</code> removes it.
+        <code>SetMaxIterations(n)</code>; <code>SetMaxIterations(0)</code> removes it. 25 suits short tool-using
+        tasks. An agent that works over many turns, such as a coding agent that reads, edits and runs tests,
+        should raise it (200 or more), or remove it and bound the run with a context deadline.
       </p>
       <p>
         A tool stops the run on purpose, for example to wait for a human answer, by returning
