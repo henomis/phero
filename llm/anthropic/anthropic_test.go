@@ -979,3 +979,77 @@ func TestExecute_ToolChoiceWithoutTools_IsOmitted(t *testing.T) {
 		})
 	}
 }
+
+// TestExecute_WithPromptCacheTTL_MarksConversationEnd checks the breakpoints
+// of a tool-using conversation with a summary: last tool, first and last
+// system blocks and the last block of the last message, all with the TTL.
+func TestExecute_WithPromptCacheTTL_MarksConversationEnd(t *testing.T) {
+	var body []byte
+
+	srv := capturingServer(t, &body)
+	defer srv.Close()
+
+	tool, err := llm.NewTool("t", "desc", func(_ context.Context, _ *struct{}) (string, error) { return "", nil })
+	if err != nil {
+		t.Fatalf("NewTool: %v", err)
+	}
+
+	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL), anthropic.WithPromptCacheTTL(anthropic.CacheTTL1h))
+
+	msgs := []llm.Message{
+		llm.SystemMessage("you are a coding agent"),
+		llm.SystemMessage("Summary of previous conversation: ..."),
+		llm.UserMessage(llm.Text("fix the test")),
+		llm.AssistantMessage(nil, llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "t", Arguments: "{}"}}),
+		llm.ToolResultMessage("c1", llm.Text("FAIL")),
+	}
+	if _, execErr := c.Execute(context.Background(), msgs, llm.WithTools(tool)); execErr != nil {
+		t.Fatalf("Execute: %v", execErr)
+	}
+
+	type cacheControl struct {
+		Type string `json:"type"`
+		TTL  string `json:"ttl"`
+	}
+
+	var req struct {
+		System []struct {
+			CacheControl *cacheControl `json:"cache_control"`
+		} `json:"system"`
+		Tools []struct {
+			CacheControl *cacheControl `json:"cache_control"`
+		} `json:"tools"`
+		Messages []struct {
+			Content []struct {
+				Type         string        `json:"type"`
+				CacheControl *cacheControl `json:"cache_control"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	if unmarshalErr := json.Unmarshal(body, &req); unmarshalErr != nil {
+		t.Fatalf("unmarshal request: %v", unmarshalErr)
+	}
+
+	marked := func(cc *cacheControl) bool { return cc != nil && cc.Type == "ephemeral" && cc.TTL == "1h" }
+
+	if len(req.System) != 2 || !marked(req.System[0].CacheControl) || !marked(req.System[1].CacheControl) {
+		t.Fatalf("system blocks not both marked: %s", body)
+	}
+
+	if len(req.Tools) != 1 || !marked(req.Tools[0].CacheControl) {
+		t.Fatalf("last tool not marked: %s", body)
+	}
+
+	last := req.Messages[len(req.Messages)-1].Content
+	if len(last) == 0 || last[len(last)-1].Type != "tool_result" || !marked(last[len(last)-1].CacheControl) {
+		t.Fatalf("last message block not marked: %s", body)
+	}
+
+	for _, m := range req.Messages[:len(req.Messages)-1] {
+		for _, b := range m.Content {
+			if b.CacheControl != nil {
+				t.Fatalf("earlier block marked: %s", body)
+			}
+		}
+	}
+}

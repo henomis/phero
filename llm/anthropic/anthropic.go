@@ -84,6 +84,7 @@ type Client struct {
 	temperatureSet   bool
 	maxTokens        int64
 	promptCaching    bool
+	cacheTTL         CacheTTL
 	thinkingbudget   int64
 	thinkingAdaptive bool
 	effort           Effort
@@ -269,7 +270,7 @@ func (c *Client) buildParams(messages []llm.Message, opts []llm.CallOption) (ant
 	}
 
 	if c.promptCaching {
-		applyPromptCaching(&params)
+		applyPromptCaching(&params, c.cacheTTL)
 	}
 
 	return params, nil
@@ -312,18 +313,42 @@ func anthropicOutputSchema(f *llm.ResponseFormat) map[string]any {
 	return out
 }
 
-// applyPromptCaching marks the high-value, stable prefix of the request as
-// cacheable: the (last) system block and the last tool definition. Anthropic
-// caches everything up to and including a cache_control breakpoint, so marking
-// these two points covers the system prompt and the full tool list.
-func applyPromptCaching(params *anthropicapi.MessageNewParams) {
-	if n := len(params.System); n > 0 {
-		params.System[n-1].CacheControl = anthropicapi.NewCacheControlEphemeralParam()
+// applyPromptCaching places cache_control breakpoints, at most four as the
+// API allows. Anthropic caches the request prefix (tools, then system, then
+// messages) up to and including a breakpoint:
+//   - the last tool definition, which caches the tool list;
+//   - the first system block (the agent's stable system prompt) and the last
+//     one, when there are several (summaries that change more often);
+//   - the last content block of the last message. This one moves forward with
+//     every request, so each call of a long tool-using conversation reads the
+//     previous call's whole prompt from the cache and pays full price only for
+//     the new turn.
+func applyPromptCaching(params *anthropicapi.MessageNewParams, ttl CacheTTL) {
+	cc := anthropicapi.NewCacheControlEphemeralParam()
+	if ttl != "" {
+		cc.TTL = anthropicapi.CacheControlEphemeralTTL(ttl)
 	}
 
 	if n := len(params.Tools); n > 0 {
 		if tool := params.Tools[n-1].OfTool; tool != nil {
-			tool.CacheControl = anthropicapi.NewCacheControlEphemeralParam()
+			tool.CacheControl = cc
+		}
+	}
+
+	if n := len(params.System); n > 0 {
+		params.System[0].CacheControl = cc
+		params.System[n-1].CacheControl = cc
+	}
+
+	if n := len(params.Messages); n > 0 {
+		blocks := params.Messages[n-1].Content
+		for i := len(blocks) - 1; i >= 0; i-- {
+			// Thinking blocks cannot carry a breakpoint; the block before can.
+			if c := blocks[i].GetCacheControl(); c != nil {
+				*c = cc
+
+				break
+			}
 		}
 	}
 }
@@ -479,11 +504,15 @@ func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam,
 
 	flush()
 
-	joined := strings.TrimSpace(strings.Join(systemParts, "\n\n"))
+	// One block per system message, so a cache breakpoint can sit after the
+	// stable system prompt, before a summary that changes more often.
+	system := make([]anthropicapi.TextBlockParam, 0, len(systemParts))
+	for _, text := range systemParts {
+		system = append(system, anthropicapi.TextBlockParam{Text: strings.TrimSpace(text)})
+	}
 
-	var system []anthropicapi.TextBlockParam
-	if joined != "" {
-		system = []anthropicapi.TextBlockParam{{Text: joined}}
+	if len(system) == 0 {
+		system = nil
 	}
 
 	return system, out, nil
@@ -728,13 +757,38 @@ func WithTemperature(temp float32) Option {
 
 // WithPromptCaching enables Anthropic prompt caching.
 //
-// When enabled, the client marks the system prompt and the tool list as cacheable
-// (an ephemeral cache_control breakpoint), so repeated requests that share that
-// stable prefix are billed at the much cheaper cache-read rate. Cache read/write
-// token counts are reported on Result.Usage (CacheReadTokens / CacheWriteTokens).
+// When enabled, the client marks the tool list, the system prompt and the end
+// of the conversation as cacheable (ephemeral cache_control breakpoints), so
+// repeated requests that share a prefix are billed at the much cheaper
+// cache-read rate. The conversation breakpoint moves forward with every
+// request: each call of a long agent run reads the previous call's prompt from
+// the cache. Cache read/write token counts are reported on Result.Usage
+// (CacheReadTokens / CacheWriteTokens).
 func WithPromptCaching() Option {
 	return func(c *Client) {
 		c.promptCaching = true
+	}
+}
+
+// CacheTTL is how long Anthropic keeps a prompt cache entry.
+type CacheTTL string
+
+const (
+	// CacheTTL5m keeps cache entries for 5 minutes, refreshed on every hit.
+	// It is the API default.
+	CacheTTL5m CacheTTL = "5m"
+	// CacheTTL1h keeps cache entries for an hour. Writing one costs more than
+	// a 5-minute entry; it pays off when calls are minutes apart, for example
+	// an agent waiting on a human or a slow tool.
+	CacheTTL1h CacheTTL = "1h"
+)
+
+// WithPromptCacheTTL enables prompt caching, as WithPromptCaching does, with
+// cache entries kept for ttl.
+func WithPromptCacheTTL(ttl CacheTTL) Option {
+	return func(c *Client) {
+		c.promptCaching = true
+		c.cacheTTL = ttl
 	}
 }
 
