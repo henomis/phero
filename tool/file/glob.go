@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -35,23 +34,28 @@ type GlobInput struct {
 // GlobOutput is the output schema for the glob tool.
 type GlobOutput struct {
 	Paths []string `json:"paths"`
+	// Truncated reports that more paths matched than the tool returns.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // GlobTool lists files matching a glob pattern.
 type GlobTool struct {
 	tool       *llm.Tool
 	workingDir string
+	maxResults int
+	noIgnore   bool
 }
 
 // NewGlobTool creates a new glob tool.
 func NewGlobTool(opts ...Option) (*GlobTool, error) {
 	o := applyOptions(opts...)
 
-	g := &GlobTool{workingDir: o.workingDir}
+	g := &GlobTool{workingDir: o.workingDir, maxResults: o.maxResults, noIgnore: o.noIgnore}
 
 	tool, err := llm.NewTool(
 		"glob",
-		"Fast file pattern matching. Returns paths sorted by modification time (most recent first).",
+		"Fast file pattern matching. Returns paths sorted by modification time (most recent first). "+
+			"Files ignored by .gitignore, and .git and node_modules, are skipped.",
 		g.glob,
 	)
 	if err != nil {
@@ -94,15 +98,7 @@ func (g *GlobTool) glob(_ context.Context, input *GlobInput) (*GlobOutput, error
 
 	entries := make([]globEntry, 0)
 
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
-		}
-
-		if d.IsDir() {
-			return nil
-		}
-
+	err = walkSearch(root, g.workingDir, g.noIgnore, func(path string, d fs.DirEntry) error {
 		rel, relErr := normalizeRelativePath(root, path)
 		if relErr != nil {
 			return nil
@@ -131,10 +127,15 @@ func (g *GlobTool) glob(_ context.Context, input *GlobInput) (*GlobOutput, error
 		return entries[i].modTime.After(entries[j].modTime)
 	})
 
+	truncated := g.maxResults > 0 && len(entries) > g.maxResults
+	if truncated {
+		entries = entries[:g.maxResults]
+	}
+
 	paths := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		paths = append(paths, entry.path)
 	}
 
-	return &GlobOutput{Paths: paths}, nil
+	return &GlobOutput{Paths: paths, Truncated: truncated}, nil
 }

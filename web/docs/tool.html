@@ -133,7 +133,19 @@ if err := a.AddTool(readTool.Tool()); err != nil {
         <li><code>WithWorkingDirectory(dir)</code>: confine all operations to a directory; paths are validated against it to prevent traversal</li>
         <li><code>WithMaxFileSize(bytes)</code>: limit the file size the read tool will return (0 = unlimited)</li>
         <li><code>WithNoOverwrite()</code>: configure write to return <code>ErrFileExists</code> when the target already exists</li>
+        <li><code>WithMaxResults(n)</code>: how many paths <code>glob</code>, and entries <code>grep</code>, return at most
+          (default <code>file.DefaultMaxResults</code>, 1000; 0 removes the cap). A cut result sets <code>Truncated</code></li>
+        <li><code>WithNoIgnore()</code>: search everything, including what <code>.gitignore</code> ignores and
+          <code>node_modules</code></li>
       </ul>
+
+      <p>
+        <code>glob</code> and <code>grep</code> are built for real repositories. They skip <code>.git</code>,
+        <code>.hg</code>, <code>.svn</code> and <code>node_modules</code>, and what the <code>.gitignore</code> files
+        ignore, from the repository root down (negation, directory-only and anchored patterns included).
+        <code>grep</code> skips binary files and clips very long lines, such as minified code. With a working
+        directory, a symlinked file whose target is outside it is skipped.
+      </p>
 
       <p>Using middleware to require user confirmation before a write:</p>
       <pre><code class="language-go">writeTool, err := file.NewWriteTool(file.WithWorkingDirectory("/workspace"))

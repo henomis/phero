@@ -52,23 +52,29 @@ type GrepInput struct {
 // GrepOutput is the output schema for the grep tool.
 type GrepOutput struct {
 	Output []string `json:"output"`
+	// Truncated reports that the output was cut at head_limit or at the
+	// tool's maximum number of results.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // GrepTool searches file contents using regular expressions.
 type GrepTool struct {
 	tool       *llm.Tool
 	workingDir string
+	maxResults int
+	noIgnore   bool
 }
 
 // NewGrepTool creates a new grep tool.
 func NewGrepTool(opts ...Option) (*GrepTool, error) {
 	o := applyOptions(opts...)
 
-	g := &GrepTool{workingDir: o.workingDir}
+	g := &GrepTool{workingDir: o.workingDir, maxResults: o.maxResults, noIgnore: o.noIgnore}
 
 	tool, err := llm.NewTool(
 		"grep",
-		"Search file contents using regular expressions.",
+		"Search file contents using regular expressions. Binary files, files ignored by .gitignore, "+
+			"and .git and node_modules, are skipped.",
 		g.grep,
 	)
 	if err != nil {
@@ -138,15 +144,7 @@ func (g *GrepTool) grep(_ context.Context, input *GrepInput) (*GrepOutput, error
 
 	files := make([]string, 0)
 
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
-		}
-
-		if d.IsDir() {
-			return nil
-		}
-
+	err = walkSearch(root, g.workingDir, g.noIgnore, func(path string, _ fs.DirEntry) error {
 		if !matchType(path, input.Type) {
 			return nil
 		}
@@ -172,11 +170,16 @@ func (g *GrepTool) grep(_ context.Context, input *GrepInput) (*GrepOutput, error
 
 	sort.Strings(files)
 
+	limit := g.maxResults
+	if input.HeadLimit > 0 {
+		limit = input.HeadLimit
+	}
+
 	out := make([]string, 0)
 
 	for _, path := range files {
 		contentBytes, readErr := os.ReadFile(path) //nolint:gosec // path comes from glob results within the working dir
-		if readErr != nil {
+		if readErr != nil || isBinary(contentBytes) {
 			continue
 		}
 
@@ -197,14 +200,9 @@ func (g *GrepTool) grep(_ context.Context, input *GrepInput) (*GrepOutput, error
 			out = append(out, matches...)
 		}
 
-		if input.HeadLimit > 0 && len(out) >= input.HeadLimit {
-			out = out[:input.HeadLimit]
-			return &GrepOutput{Output: out}, nil
+		if limit > 0 && len(out) > limit {
+			return &GrepOutput{Output: out[:limit], Truncated: true}, nil
 		}
-	}
-
-	if input.HeadLimit > 0 && len(out) > input.HeadLimit {
-		out = out[:input.HeadLimit]
 	}
 
 	return &GrepOutput{Output: out}, nil
@@ -306,12 +304,27 @@ func grepContentMatches(
 
 	out := make([]string, 0, len(indexes))
 	for _, idx := range indexes {
+		line := clipLine(lines[idx])
 		if lineNumbers {
-			out = append(out, fmt.Sprintf("%s:%d:%s", path, idx+1, lines[idx]))
+			out = append(out, fmt.Sprintf("%s:%d:%s", path, idx+1, line))
 		} else {
-			out = append(out, fmt.Sprintf("%s:%s", path, lines[idx]))
+			out = append(out, fmt.Sprintf("%s:%s", path, line))
 		}
 	}
 
 	return out
+}
+
+// maxLineRunes caps the length of a line grep returns: a minified file holds
+// its whole content on one line.
+const maxLineRunes = 500
+
+// clipLine cuts line to maxLineRunes runes, marking the cut.
+func clipLine(line string) string {
+	runes := []rune(line)
+	if len(runes) <= maxLineRunes {
+		return line
+	}
+
+	return string(runes[:maxLineRunes]) + " [...]"
 }

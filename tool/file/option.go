@@ -18,6 +18,8 @@ type toolOptions struct {
 	workingDir  string
 	maxFileSize int64
 	noOverwrite bool
+	maxResults  int
+	noIgnore    bool
 }
 
 // Option configures fs tools.
@@ -45,8 +47,26 @@ func WithNoOverwrite() Option {
 	}
 }
 
+// WithMaxResults sets how many paths glob, and entries grep, return at most;
+// a result cut short says so with Truncated. The default is
+// DefaultMaxResults; a value of 0 or less removes the cap.
+func WithMaxResults(n int) Option {
+	return func(o *toolOptions) {
+		o.maxResults = n
+	}
+}
+
+// WithNoIgnore makes glob and grep search everything under their root:
+// .gitignore files and the node_modules, .hg and .svn directories are no
+// longer skipped. .git is always skipped.
+func WithNoIgnore() Option {
+	return func(o *toolOptions) {
+		o.noIgnore = true
+	}
+}
+
 func applyOptions(opts ...Option) *toolOptions {
-	o := &toolOptions{}
+	o := &toolOptions{maxResults: DefaultMaxResults}
 	for _, opt := range opts {
 		opt(o)
 	}
