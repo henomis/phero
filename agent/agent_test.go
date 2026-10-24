@@ -1148,3 +1148,30 @@ func TestRun_Memory_EmptyAnswerNotReplayed(t *testing.T) {
 		}
 	}
 }
+
+func TestRun_ToolSeesItsCallInContext(t *testing.T) {
+	var seen llm.ToolCall
+
+	tool := mustTool(t, "probe", func(ctx context.Context, _ *struct{}) (string, error) {
+		seen, _ = llm.ToolCallFromContext(ctx)
+		return "ok", nil
+	})
+
+	stub := &stubLLM{
+		responses: []*llm.Result{toolCallResult("probe", "call-42", "{}"), textResult("done")},
+		errs:      []error{nil, nil},
+	}
+
+	a := mustNew(t, stub, "agent", "desc")
+	if err := a.AddTool(tool); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := a.Run(context.Background(), llm.Text("go")); err != nil {
+		t.Fatal(err)
+	}
+
+	if seen.ID != "call-42" || seen.Function.Name != "probe" {
+		t.Fatalf("tool call in context = %+v", seen)
+	}
+}

@@ -35,6 +35,25 @@ type ToolHandler func(ctx context.Context, arguments string) (any, error)
 // Middleware order is preserved: if you call tool.Use(m1, m2), m1 runs before m2.
 type ToolMiddleware func(tool *Tool, next ToolHandler) ToolHandler
 
+// toolCallKey is the context key of the tool call a handler runs for.
+type toolCallKey struct{}
+
+// ContextWithToolCall returns ctx carrying call, the model's tool call a tool
+// handler is about to run for. The agent sets it before running each tool, so
+// handlers and tool middlewares can read the call's ID and arguments with
+// ToolCallFromContext.
+func ContextWithToolCall(ctx context.Context, call ToolCall) context.Context {
+	return context.WithValue(ctx, toolCallKey{}, call)
+}
+
+// ToolCallFromContext returns the tool call ctx carries, set with
+// ContextWithToolCall, and whether it carries one.
+func ToolCallFromContext(ctx context.Context) (ToolCall, bool) {
+	call, ok := ctx.Value(toolCallKey{}).(ToolCall)
+
+	return call, ok
+}
+
 // Tool is a Tool that wraps a function.
 type Tool struct {
 	// The name of the tool, as shown to the LLM. Generally the name of the function.

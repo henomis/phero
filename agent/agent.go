@@ -1007,7 +1007,7 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall) (parts []l
 		}
 	}()
 
-	result, err := tool.Handle(ctx, tc.Function.Arguments)
+	result, err := tool.Handle(llm.ContextWithToolCall(ctx, tc), tc.Function.Arguments)
 	if err != nil {
 		return nil, &ToolExecutionError{Name: tc.Function.Name, Err: err}
 	}
