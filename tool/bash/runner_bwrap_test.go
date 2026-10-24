@@ -201,3 +201,23 @@ func TestBubblewrap_HomeIsPrivateAndWritable(t *testing.T) {
 		t.Fatalf("got %q, want an empty, writable home", got)
 	}
 }
+
+func TestBubblewrap_InnerMountWins(t *testing.T) {
+	workspace := t.TempDir()
+	for _, dir := range []string{".git", "ro/cache"} {
+		if err := os.MkdirAll(filepath.Join(workspace, dir), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// A read-only path inside the workspace, and a writable path inside it.
+	tool := newSandboxedTool(t, workspace,
+		WithReadOnlyPaths(filepath.Join(workspace, ".git"), filepath.Join(workspace, "ro")),
+		WithWritablePaths(filepath.Join(workspace, "ro", "cache")),
+	)
+
+	got := runOK(t, tool, "(echo x > .git/config) 2>/dev/null || echo git-ro; (echo x > ro/f) 2>/dev/null || echo ro-ro; echo x > ro/cache/f && echo cache-rw")
+	if got != "git-ro\nro-ro\ncache-rw" {
+		t.Fatalf("got %q, want the innermost mount to decide", got)
+	}
+}

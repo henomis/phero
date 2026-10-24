@@ -260,6 +260,7 @@ if err := a.AddTool(bashTool.KillTool());   err != nil { panic(err) }</code></pr
       <pre><code class="language-go">runner, err := bash.NewBubblewrapRunner(repoDir,
     bash.WithWritablePaths(goBuildCache, goModCache), // tools that write outside the workspace
     bash.WithReadOnlyPaths(toolchainDir),              // tools installed outside the system directories
+    bash.WithReadOnlyPaths(repoDir+"/.git"),           // inside the workspace: the most specific mount wins
     // bash.WithNetwork(true),                         // only if commands need it
 )
 if err != nil { panic(err) } // bash.ErrBubblewrapNotFound when bwrap is not installed

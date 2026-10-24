@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -50,6 +51,12 @@ type BubblewrapRunner struct {
 	network   bool
 }
 
+// bwrap mount flags.
+const (
+	bwrapBind   = "--bind"
+	bwrapROBind = "--ro-bind"
+)
+
 // SystemPaths returns the host directories a BubblewrapRunner mounts
 // read-only, when they exist. A path that is a symlink, such as /bin on
 // merged-/usr systems, is recreated as the same symlink.
@@ -75,6 +82,8 @@ func WithWritablePaths(paths ...string) BubblewrapOption {
 // WithReadOnlyPaths mounts more host paths read-only inside the sandbox, such
 // as a toolchain installed under $HOME. Relative paths are made absolute.
 // Unix sockets under them can be reached: mount no directory that holds one.
+// A path inside the workspace or a writable path stays read-only, such as the
+// workspace's .git: the most specific mount decides.
 func WithReadOnlyPaths(paths ...string) BubblewrapOption {
 	return func(r *BubblewrapRunner) { r.readOnly = append(r.readOnly, paths...) }
 }
@@ -137,17 +146,7 @@ func (r *BubblewrapRunner) Command(ctx context.Context, command string, opts Run
 		args = append(args, resolvConfMount()...)
 	}
 
-	// Later mounts go over earlier ones: the workspace and the extra paths may
-	// lie under $HOME or /tmp.
-	for _, p := range r.readOnly {
-		args = append(args, "--ro-bind", p, p)
-	}
-
-	args = append(args, "--bind", r.workspace, r.workspace)
-
-	for _, p := range r.writable {
-		args = append(args, "--bind", p, p)
-	}
+	args = append(args, r.binds()...)
 
 	args = append(args, "--unshare-all")
 	if r.network {
@@ -165,6 +164,37 @@ func (r *BubblewrapRunner) Command(ctx context.Context, command string, opts Run
 	cmd.Env = env
 
 	return cmd, nil
+}
+
+// binds returns the bwrap arguments that mount the workspace and the extra
+// paths. A later mount covers an earlier one, and these paths may lie under
+// $HOME, /tmp or one another, so they are mounted shallowest first: the most
+// specific mount decides, as a read-only .git inside the workspace. For the
+// same path, read-only wins.
+func (r *BubblewrapRunner) binds() []string {
+	type bind struct{ flag, path string }
+
+	binds := make([]bind, 0, 1+len(r.writable)+len(r.readOnly))
+	binds = append(binds, bind{bwrapBind, r.workspace})
+
+	for _, p := range r.writable {
+		binds = append(binds, bind{bwrapBind, p})
+	}
+
+	for _, p := range r.readOnly {
+		binds = append(binds, bind{bwrapROBind, p})
+	}
+
+	depth := func(p string) int { return strings.Count(filepath.Clean(p), string(filepath.Separator)) }
+
+	slices.SortStableFunc(binds, func(a, b bind) int { return depth(a.path) - depth(b.path) })
+
+	args := make([]string, 0, 3*len(binds)) //nolint:mnd // flag, source, destination
+	for _, b := range binds {
+		args = append(args, b.flag, b.path, b.path)
+	}
+
+	return args
 }
 
 // systemMounts returns the bwrap arguments that mount SystemPaths read-only.
@@ -185,7 +215,7 @@ func systemMounts() []string {
 			continue
 		}
 
-		args = append(args, "--ro-bind", p, p)
+		args = append(args, bwrapROBind, p, p)
 	}
 
 	return args
@@ -200,5 +230,5 @@ func resolvConfMount() []string {
 		return nil
 	}
 
-	return []string{"--ro-bind", target, target}
+	return []string{bwrapROBind, target, target}
 }
