@@ -54,8 +54,9 @@ type rule struct {
 	subject  *regexp.Regexp // nil matches every call of the tool
 }
 
-// parseRule parses "name" or "name(pattern)".
-func parseRule(spec string, decision Decision) (rule, error) {
+// parseRule parses "name" or "name(pattern)". resolve rewrites the pattern of
+// a rule for the named tool before it is compiled.
+func parseRule(spec string, decision Decision, resolve func(tool, pattern string) string) (rule, error) {
 	spec = strings.TrimSpace(spec)
 	name, pattern, hasPattern := strings.Cut(spec, "(")
 
@@ -77,7 +78,7 @@ func parseRule(spec string, decision Decision) (rule, error) {
 	r := rule{spec: spec, decision: decision, tool: compileWildcard("(?i)", name)}
 	if hasPattern {
 		// "git:*" is the older prefix form of "git*".
-		r.subject = compileWildcard("", strings.TrimSuffix(pattern, ":*")+suffixWildcard(pattern))
+		r.subject = compileWildcard("", resolve(name, strings.TrimSuffix(pattern, ":*")+suffixWildcard(pattern)))
 	}
 
 	return r, nil

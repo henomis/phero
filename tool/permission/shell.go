@@ -14,20 +14,33 @@
 
 package permission
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // shellOperators separate the commands of a shell command line. Longer
 // operators come first so "&&" is not read as two "&".
 var shellOperators = []string{"&&", "||", ";", "|", "&", "\n"}
 
+// harmlessRedirects write no file: duplicating or closing a descriptor
+// ("2>&1", ">&-") and discarding output (">/dev/null", "&>/dev/null").
+var harmlessRedirects = regexp.MustCompile(`[0-9]*>&([0-9]+|-)|(&|[0-9]*)>>?[ \t]*/dev/null\b`)
+
 // splitShell returns the commands of a shell command line, split on its
 // operators. It reports false when the line runs commands it cannot see
-// through: command or process substitution.
+// through (command or process substitution), or redirects output to a file:
+// "cat a > ~/.bashrc" writes whatever an allowed cat prints.
 func splitShell(line string) ([]string, bool) {
 	for _, sub := range []string{"$(", "`", "<(", ">("} {
 		if strings.Contains(line, sub) {
 			return nil, false
 		}
+	}
+
+	line = harmlessRedirects.ReplaceAllString(line, " ")
+	if strings.Contains(line, ">") {
+		return nil, false
 	}
 
 	parts := []string{line}

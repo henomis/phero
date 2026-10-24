@@ -17,6 +17,9 @@ package permission
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -44,6 +47,14 @@ var defaultSubjects = map[string]string{
 	"glob":       argPath,
 	"grep":       argPath,
 	"web_fetch":  "url",
+}
+
+// isPathTool reports whether tool is a built-in tool whose subject is a file
+// path: its subjects and rule patterns are cleaned, made absolute against the
+// working directory and resolved through symlinks before they are matched.
+func isPathTool(tool string) bool {
+	arg := defaultSubjects[tool]
+	return arg == argFilePath || arg == argPath
 }
 
 // Answer is a human's answer to a permission question.
@@ -77,13 +88,21 @@ type Asker func(ctx context.Context, req Request) (Answer, error)
 // Policy decides whether tool calls may run. Install it on tools with Apply.
 // It is safe for concurrent use.
 type Policy struct {
-	rules    []rule
-	fallback Decision
-	asker    Asker
-	args     map[string]string // the subject argument of each tool
+	rules      []rule
+	specs      []pendingRule // rules given as options, parsed once all are applied
+	fallback   Decision
+	asker      Asker
+	args       map[string]string // the subject argument of each tool
+	workingDir string
 
 	mu     sync.Mutex // serializes questions and guards always
 	always map[string][]string
+}
+
+// pendingRule is a rule given as an option.
+type pendingRule struct {
+	spec     string
+	decision Decision
 }
 
 // Option configures a Policy.
@@ -107,13 +126,24 @@ func WithDeny(specs ...string) Option {
 func withRules(decision Decision, specs []string) Option {
 	return func(p *Policy) error {
 		for _, spec := range specs {
-			r, err := parseRule(spec, decision)
-			if err != nil {
-				return err
-			}
-
-			p.rules = append(p.rules, r)
+			p.specs = append(p.specs, pendingRule{spec: spec, decision: decision})
 		}
+
+		return nil
+	}
+}
+
+// WithWorkingDir sets the directory that relative and empty file paths are
+// resolved against, in subjects and in rule patterns. Set it to the file
+// tools' working directory. It is the process's working directory unless set.
+func WithWorkingDir(dir string) Option {
+	return func(p *Policy) error {
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			return err
+		}
+
+		p.workingDir = abs
 
 		return nil
 	}
@@ -153,10 +183,24 @@ func New(opts ...Option) (*Policy, error) {
 		p.args[tool] = argument
 	}
 
+	if wd, err := os.Getwd(); err == nil {
+		p.workingDir = wd
+	}
+
 	for _, opt := range opts {
 		if err := opt(p); err != nil {
 			return nil, err
 		}
+	}
+
+	// Path patterns depend on the working directory, which any option may set.
+	for _, pending := range p.specs {
+		r, err := p.parseRule(pending.spec, pending.decision)
+		if err != nil {
+			return nil, err
+		}
+
+		p.rules = append(p.rules, r)
 	}
 
 	return p, nil
@@ -169,7 +213,7 @@ func (p *Policy) Allow(specs ...string) error {
 	rules := make([]rule, 0, len(specs))
 
 	for _, spec := range specs {
-		r, err := parseRule(spec, Allow)
+		r, err := p.parseRule(spec, Allow)
 		if err != nil {
 			return err
 		}
@@ -208,7 +252,10 @@ func (p *Policy) Middleware() llm.ToolMiddleware {
 // Decide returns what the Policy does with a call of tool with arguments,
 // before asking anyone, and the subjects it decided on.
 func (p *Policy) Decide(tool, arguments string) (Decision, []string) {
-	subjects := p.subjects(tool, arguments)
+	subjects, ambiguous := p.subjects(tool, arguments)
+	if ambiguous {
+		return Deny, subjects
+	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -222,14 +269,19 @@ func (p *Policy) check(ctx context.Context, tool, arguments string) error {
 
 	subject := joinSubjects(subjects)
 	if subjects == nil {
-		subject, _ = p.subjectValue(tool, arguments)
+		subject, _, _ = p.subjectValue(tool, arguments)
 	}
 
 	switch decision {
 	case Allow:
 		return nil
 	case Deny:
-		return &DeniedError{Tool: tool, Subject: subject, Reason: "denied by a rule"}
+		reason := "denied by a rule"
+		if _, _, ambiguous := p.subjectValue(tool, arguments); ambiguous {
+			reason = "the arguments give the " + p.args[tool] + " argument more than once"
+		}
+
+		return &DeniedError{Tool: tool, Subject: subject, Reason: reason}
 	case Ask:
 	}
 
@@ -312,46 +364,165 @@ func (p *Policy) decideOne(tool, subject string) Decision {
 }
 
 // subjects returns what a call touches: the commands of a bash command line
-// (nil when it cannot be split safely), or the subject argument's value.
-func (p *Policy) subjects(tool, arguments string) []string {
-	value, ok := p.subjectValue(tool, arguments)
+// (nil when it cannot be split safely), or the subject argument's value. It
+// reports true when the arguments give the subject argument more than once.
+func (p *Policy) subjects(tool, arguments string) ([]string, bool) {
+	value, ok, ambiguous := p.subjectValue(tool, arguments)
+	if ambiguous {
+		return nil, true
+	}
+
 	if !ok {
-		return []string{""}
+		return []string{""}, false
+	}
+
+	if isPathTool(tool) {
+		return []string{p.resolvePath(value)}, false
 	}
 
 	if tool != bashTool {
-		return []string{value}
+		return []string{value}, false
 	}
 
 	commands, ok := splitShell(value)
 	if !ok {
-		return nil
+		return nil, false
 	}
 
 	if len(commands) == 0 {
-		return []string{""}
+		return []string{""}, false
 	}
 
-	return commands
+	return commands, false
 }
 
 // subjectValue returns the value of the subject argument of a call of tool,
-// and false when tool has no subject argument.
-func (p *Policy) subjectValue(tool, arguments string) (string, bool) {
+// false when tool has no subject argument, and true when the arguments give
+// it more than once.
+//
+// The value is the one the tool's handler decodes: encoding/json matches
+// object keys to struct fields case-insensitively and keeps the last
+// duplicate. Arguments that give the subject twice are reported as ambiguous
+// rather than resolved, so the rules and the handler cannot see two values.
+func (p *Policy) subjectValue(tool, arguments string) (string, bool, bool) {
 	argument, ok := p.args[tool]
 	if !ok {
-		return "", false
+		return "", false, false
 	}
 
-	// Arguments that do not parse have no subject: the call matches only
-	// rules without a pattern.
-	var args map[string]any
+	value, count := topLevelString(arguments, argument)
 
-	_ = json.Unmarshal([]byte(arguments), &args)
+	return value, true, count > 1
+}
 
-	value, _ := args[argument].(string)
+// topLevelString returns the string value of key in the JSON object
+// arguments, matched case-insensitively, and how many keys matched. Arguments
+// that do not parse have no value: the call matches only rules without a
+// pattern.
+func topLevelString(arguments, key string) (string, int) {
+	dec := json.NewDecoder(strings.NewReader(arguments))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return "", 0
+	}
 
-	return value, true
+	var (
+		value string
+		count int
+	)
+
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return value, count
+		}
+
+		var raw json.RawMessage
+		if err = dec.Decode(&raw); err != nil {
+			return value, count
+		}
+
+		if name, isString := tok.(string); !isString || !strings.EqualFold(name, key) {
+			continue
+		}
+
+		count++
+		value = ""
+		_ = json.Unmarshal(raw, &value)
+	}
+
+	return value, count
+}
+
+// parseRule parses a rule and, for a file tool, resolves its path pattern.
+func (p *Policy) parseRule(spec string, decision Decision) (rule, error) {
+	return parseRule(spec, decision, func(tool, pattern string) string {
+		if !isPathTool(strings.ToLower(tool)) {
+			return pattern
+		}
+
+		return p.resolvePattern(pattern)
+	})
+}
+
+// resolvePath cleans path, makes it absolute against the working directory
+// and resolves the symlinks of its longest existing prefix, as the file tools
+// do before they open it. An empty path is the working directory.
+func (p *Policy) resolvePath(path string) string {
+	if path == "" {
+		path = p.workingDir
+	}
+
+	if !filepath.IsAbs(path) && p.workingDir != "" {
+		path = filepath.Join(p.workingDir, path)
+	}
+
+	path = filepath.Clean(path)
+	if !filepath.IsAbs(path) {
+		return path
+	}
+
+	var missing []string
+
+	for current := path; ; {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			for i := len(missing) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, missing[i])
+			}
+
+			return resolved
+		}
+
+		parent := filepath.Dir(current)
+		if !errors.Is(err, os.ErrNotExist) || parent == current {
+			return path
+		}
+
+		missing = append(missing, filepath.Base(current))
+		current = parent
+	}
+}
+
+// resolvePattern resolves the directory before a path pattern's first
+// wildcard as resolvePath does, so the pattern and the subjects it is matched
+// with name files the same way.
+func (p *Policy) resolvePattern(pattern string) string {
+	star := strings.IndexByte(pattern, '*')
+	if star < 0 {
+		return p.resolvePath(pattern)
+	}
+
+	slash := strings.LastIndexByte(pattern[:star], '/')
+	if slash < 0 {
+		return pattern // "*.env": no directory to resolve
+	}
+
+	dir := pattern[:slash]
+	if dir == "" {
+		dir = "/"
+	}
+
+	return strings.TrimSuffix(p.resolvePath(dir), "/") + pattern[slash:]
 }
 
 // joinSubjects renders subjects for an error or a question.

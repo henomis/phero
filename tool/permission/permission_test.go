@@ -18,6 +18,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -288,5 +290,94 @@ func TestPolicy_AllowAtRuntimeAndForeignSyntax(t *testing.T) {
 
 	if err := p.Allow("bash(oops"); !errors.Is(err, permission.ErrInvalidRule) {
 		t.Fatalf("err = %v, want ErrInvalidRule", err)
+	}
+}
+
+func TestDecide_SubjectKeyAsTheHandlerReadsIt(t *testing.T) {
+	allow := mustPolicy(t, permission.WithAllow("bash(go test *)"))
+	deny := mustPolicy(t, permission.WithDeny("bash(rm *)"), permission.WithDefault(permission.Allow))
+
+	cases := []struct {
+		name   string
+		policy *permission.Policy
+		args   string
+		want   permission.Decision
+	}{
+		// encoding/json matches struct fields case-insensitively, and the last
+		// duplicate wins: the policy must not decide on another value.
+		{"duplicate key", allow, `{"command":"go test ./...","COMMAND":"rm -rf ~"}`, permission.Deny},
+		{"exact duplicate", allow, `{"command":"go test ./...","command":"rm -rf ~"}`, permission.Deny},
+		{"case variant allowed", allow, `{"Command":"go test ./..."}`, permission.Allow},
+		{"case variant denied", deny, `{"Command":"rm -rf ~"}`, permission.Deny},
+	}
+
+	for _, tc := range cases {
+		if got, _ := tc.policy.Decide("bash", tc.args); got != tc.want {
+			t.Errorf("%s: Decide(%s) = %s, want %s", tc.name, tc.args, got, tc.want)
+		}
+	}
+}
+
+func TestDecide_PathsAreCleanedAndResolved(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, "secrets"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(filepath.Join(repo, "secrets"), filepath.Join(repo, "link")); err != nil {
+		t.Fatal(err)
+	}
+
+	p := mustPolicy(t,
+		permission.WithWorkingDir(repo),
+		permission.WithAllow("read", "edit("+repo+"/**)"),
+		permission.WithDeny("read(.env)", "read("+repo+"/secrets/*)"),
+	)
+
+	args := func(path string) string { return `{"file_path":"` + path + `"}` }
+
+	cases := []struct {
+		tool, path string
+		want       permission.Decision
+	}{
+		{"read", repo + "/main.go", permission.Allow},
+		{"read", repo + "/./.env", permission.Deny},
+		{"read", ".env", permission.Deny}, // relative: against the working dir, as is the rule
+		{"read", repo + "/src/../secrets/k", permission.Deny},
+		{"read", repo + "/link/k", permission.Deny}, // a symlink into secrets
+		{"edit", repo + "/src/main.go", permission.Allow},
+		{"edit", repo + "/../etc/passwd", permission.Ask}, // .. leaves the allowed tree
+	}
+
+	for _, tc := range cases {
+		if got, subjects := p.Decide(tc.tool, args(tc.path)); got != tc.want {
+			t.Errorf("Decide(%s, %s) = %s (subjects %q), want %s", tc.tool, tc.path, got, subjects, tc.want)
+		}
+	}
+}
+
+func TestDecide_RedirectionsAreAsked(t *testing.T) {
+	p := mustPolicy(t, permission.WithAllow("bash(cat *)", "bash(go test *)"))
+
+	cases := []struct {
+		command string
+		want    permission.Decision
+	}{
+		{"cat notes.txt >> ~/.bashrc", permission.Ask},
+		{"cat a > b", permission.Ask},
+		{"cat a &> b", permission.Ask},
+		{"cat a >| b", permission.Ask},
+		{"cat a <> b", permission.Ask},
+		{"cat a 2>b", permission.Ask},
+		// Duplicating a descriptor or discarding output writes no file.
+		{"go test ./... 2>&1", permission.Allow},
+		{"go test ./... >/dev/null 2>&1", permission.Allow},
+		{"go test ./... 2> /dev/null", permission.Allow},
+	}
+
+	for _, tc := range cases {
+		if got, subjects := p.Decide("bash", bashArgs(tc.command)); got != tc.want {
+			t.Errorf("Decide(%q) = %s (subjects %q), want %s", tc.command, got, subjects, tc.want)
+		}
 	}
 }

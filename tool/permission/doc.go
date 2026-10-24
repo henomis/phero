@@ -31,6 +31,13 @@
 // URL for web_fetch; WithSubject sets it for other tools. A rule with no
 // pattern matches every call of its tool.
 //
+// File paths, in subjects and in rule patterns, are matched as the file tools
+// open them: cleaned, made absolute against the working directory
+// (WithWorkingDir, the process's by default) and resolved through symlinks,
+// so "/repo/src/../secrets/k" meets read(/repo/secrets/*). Arguments that
+// give the subject argument twice, in any letter case, are denied: the tool's
+// handler would decode the last one, which the rules might not have seen.
+//
 // A call is denied when a deny rule matches, else asked when an ask rule
 // matches, else allowed when an allow rule matches, else given the default
 // decision (Ask unless WithDefault says otherwise).
@@ -38,8 +45,10 @@
 // A bash command is split on &&, ||, ;, |, & and newlines, and every part must
 // be allowed on its own, so "go test ./... && rm -rf /" does not pass
 // bash(go test *). A command with $(...), backticks or process substitution is
-// always asked. The split does not understand quotes: a quoted operator splits
-// too, which can only make a command asked, never allowed.
+// always asked, and so is a redirection to a file ("cat a >> ~/.bashrc" does
+// not pass bash(cat *)); "2>&1" and ">/dev/null" write no file. The split does
+// not understand quotes: a quoted operator splits too, which can only make a
+// command asked, never allowed.
 //
 // Asking goes through an Asker, one question at a time even when the agent
 // runs tool calls in parallel. An answer of AllowAlways allows the same subject
