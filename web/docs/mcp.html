@@ -161,6 +161,22 @@ _ = server.Run(context.Background(), &mcp.StdioTransport{})</code></pre>
     // allowlist only a subset
     return name == "get_random_quote" || strings.HasPrefix(name, "search_")
 })</code></pre>
+      <p>
+        When an agent uses several MCP servers, two of them may offer a tool with the same name. Give each server
+        a prefix with <code>mcp.WithToolPrefix</code>; the MCP server is still called with the tool's own name:
+      </p>
+      <pre><code class="language-go">github := mcp.New(githubSession, mcp.WithToolPrefix("github_"))
+browser := mcp.New(playwrightSession, mcp.WithToolPrefix("browser_"))</code></pre>
+    </section>
+
+    <section>
+      <h2>Tool results</h2>
+      <ul>
+        <li>Text content is joined into the tool's text result.</li>
+        <li>Image content, such as a Playwright screenshot, is passed to the model as an image part.</li>
+        <li>A result with <code>IsError</code> set returns an <code>*mcp.ToolResultError</code> holding the result's
+          text, so the agent reports a failed tool call to the model.</li>
+      </ul>
     </section>
 
     <section>
