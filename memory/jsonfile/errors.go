@@ -18,3 +18,7 @@ import "errors"
 
 // ErrEmptyFilePath is returned when the file path is empty.
 var ErrEmptyFilePath = errors.New("empty file path")
+
+// ErrUnknownFileVersion is returned by New for a memory file written in a
+// format this version does not know.
+var ErrUnknownFileVersion = errors.New("unknown memory file version")

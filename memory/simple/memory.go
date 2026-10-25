@@ -16,10 +16,9 @@ package simple
 
 import (
 	"context"
-	"fmt"
-	"strconv"
 	"sync"
 
+	"github.com/henomis/phero/v2/internal/snaplog"
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/memory"
 )
@@ -40,12 +39,11 @@ type Memory struct {
 	summaryThreshold uint
 	summarySize      uint
 
-	mu sync.Mutex // guards next, snapshot and upTo, and orders Save with them
+	mu sync.Mutex // guards next and snapshot, and orders Save with them
 	// next is the absolute position of the next message saved: the buffer
 	// holds positions next-Len() to next-1, so a cursor survives eviction.
 	next     int
 	snapshot *memory.Snapshot
-	upTo     int // absolute position of the last message snapshot stands for
 	prune    bool
 }
 
@@ -153,14 +151,9 @@ func (m *Memory) Retrieve(_ context.Context, _ string) ([]llm.Message, error) {
 		return memory.TrimOrphanToolResults(m.buffer.Get()), nil
 	}
 
-	tail := m.tail()
-	out := memory.SummaryMessages(*m.snapshot)
+	msgs := m.buffer.Get()
 
-	for _, lm := range tail {
-		out = append(out, lm.Message)
-	}
-
-	return out, nil
+	return snaplog.View(msgs, m.next-len(msgs), *m.snapshot), nil
 }
 
 // LoadSnapshot returns the latest snapshot (nil when there is none) and the
@@ -196,17 +189,12 @@ func (m *Memory) SaveSnapshot(_ context.Context, s memory.Snapshot, upTo memory.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if !memory.SameSnapshot(m.snapshot, prev) {
-		return memory.ErrSnapshotConflict
-	}
-
-	pos, err := strconv.Atoi(string(upTo))
-	if err != nil || pos < 0 || pos >= m.next || (m.snapshot != nil && pos <= m.upTo) {
-		return fmt.Errorf("%w: %q", memory.ErrInvalidCursor, upTo)
+	if _, err := snaplog.Cutoff(m.snapshot, prev, upTo, m.next); err != nil {
+		return err
 	}
 
 	s.UpTo = upTo
-	m.snapshot, m.upTo = &s, pos
+	m.snapshot = &s
 
 	if m.prune {
 		kept := make([]llm.Message, 0, m.buffer.Len())
@@ -220,29 +208,12 @@ func (m *Memory) SaveSnapshot(_ context.Context, s memory.Snapshot, upTo memory.
 	return nil
 }
 
-// tail returns the buffered messages after the snapshot (all of them without
-// one), with their cursors, leaving out tool results whose call is not kept.
-// The caller holds m.mu.
+// tail returns the buffered messages after the snapshot, with their
+// cursors. The caller holds m.mu.
 func (m *Memory) tail() []memory.LoggedMessage {
 	msgs := m.buffer.Get()
-	base := m.next - len(msgs)
 
-	start := 0
-	if m.snapshot != nil {
-		start = max(m.upTo+1-base, 0)
-	}
-
-	out := make([]memory.LoggedMessage, 0, len(msgs)-min(start, len(msgs)))
-
-	for i := start; i < len(msgs); i++ {
-		if len(out) == 0 && msgs[i].Role == llm.RoleTool {
-			continue // its tool call was evicted or summarized
-		}
-
-		out = append(out, memory.LoggedMessage{Message: msgs[i], Cursor: memory.Cursor(strconv.Itoa(base + i))})
-	}
-
-	return out
+	return snaplog.Tail(msgs, m.next-len(msgs), m.snapshot)
 }
 
 // Clear removes all messages and the snapshot from memory.
