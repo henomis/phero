@@ -16,6 +16,7 @@ package jsonfile
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -292,5 +293,43 @@ func TestMemory_SummarizationKeepsToolPairs(t *testing.T) {
 	got, _ := mem.Retrieve(ctx, "")
 	if len(got) != 2 || got[1].TextContent() != "done" {
 		t.Fatalf("got %+v, want summary + final answer", got)
+	}
+}
+
+func TestMemory_FailedSaveStoresNothing(t *testing.T) {
+	dir := t.TempDir()
+
+	mem, err := New(filepath.Join(dir, "memory.json"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctx := context.Background()
+	if err = mem.Save(ctx, []llm.Message{llm.UserMessage(llm.Text("one"))}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The temp file can't be created, so the write fails.
+	if err = os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	if err = mem.Save(ctx, []llm.Message{llm.UserMessage(llm.Text("two"))}); err == nil {
+		t.Skip("the directory is still writable (running as root?)")
+	}
+
+	if err = os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Saving again after the failure stores the message once.
+	if err = mem.Save(ctx, []llm.Message{llm.UserMessage(llm.Text("two"))}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := mem.Len(); got != 2 {
+		t.Fatalf("Len() = %d, want 2", got)
 	}
 }

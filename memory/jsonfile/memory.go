@@ -220,7 +220,21 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.messages = append(m.messages, messages...)
+	// A failed Save stores nothing, so the caller can save the same messages
+	// again without duplicating them.
+	old := m.messages
+	if err := m.save(ctx, messages); err != nil {
+		m.messages = old
+		return err
+	}
+
+	return nil
+}
+
+// save appends messages, summarizing when needed, and flushes to disk. The
+// caller must hold the write lock.
+func (m *Memory) save(ctx context.Context, messages []llm.Message) error {
+	m.messages = append(m.messages[:len(m.messages):len(m.messages)], messages...)
 
 	if m.needSummarization() {
 		// Split past tool results so none is kept without its tool call.
