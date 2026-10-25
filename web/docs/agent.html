@@ -361,7 +361,10 @@ a.SetCompaction(agent.NewSummaryCompactor(cheapLLM, agent.WithKeepRecent(20)), 1
 
       <ul>
         <li>Before an LLM call, once the previous call's prompt and output tokens reached the threshold (here
-          150k), the session is handed to the compactor. Pass 0 to skip this check.</li>
+          150k), the session is handed to the compactor. Pass 0 to skip this check. Before the provider has reported
+          a size (the first call of a run, after a compaction, or with no usage at all), the session is estimated with
+          <code>agent.EstimateTokens</code> (about four characters per token), so a long history loaded from memory
+          is compacted before it is sent.</li>
         <li>When a call fails with <code>llm.ErrContextLengthExceeded</code>, the session is compacted and the call
           made again, once. A second such error in a row ends the run.</li>
         <li><code>NewSummaryCompactor</code> replaces the older messages with one summary, written from a prompt that

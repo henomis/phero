@@ -276,7 +276,11 @@ func (a *Agent) SetResponseFormat(format *llm.ResponseFormat) {
 // run keeps fitting the model's context window. The session, without the
 // system prompt, is handed to c (NewSummaryCompactor is the default choice):
 //   - before an LLM call, when the previous call's prompt and output tokens,
-//     as the provider reported them, reached atTokens; 0 disables this check;
+//     as the provider reported them, reached atTokens; 0 disables this check.
+//     Before any size is reported (the first call of a run, after a
+//     compaction, or with a provider that reports no usage), the session is
+//     estimated with EstimateTokens, so a long stored history is compacted
+//     before it is sent;
 //   - when a call fails with llm.ErrContextLengthExceeded: the session is
 //     compacted and the call made again, once. A second such error in a row
 //     ends the run.
@@ -297,7 +301,20 @@ func (a *Agent) SetCompaction(c Compactor, atTokens int) {
 // compactIfNeeded compacts the session before the next LLM call when the
 // previous call reached the compaction threshold.
 func (a *Agent) compactIfNeeded(ctx context.Context, rs *runState, session *[]llm.Message, sessionIndex *int) error {
-	if a.compactor == nil || a.compactAtTokens <= 0 || rs.contextTokens < a.compactAtTokens {
+	if a.compactor == nil || a.compactAtTokens <= 0 {
+		return nil
+	}
+
+	// Before the provider has reported a prompt size (the first call, after a
+	// compaction, or with no usage at all), the session is estimated: a run
+	// that starts with a long history must not rely on the provider failing
+	// with a recognizable context-length error.
+	tokens := rs.contextTokens
+	if tokens == 0 {
+		tokens = EstimateTokens(*session)
+	}
+
+	if tokens < a.compactAtTokens {
 		return nil
 	}
 
@@ -444,7 +461,7 @@ type runState struct {
 	promptLen int
 	// contextTokens estimates the tokens of the next prompt: the previous
 	// call's prompt and output tokens, as the provider reported them. It is 0
-	// when unknown, as after a compaction.
+	// when unknown, as after a compaction, and EstimateTokens is used then.
 	contextTokens int
 	// compactedOnError is set when the session was compacted after a
 	// context-length error, so a second such error in a row ends the run.

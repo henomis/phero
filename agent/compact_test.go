@@ -360,3 +360,61 @@ func TestRun_CompactionErrorEndsRun(t *testing.T) {
 		t.Fatalf("err = %v, want a CompactionError", err)
 	}
 }
+
+// bigHistory is a stored history of n user/assistant turns of size chars each.
+func bigHistory(n, size int) []llm.Message {
+	text := strings.Repeat("x", size)
+
+	msgs := make([]llm.Message, 0, 2*n)
+	for range n {
+		msgs = append(msgs, llm.UserMessage(llm.Text(text)), llm.AssistantMessage([]llm.ContentPart{llm.Text(text)}))
+	}
+
+	return msgs
+}
+
+func TestRun_CompactsBeforeTheFirstCallOnEstimate(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		history     []llm.Message
+		compactions int
+	}{
+		// 10 turns of 2×4000 chars is about 20k tokens, over the 5000 threshold.
+		{"large history", bigHistory(10, 4000), 1},
+		{"small history", bigHistory(2, 100), 0},
+	} {
+		client := &scriptedLLM{fn: func(int, []llm.Message) (*llm.Result, error) { return textResult("done"), nil }}
+
+		a := mustNew(t, client, "agent", "desc")
+		a.SetMemory(&appendMemory{msgs: tc.history})
+
+		compactions := 0
+		a.SetCompaction(keepLastCompactor(&compactions), 5000)
+
+		if _, err := a.Run(context.Background(), llm.Text("go")); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+
+		if compactions != tc.compactions {
+			t.Errorf("%s: compactions = %d, want %d", tc.name, compactions, tc.compactions)
+		}
+
+		// The provider never saw the oversized prompt.
+		if tc.compactions > 0 && client.prompts[0][1].TextContent() != "compacted" {
+			t.Errorf("%s: first prompt = %+v, want the compacted session", tc.name, client.prompts[0])
+		}
+	}
+}
+
+func TestEstimateTokens(t *testing.T) {
+	msgs := []llm.Message{
+		llm.UserMessage(llm.Text(strings.Repeat("a", 400))),
+		llm.AssistantMessage(nil, llm.ToolCall{ID: "c", Function: llm.FunctionCall{Name: "echo", Arguments: strings.Repeat("b", 40)}}),
+		llm.ToolResultMessage("c", llm.Text(strings.Repeat("c", 80))),
+	}
+
+	// 400/4 + 40/4 + 80/4 = 130, plus an overhead per message.
+	if got := agent.EstimateTokens(msgs); got < 130 || got > 160 {
+		t.Fatalf("EstimateTokens = %d, want about 130 plus overhead", got)
+	}
+}

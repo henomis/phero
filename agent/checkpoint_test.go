@@ -122,9 +122,16 @@ func TestRun_CheckpointThenResume(t *testing.T) {
 	mem := &appendMemory{}
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// What memory holds during the second call is what a process that died
+	// then would leave: only a checkpoint can have saved the first iteration
+	// (the end-of-run save happens later, even on cancellation).
+	var atCrash []llm.Message
+
 	client := &scriptedLLM{fn: func(call int, _ []llm.Message) (*llm.Result, error) {
 		if call == 2 {
-			cancel() // the process "dies" during the second call
+			atCrash, _ = mem.Retrieve(context.Background(), "")
+
+			cancel()
 		}
 
 		return toolCallResult("echo", string(rune('a'+call)), "{}"), nil
@@ -139,7 +146,11 @@ func TestRun_CheckpointThenResume(t *testing.T) {
 		t.Fatal("want the cancellation")
 	}
 
+	// The user message, the first tool call and its result.
+	assertRoles(t, atCrash, llm.RoleUser, llm.RoleAssistant, llm.RoleTool)
 	assertValidConversation(t, mem.msgs)
+
+	mem.msgs = atCrash // resume from what the crash left
 
 	// A run with no input continues from memory, with every pair intact.
 	resume := &scriptedLLM{fn: func(int, []llm.Message) (*llm.Result, error) { return textResult("resumed"), nil }}
