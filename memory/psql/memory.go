@@ -27,7 +27,7 @@ import (
 	"github.com/henomis/phero/v2/memory"
 )
 
-var _ memory.Memory = (*Memory)(nil)
+var _ memory.SnapshotStore = (*Memory)(nil)
 
 const (
 	defaultTableName          = "conversation_memory"
@@ -56,6 +56,8 @@ type Memory struct {
 	llm              llm.LLM
 	summaryThreshold uint
 	summarySize      uint
+
+	prune bool
 }
 
 // New creates a new PostgreSQL-backed memory bound to sessionID.
@@ -161,6 +163,15 @@ func (m *Memory) EnsureSchema(ctx context.Context) error {
 		return execErr
 	}
 
+	snapshots, err := m.snapshotTable()
+	if err != nil {
+		return err
+	}
+
+	if _, execErr := m.db.ExecContext(ctx, fmt.Sprintf(createSnapshotTableSQLTemplate, snapshots)); execErr != nil {
+		return execErr
+	}
+
 	m.schemaDone = true
 
 	return nil
@@ -210,6 +221,8 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 }
 
 // Retrieve returns all messages currently in memory, ordered from oldest to newest.
+// With a snapshot, the messages it stands for are replaced by
+// memory.SummaryMessages.
 //
 // query is currently ignored (matching the behavior of memory/simple).
 func (m *Memory) Retrieve(ctx context.Context, _ string) ([]llm.Message, error) {
@@ -217,6 +230,27 @@ func (m *Memory) Retrieve(ctx context.Context, _ string) ([]llm.Message, error) 
 		return nil, err
 	}
 
+	if m.llm == nil {
+		snap, logged, err := m.LoadSnapshot(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		if snap != nil {
+			out := memory.SummaryMessages(*snap)
+			for _, lm := range logged {
+				out = append(out, lm.Message)
+			}
+
+			return out, nil
+		}
+	}
+
+	return m.retrieveAll(ctx)
+}
+
+// retrieveAll returns every message of the session, oldest first.
+func (m *Memory) retrieveAll(ctx context.Context) ([]llm.Message, error) {
 	table, err := sqlutil.QuoteQualifiedIdent(m.tableName)
 	if err != nil {
 		return nil, ErrInvalidTableName
@@ -265,10 +299,24 @@ func (m *Memory) Clear(ctx context.Context) error {
 		return ErrInvalidTableName
 	}
 
-	stmt := fmt.Sprintf(clearSessionSQLTemplate, table)
-	_, err = m.db.ExecContext(ctx, stmt, m.sessionID)
+	snapshots, err := m.snapshotTable()
+	if err != nil {
+		return err
+	}
 
-	return err
+	tx, err := m.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, t := range []string{table, snapshots} {
+		if _, execErr := tx.ExecContext(ctx, fmt.Sprintf(clearSessionSQLTemplate, t), m.sessionID); execErr != nil {
+			return execErr
+		}
+	}
+
+	return tx.Commit()
 }
 
 func (m *Memory) count(ctx context.Context) (int, error) {
@@ -301,7 +349,7 @@ func (m *Memory) maybeSummarize(ctx context.Context) error {
 		return nil
 	}
 
-	msgs, err := m.Retrieve(ctx, "")
+	msgs, err := m.retrieveAll(ctx)
 	if err != nil {
 		return err
 	}

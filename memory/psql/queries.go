@@ -68,3 +68,69 @@ const clearSessionSQLTemplate = `
 DELETE FROM %s
 WHERE session_id = $1
 `
+
+// createSnapshotTableSQLTemplate expects:
+//   - %s: quoted snapshot table name
+//
+// One row per session: its latest snapshot, standing for the session's
+// messages up to and including upto_seq.
+const createSnapshotTableSQLTemplate = `
+CREATE TABLE IF NOT EXISTS %s (
+	session_id text        PRIMARY KEY,
+	upto_seq   bigint      NOT NULL,
+	snapshot   jsonb       NOT NULL,
+	created_at timestamptz NOT NULL DEFAULT now()
+)
+`
+
+// selectSnapshotSQLTemplate expects:
+//   - %s: quoted snapshot table name
+const selectSnapshotSQLTemplate = `
+SELECT upto_seq, snapshot
+FROM %s
+WHERE session_id = $1
+`
+
+// selectMessagesAfterSQLTemplate expects:
+//   - %s: quoted table name
+const selectMessagesAfterSQLTemplate = `
+SELECT seq, message
+FROM %s
+WHERE session_id = $1 AND seq > $2
+ORDER BY seq ASC
+`
+
+// messageExistsSQLTemplate expects:
+//   - %s: quoted table name
+const messageExistsSQLTemplate = `
+SELECT EXISTS (SELECT 1 FROM %s WHERE session_id = $1 AND seq = $2)
+`
+
+// insertSnapshotSQLTemplate expects:
+//   - %s: quoted snapshot table name
+//
+// It inserts the session's first snapshot; a row already there (another
+// writer's) is left alone, and no row is affected.
+const insertSnapshotSQLTemplate = `
+INSERT INTO %s (session_id, upto_seq, snapshot)
+VALUES ($1, $2, $3::jsonb)
+ON CONFLICT (session_id) DO NOTHING
+`
+
+// updateSnapshotSQLTemplate expects:
+//   - %s: quoted snapshot table name
+//
+// It replaces the snapshot only if it is still the one saved up to $4: a
+// compare-and-swap, affecting no row when another writer moved it.
+const updateSnapshotSQLTemplate = `
+UPDATE %s
+SET upto_seq = $2, snapshot = $3::jsonb, created_at = now()
+WHERE session_id = $1 AND upto_seq = $4
+`
+
+// pruneMessagesSQLTemplate expects:
+//   - %s: quoted table name
+const pruneMessagesSQLTemplate = `
+DELETE FROM %s
+WHERE session_id = $1 AND seq <= $2
+`

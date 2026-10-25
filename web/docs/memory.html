@@ -79,8 +79,8 @@ a.SetMemory(conversationMemory)</code></pre>
         A memory that implements <code>memory.SnapshotStore</code> keeps a log of messages plus a stored
         <code>memory.Snapshot</code>: a summary (and a few pinned messages, such as the task) that stands for the oldest
         messages. <code>Retrieve</code> then returns the summary followed by the messages after it, so a long
-        conversation stays short without losing its log. <code>memory/simple</code> and <code>memory/jsonfile</code>
-        implement it; the agent's compaction uses it.
+        conversation stays short without losing its log. <code>memory/simple</code>, <code>memory/jsonfile</code>
+        and <code>memory/psql</code> implement it; the agent's compaction uses it.
       </p>
 
       <pre><code class="language-go">snap, tail, err := store.LoadSnapshot(ctx) // latest snapshot (or nil) and the messages after it, with cursors
@@ -97,8 +97,8 @@ err = store.SaveSnapshot(ctx, memory.Snapshot{Summary: text}, tail[len(tail)-5].
           keeps its place in the conversation. <code>memory.FormatSnapshotPrompt</code> updates the previous summary
           with the new messages, in fixed sections: task, decisions and facts, files and commands, user preferences,
           open items.</li>
-        <li>The messages a snapshot covers are kept by default; <code>WithPruneCompacted(true)</code> (simple, jsonfile)
-          drops them. Snapshots can't be combined with a backend's own <code>WithSummarization</code>, which rewrites the log
+        <li>The messages a snapshot covers are kept by default; <code>WithPruneCompacted(true)</code> (simple, jsonfile,
+          psql) drops them. Snapshots can't be combined with a backend's own <code>WithSummarization</code>, which rewrites the log
           (<code>memory.ErrSnapshotsUnsupported</code>).</li>
       </ul>
     </section>
@@ -277,6 +277,20 @@ a.SetMemory(conversationMemory)</code></pre>
       <p>
         By default the store auto-creates its table/index (you can disable that with <code>psql.WithEnsureSchema(false)</code>).
       </p>
+      <p>
+        It keeps <a href="#snapshots">snapshots</a> in a second table named after the first, with
+        <code>_snapshots</code> appended: one row per session, whose cursor is the <code>seq</code> of the last message it
+        covers. <code>SaveSnapshot</code> compares and swaps in SQL, so two processes on the same session cannot
+        overwrite each other's snapshot, and <code>psql.WithPruneCompacted(true)</code> deletes the covered rows in the
+        same transaction. With <code>WithEnsureSchema(false)</code>, create it yourself:
+      </p>
+
+      <pre><code class="language-sql">CREATE TABLE IF NOT EXISTS conversation_memory_snapshots (
+    session_id text        PRIMARY KEY,
+    upto_seq   bigint      NOT NULL,
+    snapshot   jsonb       NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);</code></pre>
     </section>
 
     <section>
