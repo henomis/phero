@@ -399,3 +399,44 @@ func TestSchema_DescriptionsAreComplete(t *testing.T) {
 		t.Fatalf("description = %q, want %q", got, want)
 	}
 }
+
+func TestBashTool_LongOutputTruncatedOnce(t *testing.T) {
+	requireBash(t)
+
+	tool, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tool.maxOutputChars = 100
+	tool.timeout = 500 * time.Millisecond
+
+	print5000 := "head -c 5000 /dev/zero | tr '\\0' a; echo"
+
+	cases := map[string]struct {
+		command, suffix string
+	}{
+		"timeout":   {print5000 + "; sleep 5", "command timed out after 500ms"},
+		"exit code": {print5000 + "; exit 3", "exit code: 3"},
+	}
+
+	for name, tc := range cases {
+		out, runErr := tool.run(context.Background(), &Input{Command: tc.command})
+		if runErr != nil {
+			t.Fatalf("%s: %v", name, runErr)
+		}
+
+		// 5001 bytes printed (with the newline), 100 kept: one marker, 4901 cut.
+		if n := strings.Count(out.Output, "bytes truncated"); n != 1 {
+			t.Errorf("%s: %d truncation markers in %q, want 1", name, n, out.Output)
+		}
+
+		if !strings.Contains(out.Output, "[... 4901 bytes truncated ...]") {
+			t.Errorf("%s: output %q, want 4901 bytes reported cut", name, out.Output)
+		}
+
+		if !strings.HasSuffix(out.Output, tc.suffix) || !out.Truncated {
+			t.Errorf("%s: output %q (truncated %v), want it to end with %q", name, out.Output, out.Truncated, tc.suffix)
+		}
+	}
+}

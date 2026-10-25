@@ -431,8 +431,8 @@ func (t *Tool) runForeground(ctx context.Context, command string, cmdTimeout tim
 			out += "\n"
 		}
 
+		// The output is already truncated: the note goes after it, uncut.
 		out += fmt.Sprintf("command timed out after %s", cmdTimeout)
-		out, truncated = t.truncateOutput(out)
 
 		return &Output{Output: out, Truncated: truncated, TimedOut: true}, nil
 	}
@@ -445,8 +445,8 @@ func (t *Tool) runForeground(ctx context.Context, command string, cmdTimeout tim
 			out += "\n"
 		}
 
+		// The output is already truncated: the note goes after it, uncut.
 		out += fmt.Sprintf("exit code: %d", exitErr.ExitCode())
-		out, truncated = t.truncateOutput(out)
 
 		return &Output{Output: out, Running: false, Truncated: truncated}, nil
 	}
