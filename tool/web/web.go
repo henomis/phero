@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -162,8 +163,89 @@ func (f *Fetcher) newTransport() http.RoundTripper {
 
 // isPrivate reports whether ip is on a network the tool refuses by default.
 func isPrivate(ip net.IP) bool {
+	if isLocalIP(ip) {
+		return true
+	}
+
+	// IPv6 forms that carry an IPv4 address the packets are delivered to.
+	for _, embedded := range embeddedIPv4(ip) {
+		if isLocalIP(embedded) {
+			return true
+		}
+	}
+
+	return inNets(ip, localUseNAT64)
+}
+
+// isLocalIP reports whether ip is not a public unicast address.
+func isLocalIP(ip net.IP) bool {
 	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
-		ip.IsUnspecified() || ip.IsMulticast()
+		ip.IsUnspecified() || ip.IsMulticast() || inNets(ip, localIPv4)
+}
+
+var (
+	// localIPv4 are IPv4 ranges the net package does not classify: "this
+	// network", which reaches the local host on Linux, and carrier-grade NAT.
+	localIPv4 = mustCIDRs("0.0.0.0/8", "100.64.0.0/10")
+
+	// localUseNAT64 is the local-use NAT64 prefix (RFC 8215), whose IPv4
+	// position is not fixed: it is refused as a whole.
+	localUseNAT64 = mustCIDRs("64:ff9b:1::/48")
+
+	nat64     = mustCIDRs("64:ff9b::/96")
+	sixToFour = mustCIDRs("2002::/16")
+	teredo    = mustCIDRs("2001::/32")
+)
+
+// embeddedIPv4 returns the IPv4 addresses an IPv6 address hands packets to:
+// the NAT64 well-known prefix (RFC 6052), 6to4 (RFC 3056), and Teredo's
+// server and obfuscated client (RFC 4380).
+func embeddedIPv4(ip net.IP) []net.IP {
+	ip16 := ip.To16()
+	if ip16 == nil || ip.To4() != nil {
+		return nil
+	}
+
+	switch {
+	case inNets(ip16, nat64):
+		return []net.IP{slices.Clone(ip16[12:16])}
+	case inNets(ip16, sixToFour):
+		return []net.IP{slices.Clone(ip16[2:6])}
+	case inNets(ip16, teredo):
+		client := make(net.IP, net.IPv4len)
+		for i := range client {
+			client[i] = ^ip16[12+i] // Teredo stores the client address inverted
+		}
+
+		return []net.IP{slices.Clone(ip16[4:8]), client}
+	default:
+		return nil
+	}
+}
+
+func inNets(ip net.IP, nets []*net.IPNet) bool {
+	for _, n := range nets {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func mustCIDRs(cidrs ...string) []*net.IPNet {
+	nets := make([]*net.IPNet, 0, len(cidrs))
+
+	for _, c := range cidrs {
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			panic(err)
+		}
+
+		nets = append(nets, n)
+	}
+
+	return nets
 }
 
 // checkURL applies the scheme and host rules to u.

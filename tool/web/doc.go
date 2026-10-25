@@ -20,8 +20,10 @@
 // are; binary content is refused. Responses are capped in size and time.
 //
 // The URL comes from the model, so by default the tool refuses addresses on
-// loopback, private and link-local networks (including cloud metadata
-// endpoints), checked when connecting, so redirects and DNS answers cannot get
+// loopback, private, link-local, carrier-grade NAT and "this network"
+// (0.0.0.0/8) addresses (including cloud metadata endpoints), and IPv6
+// addresses that carry such an IPv4 address (NAT64, 6to4, Teredo), checked
+// when connecting, so redirects and DNS answers cannot get
 // around it. WithPrivateNetworks(true) allows them, for example to read a
 // local dev server; WithAllowedHosts limits the hosts that can be fetched.
 //

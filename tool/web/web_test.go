@@ -17,6 +17,7 @@ package web
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -115,5 +116,42 @@ func TestFetch_SchemeAndHostRules(t *testing.T) {
 
 	if _, err := f.fetch(ctx, &Input{URL: target.URL}); err != nil {
 		t.Fatalf("allowed host: %v", err)
+	}
+}
+
+func TestIsPrivate(t *testing.T) {
+	cases := []struct {
+		ip      string
+		private bool
+	}{
+		{"8.8.8.8", false},
+		{"2606:4700::1111", false},
+		{"127.0.0.1", true},
+		{"10.1.2.3", true},
+		{"169.254.169.254", true},
+		{"::ffff:10.0.0.1", true}, // IPv4-mapped
+		{"0.1.2.3", true},         // "this network": reaches the local host on Linux
+		{"100.64.0.1", true},      // CGNAT
+		{"100.127.255.254", true},
+		{"100.128.0.1", false},
+		{"64:ff9b::a00:1", true},             // NAT64 of 10.0.0.1
+		{"64:ff9b::808:808", false},          // NAT64 of 8.8.8.8
+		{"64:ff9b:1::1", true},               // local-use NAT64 prefix
+		{"2002:a00:1::1", true},              // 6to4 of 10.0.0.1
+		{"2002:808:808::1", false},           // 6to4 of 8.8.8.8
+		{"2001:0:808:808::f5ff:fffe", true},  // Teredo, client 10.0.0.1 (obfuscated)
+		{"2001:0:a00:1::f7f7:f7f7", true},    // Teredo, server 10.0.0.1
+		{"2001:0:808:808::f7f7:f7f7", false}, // Teredo, server and client 8.8.8.8
+	}
+
+	for _, tc := range cases {
+		ip := net.ParseIP(tc.ip)
+		if ip == nil {
+			t.Fatalf("bad test IP %q", tc.ip)
+		}
+
+		if got := isPrivate(ip); got != tc.private {
+			t.Errorf("isPrivate(%s) = %v, want %v", tc.ip, got, tc.private)
+		}
 	}
 }

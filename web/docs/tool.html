@@ -395,8 +395,9 @@ if err != nil { panic(err) }
 
 if err := a.AddTool(fetchTool); err != nil { panic(err) }</code></pre>
       <p>
-        The URL comes from the model, so the tool refuses addresses on loopback, private and link-local networks,
-        including cloud metadata endpoints. The check runs on the address it connects to, so a redirect or a DNS answer
+        The URL comes from the model, so the tool refuses addresses on loopback, private, link-local and
+        carrier-grade NAT networks and <code>0.0.0.0/8</code>, including cloud metadata endpoints, and IPv6 addresses
+        that carry such an IPv4 address (NAT64, 6to4, Teredo). The check runs on the address it connects to, so a redirect or a DNS answer
         cannot get around it. <code>WithPrivateNetworks(true)</code> allows them, for example to read a local dev server.
         <code>WithAllowedHosts</code> limits the hosts, redirects included; only <code>http</code> and <code>https</code>
         URLs are fetched.
