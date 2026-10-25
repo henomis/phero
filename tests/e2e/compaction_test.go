@@ -83,7 +83,14 @@ func TestAgent_LongRunCompaction(t *testing.T) {
 			// About 600 tokens per chunk: a dozen chunks fill an 8k context.
 			body := strings.Repeat(fmt.Sprintf("Chunk %d is filler text about nothing in particular. ", in.N), 50)
 
-			return &readOutput{Text: fmt.Sprintf("%s\nNext: call read_chunk with n=%d.", body, in.N+1)}, nil
+			// The last chunk says so: a small model stops on the tool's word
+			// more reliably than on the system prompt's.
+			next := fmt.Sprintf("Next: call read_chunk with n=%d.", in.N+1)
+			if in.N >= chunks {
+				next = "This was the last chunk. Do not call read_chunk again: reply with the word DONE."
+			}
+
+			return &readOutput{Text: body + "\n" + next}, nil
 		})
 	if err != nil {
 		t.Fatal(err)
