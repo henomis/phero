@@ -691,3 +691,35 @@ func TestRun_SnapshotsStoredAfterClippedToolResults(t *testing.T) {
 		t.Fatalf("stored snapshot leaves %d messages after it (up to %s), want the later compactions stored", len(logged), snap.UpTo)
 	}
 }
+
+func TestRun_RejectsKeptMessagesFromAnEmptyInput(t *testing.T) {
+	ctx := context.Background()
+	store := simple.New(100)
+
+	if err := store.Save(ctx, []llm.Message{llm.UserMessage(llm.Text("old")), llm.AssistantMessage([]llm.ContentPart{llm.Text("ok")})}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, logged, err := store.LoadSnapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err = store.SaveSnapshot(ctx, memory.Snapshot{Summary: "s"}, logged[len(logged)-1].Cursor, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	tooLong := &llm.ProviderError{Provider: "p", StatusCode: 400, ContextLengthExceeded: true, Err: errors.New("prompt is too long")}
+	client := &scriptedLLM{fn: func(int, []llm.Message) (*llm.Result, error) { return nil, tooLong }}
+
+	a := mustNew(t, client, "agent", "desc")
+	a.SetMemory(store)
+	a.SetCompaction(agent.CompactorFunc(func(context.Context, agent.CompactInput) (*agent.Compaction, error) {
+		return &agent.Compaction{Kept: []llm.Message{llm.UserMessage(llm.Text("made up"))}}, nil
+	}), 0)
+
+	// No input, and the snapshot covers the whole log: nothing to keep.
+	if _, err = a.Run(ctx); !errors.Is(err, agent.ErrInvalidCompaction) {
+		t.Fatalf("err = %v, want ErrInvalidCompaction", err)
+	}
+}

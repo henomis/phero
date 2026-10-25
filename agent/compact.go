@@ -84,7 +84,7 @@ func (f CompactorFunc) Compact(ctx context.Context, in CompactInput) (*Compactio
 // check returns ErrInvalidCompaction unless c's kept messages line up with
 // the last messages of in and do not start with a tool result.
 func (c *Compaction) check(in CompactInput) error {
-	if len(c.Kept) >= len(in.Messages) && len(in.Messages) > 0 {
+	if len(c.Kept) > 0 && len(c.Kept) >= len(in.Messages) {
 		return fmt.Errorf("%w: it keeps every message", ErrInvalidCompaction)
 	}
 
