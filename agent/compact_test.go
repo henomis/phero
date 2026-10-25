@@ -44,6 +44,11 @@ func (s *summaryLLM) Execute(_ context.Context, msgs []llm.Message, _ ...llm.Cal
 	return textResult("summary"), nil
 }
 
+// paddedArgs are tool call arguments of about 300 estimated tokens: over the
+// budget a compaction keeps whole at a 1000-token threshold, so the messages
+// after the summary are worth compacting.
+var paddedArgs = `{"pad":"` + strings.Repeat("x", 1200) + `"}`
+
 // toolSession returns a user task followed by n tool turns (assistant call
 // plus result).
 func toolSession(n int) []llm.Message {
@@ -190,7 +195,7 @@ func TestRun_RejectsAnInvalidCompaction(t *testing.T) {
 		"keeps everything":          func(in agent.CompactInput) []llm.Message { return in.Messages },
 	} {
 		client := &scriptedLLM{fn: func(call int, _ []llm.Message) (*llm.Result, error) {
-			return toolCallResultWithUsage("echo", fmt.Sprintf("c%d", call), "{}", &llm.Usage{InputTokens: 5000}), nil
+			return toolCallResultWithUsage("echo", fmt.Sprintf("c%d", call), paddedArgs, &llm.Usage{InputTokens: 5000}), nil
 		}}
 
 		a := mustNew(t, client, "agent", "desc")
@@ -249,7 +254,7 @@ func addEchoTool(t *testing.T, a *agent.Agent) {
 func TestRun_CompactsAtTokenThreshold(t *testing.T) {
 	client := &scriptedLLM{fn: func(call int, _ []llm.Message) (*llm.Result, error) {
 		if call < 4 {
-			return toolCallResultWithUsage("echo", fmt.Sprintf("c%d", call), "{}", &llm.Usage{InputTokens: 900, OutputTokens: 200}), nil
+			return toolCallResultWithUsage("echo", fmt.Sprintf("c%d", call), paddedArgs, &llm.Usage{InputTokens: 900, OutputTokens: 200}), nil
 		}
 
 		return textResult("done"), nil
@@ -345,7 +350,7 @@ func assertRoles(t *testing.T, msgs []llm.Message, roles ...string) {
 func TestRun_CompactionSavesEachMessageOnce(t *testing.T) {
 	client := &scriptedLLM{fn: func(call int, _ []llm.Message) (*llm.Result, error) {
 		if call == 1 {
-			return toolCallResultWithUsage("echo", "c2", "{}", &llm.Usage{InputTokens: 5000}), nil
+			return toolCallResultWithUsage("echo", "c2", paddedArgs, &llm.Usage{InputTokens: 5000}), nil
 		}
 
 		return textResult("done"), nil
@@ -430,7 +435,7 @@ func TestRun_SecondContextLengthErrorEndsRun(t *testing.T) {
 
 func TestRun_CompactionErrorEndsRun(t *testing.T) {
 	client := &scriptedLLM{fn: func(int, []llm.Message) (*llm.Result, error) {
-		return toolCallResultWithUsage("echo", "c", "{}", &llm.Usage{InputTokens: 5000}), nil
+		return toolCallResultWithUsage("echo", "c", paddedArgs, &llm.Usage{InputTokens: 5000}), nil
 	}}
 
 	a := mustNew(t, client, "agent", "desc")
@@ -514,7 +519,7 @@ func twoRunsWithSnapshots(t *testing.T, store memory.Memory, checkpoint bool) []
 	first := &scriptedLLM{fn: func(call int, _ []llm.Message) (*llm.Result, error) {
 		switch call {
 		case 1, 2:
-			return toolCallResultWithUsage("echo", fmt.Sprintf("c%d", call), "{}", &llm.Usage{InputTokens: 5000}), nil
+			return toolCallResultWithUsage("echo", fmt.Sprintf("c%d", call), paddedArgs, &llm.Usage{InputTokens: 5000}), nil
 		default:
 			return textResult("first done"), nil
 		}
@@ -611,7 +616,7 @@ func TestRun_SnapshotConflictKeepsTheRunGoing(t *testing.T) {
 
 	client := &scriptedLLM{fn: func(call int, _ []llm.Message) (*llm.Result, error) {
 		if call == 1 {
-			return toolCallResultWithUsage("echo", "c1", "{}", &llm.Usage{InputTokens: 5000}), nil
+			return toolCallResultWithUsage("echo", "c1", paddedArgs, &llm.Usage{InputTokens: 5000}), nil
 		}
 
 		return textResult("done"), nil
@@ -661,7 +666,7 @@ func TestRun_SnapshotsStoredAfterClippedToolResults(t *testing.T) {
 
 	client := &scriptedLLM{fn: func(call int, _ []llm.Message) (*llm.Result, error) {
 		if call <= 3 {
-			return toolCallResultWithUsage("big", fmt.Sprintf("c%d", call), "{}", &llm.Usage{InputTokens: 5000}), nil
+			return toolCallResultWithUsage("big", fmt.Sprintf("c%d", call), paddedArgs, &llm.Usage{InputTokens: 5000}), nil
 		}
 
 		return textResult("done"), nil
@@ -689,6 +694,34 @@ func TestRun_SnapshotsStoredAfterClippedToolResults(t *testing.T) {
 	// turn and the answer after it.
 	if len(logged) > 3 {
 		t.Fatalf("stored snapshot leaves %d messages after it (up to %s), want the later compactions stored", len(logged), snap.UpTo)
+	}
+}
+
+func TestRun_NoCompactionWhenOnlyTheSummaryIsLarge(t *testing.T) {
+	// Every call reports 5000 tokens, over the threshold, but the messages
+	// after the first compaction are small: compacting them again can't help.
+	client := &scriptedLLM{fn: func(call int, _ []llm.Message) (*llm.Result, error) {
+		if call < 6 {
+			return toolCallResultWithUsage("echo", fmt.Sprintf("c%d", call), "{}", &llm.Usage{InputTokens: 5000}), nil
+		}
+
+		return textResult("done"), nil
+	}}
+
+	a := mustNew(t, client, "agent", "desc")
+	a.SetMemory(&appendMemory{msgs: bigHistory(10, 4000)})
+	addEchoTool(t, a)
+
+	compactions := 0
+	a.SetCompaction(keepLastCompactor(&compactions), 5000)
+
+	if _, err := a.Run(context.Background(), llm.Text("go")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Only the large stored history, before the first call.
+	if compactions != 1 {
+		t.Fatalf("compactions = %d, want 1", compactions)
 	}
 }
 

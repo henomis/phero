@@ -325,11 +325,27 @@ func (a *Agent) compactIfNeeded(ctx context.Context, rs *runState, session *[]ll
 		return nil
 	}
 
+	// Compaction only shortens the messages after the summary. When those fit
+	// the budget a compactor keeps whole, the threshold is reached by what it
+	// can't shorten (the system prompt, the summary, the pinned task), and
+	// compacting again would cost a summary call on every iteration for
+	// nothing. A prompt that then overflows is still compacted once on the
+	// context-length error.
+	if EstimateTokens((*session)[rs.tailStart():]) < a.keepTokens() {
+		return nil
+	}
+
 	var err error
 
 	*session, *sessionIndex, err = a.compactSession(ctx, rs, *session, *sessionIndex)
 
 	return err
+}
+
+// keepTokens returns the budget for the messages a compaction keeps whole: a
+// quarter of the compaction threshold.
+func (a *Agent) keepTokens() int {
+	return a.compactAtTokens / 4 //nolint:mnd // a quarter of the threshold for the kept messages
 }
 
 // iterationFailed decides how the run goes on after an iteration failed with
@@ -391,7 +407,7 @@ func (a *Agent) compactSession(
 	in := CompactInput{
 		Previous:   rs.snapshot,
 		Messages:   slices.Clone(session[rs.tailStart():]),
-		KeepTokens: a.compactAtTokens / 4, //nolint:mnd // a quarter of the threshold for the kept messages
+		KeepTokens: a.keepTokens(),
 	}
 
 	compaction, err := a.compactor.Compact(ctx, in)
