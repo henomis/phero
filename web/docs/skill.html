@@ -105,13 +105,15 @@ Use this skill when the user asks for a random quote (inspirational, motivationa
       <p>
         The <code>allowed-tools</code> frontmatter field lists the tools a skill pre-approves, in the space-separated form
         of the Agent Skills spec (<code>Read Grep</code>) or the comma-separated form with patterns
-        (<code>Bash(git:*), Read</code>). <code>Skill.Tools()</code> returns the entries, the <code>skill</code> tool
+        (<code>Bash(git status:*), Read</code>). <code>Skill.Tools()</code> returns the entries, the <code>skill</code> tool
         returns them to the model, and <code>WithOnLoad</code> lets the application grant them, for example in a
         <a href="tool.html">permission policy</a>. As in Claude Code, the grant should last only for the run that
         loaded the skill (<code>AllowForRun</code>), and <code>permission.SkillGrants</code> leaves out grants too
         broad for a skill a cloned project may ship: bash with no fixed command (<code>Bash</code>,
-        <code>Bash(*)</code>, a <code>*</code> tool name) or with a command that runs others (<code>sh</code>,
-        <code>sudo</code>, <code>env</code>, <code>python</code>, …).
+        <code>Bash(*)</code>, a <code>*</code> tool name), with a quoted or escaped command (<code>\sh</code>),
+        with a command that runs others (<code>sh</code>, <code>sudo</code>, <code>env</code>,
+        <code>python3.12</code>, <code>busybox</code>, …), or with <code>git</code> and no subcommand
+        (<code>git -c</code> can run anything).
       </p>
       <pre><code class="language-go">skillTool, err := skilltool.New("",
     skilltool.WithRoots(userSkillsDir, "./skills"), // earlier roots win on the same skill name

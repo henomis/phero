@@ -540,14 +540,16 @@ func TestSkillGrants_RefusesBroadBash(t *testing.T) {
 	granted, refused := permission.SkillGrants([]string{
 		"Read", "Bash(git status:*)", "bash(go test *)",
 		"Bash", "Bash(*)", "bash(:*)", "*", "b*", "Bash(sh -c *)", "bash(sudo *)", "Bash(env *)",
+		`Bash(\sh:*)`, `Bash("sh" -c *)`, "Bash(python3.12 *)", "Bash(/usr/bin/python3 *)", "Bash(busybox:*)",
+		"Bash(pwsh *)", "Bash(tcsh *)", "Bash(git:*)", "Bash(git -c *)", "Bash(git *)",
 	})
 
 	if want := []string{"Read", "Bash(git status:*)", "bash(go test *)"}; !slices.Equal(granted, want) {
 		t.Errorf("granted = %q, want %q", granted, want)
 	}
 
-	if len(refused) != 8 {
-		t.Errorf("refused = %q, want the 8 broad rules", refused)
+	if len(refused) != 18 {
+		t.Errorf("refused = %q, want the 18 broad rules", refused)
 	}
 }
 
@@ -569,6 +571,7 @@ func TestDecide_ShellIsParsed(t *testing.T) {
 		{"(cd /tmp && rm -rf ~)", permission.Deny},      // nor a subshell
 		{"if true; then rm -rf ~; fi", permission.Deny}, // nor a compound command
 		{"$CMD ./...", permission.Ask},                  // the command itself is unknown
+		{`\echo hi`, permission.Ask},                    // and so is an escaped name
 		{"f() { rm -rf ~; }; f", permission.Deny},       // a function's body is checked
 		{"g() { echo hi; }; g", permission.Ask},         // and a function call is unknown
 		{"echo 'unterminated", permission.Ask},          // what does not parse is asked

@@ -39,8 +39,8 @@ var shellOperators = []string{"&&", "||", ";", "|", "&", "\n"}
 //     variable;
 //   - a statement only assigns variables, or declares them (export, local,
 //     declare, readonly), which changes what later commands do (PATH=.);
-//   - a command's name is not a plain word ("$CMD", a quoted name), or names a
-//     function the line defines;
+//   - a command's name is not a plain word ("$CMD", a quoted or escaped
+//     name such as "\sh"), or names a function the line defines;
 //   - a redirection writes a file ("cat a > ~/.bashrc"); "2>&1", ">&-",
 //     ">/dev/null", input redirections and heredocs write none.
 //
@@ -109,7 +109,7 @@ func (s *shellScan) call(n *syntax.CallExpr) {
 
 	s.commands = append(s.commands, strings.TrimSpace(b.String()))
 
-	if name := n.Args[0].Lit(); name == "" || s.funcs[name] {
+	if name := n.Args[0].Lit(); name == "" || strings.Contains(name, `\`) || s.funcs[name] {
 		s.safe = false
 	}
 }
