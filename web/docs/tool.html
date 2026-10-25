@@ -458,12 +458,16 @@ policy.Apply(readTool.Tool(), bashTool.Tool(), editTool.Tool())</code></pre>
       <ul>
         <li>A call is denied when a deny rule matches, else asked when an ask rule matches, else allowed when an allow
           rule matches, else given the default (<code>Ask</code>; change it with <code>WithDefault</code>).</li>
-        <li>A bash command line is split on <code>&amp;&amp;</code>, <code>||</code>, <code>;</code>, <code>|</code>,
-          <code>&amp;</code> and newlines, and every part must be allowed: <code>go test ./... &amp;&amp; rm -rf /</code>
-          does not pass <code>bash(go test *)</code>. Command or process substitution is asked (still denied when a deny rule
-          matches one of its parts: <code>rm -rf ~ $(true)</code> meets <code>bash(rm *)</code>), and so is a
-          redirection to a file (<code>cat a &gt;&gt; ~/.bashrc</code> does not pass <code>bash(cat *)</code>);
-          <code>2&gt;&amp;1</code> and <code>&gt;/dev/null</code> write no file and are allowed.</li>
+        <li>A bash command line is parsed as the shell would (<code>mvdan.cc/sh</code>), and every simple command
+          in it must be allowed: those joined by <code>&amp;&amp;</code>, <code>||</code>, <code>;</code>,
+          <code>|</code> and <code>&amp;</code>, and those inside subshells, <code>if</code>/<code>for</code> bodies,
+          functions and substitutions. <code>go test ./... &amp;&amp; rm -rf /</code> does not pass
+          <code>bash(go test *)</code>; a quoted operator does not split (<code>echo 'a &amp;&amp; b'</code> is one
+          command), and commands are matched single-spaced. A line is asked (still denied when a deny rule matches
+          one of its commands) when it does not parse, uses a command or process substitution, names its command with
+          something other than a plain word (<code>$CMD</code>, a function it defines), or redirects output to a file
+          (<code>cat a &gt;&gt; ~/.bashrc</code> does not pass <code>bash(cat *)</code>); <code>2&gt;&amp;1</code>,
+          <code>&gt;/dev/null</code>, input redirections and heredocs write no file.</li>
         <li>File paths are matched as the file tools open them: cleaned, made absolute against the working directory
           (<code>WithWorkingDir</code>, the process's by default; set it to the file tools' working directory), with
           a leading <code>~</code> read as the home directory, and resolved through symlinks. Path patterns in rules are resolved the same way, so <code>/repo/src/../secrets/k</code>

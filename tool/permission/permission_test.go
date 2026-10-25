@@ -76,7 +76,7 @@ func TestDecide(t *testing.T) {
 		{"bash", bashArgs("go test ./... && go build ./cmd"), permission.Allow},
 		{"bash", bashArgs("go test ./... && rm -rf /"), permission.Deny},
 		{"bash", bashArgs("go test ./... | tee out.txt"), permission.Ask},
-		{"bash", bashArgs("go test $(rm -rf /)"), permission.Ask},
+		{"bash", bashArgs("go test $(rm -rf /)"), permission.Deny}, // the deny rule sees inside
 		{"bash", bashArgs("go test `whoami`"), permission.Ask},
 		{"bash", bashArgs("ls"), permission.Ask},
 		{"edit", `{"file_path":"/repo/main.go"}`, permission.Allow},
@@ -548,5 +548,36 @@ func TestSkillGrants_RefusesBroadBash(t *testing.T) {
 
 	if len(refused) != 8 {
 		t.Errorf("refused = %q, want the 8 broad rules", refused)
+	}
+}
+
+func TestDecide_ShellIsParsed(t *testing.T) {
+	p := mustPolicy(t,
+		permission.WithAllow("bash(echo *)", "bash(cat *)", "bash(go test *)"),
+		permission.WithDeny("bash(rm -rf *)"),
+	)
+
+	cases := []struct {
+		command string
+		want    permission.Decision
+	}{
+		{`echo "a && b; c"`, permission.Allow},          // a quoted operator is not an operator
+		{"cat -n <<EOF\nhello\nEOF", permission.Allow},  // a heredoc writes no file
+		{"cat -n <<< hello", permission.Allow},          // nor does a here-string
+		{"rm  -rf ~", permission.Deny},                  // spacing does not hide a command
+		{"go test $(rm -rf ~)", permission.Deny},        // nor does a substitution
+		{"(cd /tmp && rm -rf ~)", permission.Deny},      // nor a subshell
+		{"if true; then rm -rf ~; fi", permission.Deny}, // nor a compound command
+		{"$CMD ./...", permission.Ask},                  // the command itself is unknown
+		{"f() { rm -rf ~; }; f", permission.Deny},       // a function's body is checked
+		{"g() { echo hi; }; g", permission.Ask},         // and a function call is unknown
+		{"echo 'unterminated", permission.Ask},          // what does not parse is asked
+		{"go test ./... 2>&1 | cat -n", permission.Allow},
+	}
+
+	for _, tc := range cases {
+		if got, subjects := p.Decide("bash", bashArgs(tc.command)); got != tc.want {
+			t.Errorf("Decide(%q) = %s (subjects %q), want %s", tc.command, got, subjects, tc.want)
+		}
 	}
 }

@@ -46,14 +46,18 @@
 // matches, else allowed when an allow rule matches, else given the default
 // decision (Ask unless WithDefault says otherwise).
 //
-// A bash command is split on &&, ||, ;, |, & and newlines, and every part must
-// be allowed on its own, so "go test ./... && rm -rf /" does not pass
-// bash(go test *). A command with $(...), backticks or process substitution is
-// asked, unless a deny rule matches one of its parts ("rm -rf ~ $(true)" is
-// still denied by bash(rm *)), and so is a redirection to a file ("cat a >> ~/.bashrc" does
-// not pass bash(cat *)); "2>&1" and ">/dev/null" write no file. The split does
-// not understand quotes: a quoted operator splits too, which can only make a
-// command asked, never allowed.
+// A bash command line is parsed as the shell would (mvdan.cc/sh), and every
+// simple command in it must be allowed on its own: those joined by &&, ||, ;,
+// | and &, and those inside subshells, if/for/while bodies, function bodies
+// and substitutions. So "go test ./... && rm -rf /" does not pass
+// bash(go test *), quoted operators do not split ("echo 'a && b'" is one
+// command), and commands are matched in a normal form, single-spaced. A line
+// is asked, unless a deny rule matches one of its commands, when it does not
+// parse, uses a command or process substitution, names its command with
+// something other than a plain word ("$CMD", a function it defines), or
+// redirects output to a file ("cat a >> ~/.bashrc" does not pass
+// bash(cat *)); "2>&1", ">&-", ">/dev/null", input redirections and heredocs
+// write no file.
 //
 // Bash rules are advisory, not a security boundary. They match the command
 // text, so a deny rule misses the same program written another way:

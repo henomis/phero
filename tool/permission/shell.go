@@ -15,39 +15,97 @@
 package permission
 
 import (
-	"regexp"
+	"bytes"
 	"strings"
+
+	"mvdan.cc/sh/v3/syntax"
 )
 
 // shellOperators separate the commands of a shell command line. Longer
-// operators come first so "&&" is not read as two "&".
+// operators come first so "&&" is not read as two "&". They split a line the
+// parser rejects, to find what deny rules can still see.
 var shellOperators = []string{"&&", "||", ";", "|", "&", "\n"}
 
-// harmlessRedirects write no file: duplicating or closing a descriptor
-// ("2>&1", ">&-") and discarding output (">/dev/null", "&>/dev/null"). The
-// target must end the word: bash reads ">&1x" as a redirection to the file
-// "1x". The character that ends it is kept, as it may be an operator.
-var harmlessRedirects = regexp.MustCompile(
-	`(?:[0-9]*>&(?:[0-9]+|-)|(?:&|[0-9]*)>>?[ \t]*/dev/null)(?P<end>[\s;&|<>()]|$)`,
-)
-
-// splitShell returns the commands of a shell command line, split on its
-// operators. It reports false when the line runs commands it cannot see
-// through (command or process substitution), or redirects output to a file:
-// "cat a > ~/.bashrc" writes whatever an allowed cat prints.
+// splitShell parses a shell command line and returns its simple commands,
+// printed in a normal form (single spaces, the words as written), those inside
+// subshells, compound commands, function bodies and substitutions included. It
+// reports false when the line cannot be judged from them:
+//   - it does not parse;
+//   - a command or process substitution runs a command whose output becomes
+//     part of another;
+//   - a command's name is not a plain word ("$CMD", a quoted name), or names a
+//     function the line defines;
+//   - a redirection writes a file ("cat a > ~/.bashrc"); "2>&1", ">&-",
+//     ">/dev/null", input redirections and heredocs write none.
+//
+// The commands are returned in both cases, for the deny rules to see.
 func splitShell(line string) ([]string, bool) {
-	for _, sub := range []string{"$(", "`", "<(", ">("} {
-		if strings.Contains(line, sub) {
-			return nil, false
+	file, err := syntax.NewParser().Parse(strings.NewReader(line), "")
+	if err != nil {
+		return splitOperators(line), false
+	}
+
+	var (
+		commands []string
+		safe     = true
+		funcs    = map[string]bool{}
+		printer  = syntax.NewPrinter(syntax.SingleLine(true))
+	)
+
+	syntax.Walk(file, func(node syntax.Node) bool {
+		switch n := node.(type) {
+		case *syntax.CmdSubst, *syntax.ProcSubst:
+			safe = false
+		case *syntax.FuncDecl:
+			funcs[n.Name.Value] = true
+		case *syntax.Stmt:
+			for _, r := range n.Redirs {
+				safe = safe && harmlessRedirect(r)
+			}
+		case *syntax.CallExpr:
+			if len(n.Args) == 0 {
+				return true // assignments only
+			}
+
+			var b bytes.Buffer
+			if printer.Print(&b, n) != nil {
+				safe = false
+				return true
+			}
+
+			commands = append(commands, strings.TrimSpace(b.String()))
+
+			if name := n.Args[0].Lit(); name == "" || funcs[name] {
+				safe = false
+			}
 		}
+
+		return true
+	})
+
+	return commands, safe
+}
+
+// harmlessRedirect reports whether r writes no file: an input redirection, a
+// heredoc or here-string, a descriptor duplicated or closed, or output sent to
+// /dev/null.
+func harmlessRedirect(r *syntax.Redirect) bool {
+	target := ""
+	if r.Word != nil {
+		target = r.Word.Lit()
 	}
 
-	line = harmlessRedirects.ReplaceAllString(line, " ${end}")
-	if strings.Contains(line, ">") {
-		return nil, false
+	//nolint:exhaustive // every other operator writes a file
+	switch r.Op {
+	case syntax.RdrIn, syntax.Hdoc, syntax.DashHdoc, syntax.WordHdoc, syntax.DplIn:
+		return true
+	case syntax.DplOut:
+		return target == "-" || (target != "" && strings.Trim(target, "0123456789") == "")
+	case syntax.RdrOut, syntax.AppOut, syntax.RdrAll, syntax.AppAll, syntax.RdrClob:
+		return target == "/dev/null"
+	default:
+		return false
 	}
-
-	return splitOperators(line), true
 }
 
 // splitOperators splits a command line on its operators, with no check of

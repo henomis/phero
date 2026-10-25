@@ -494,7 +494,7 @@ func (p *Policy) subjects(tool, arguments string) ([]string, []string, bool) {
 	commands, ok := splitShell(value)
 	if !ok {
 		// Asked, unless a deny rule matches what can be seen of it.
-		return nil, splitOperators(value), false
+		return nil, commands, false
 	}
 
 	if len(commands) == 0 {
