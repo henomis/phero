@@ -117,7 +117,6 @@ func main() {
 		qc,
 		strings.TrimSpace(qdrantCollection),
 		vsqdrant.WithVectorSize(vectorSize),
-		vsqdrant.WithWait(true),
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create qdrant vector store: %v\n", err)

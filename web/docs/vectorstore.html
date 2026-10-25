@@ -95,7 +95,6 @@ store, err := vsqdrant.New(
     qc,
     strings.TrimSpace(qdrantCollection),
     vsqdrant.WithVectorSize(vectorSize),
-    vsqdrant.WithWait(true),
 )
 if err != nil {
     // handle error
@@ -106,6 +105,11 @@ ragEngine, _ := rag.New(store, embedder, rag.WithTopK(topK))</code></pre>
 
       <p>
         The RAG engine handles ingestion and retrieval; the vector store’s job is to provide durable storage and fast similarity search.
+      </p>
+      <p>
+        Writes wait until Qdrant has applied them, so a query right after ingestion sees the new points.
+        <code>vsqdrant.WithWait(false)</code> returns as soon as Qdrant has accepted a write: faster, but a search
+        right after it may miss it.
       </p>
     </section>
 
@@ -146,7 +150,6 @@ store, err := vsqdrant.New(
     qc,
     qdrantCollection,
     vsqdrant.WithVectorSize(vectorSize),
-    vsqdrant.WithWait(true),
 )
 if err != nil {
     // handle error
