@@ -207,6 +207,10 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if _, err = tx.ExecContext(ctx, lockSessionSQL, m.tableName, m.sessionID); err != nil {
+		return err
+	}
+
 	for _, msg := range messages {
 		b, marshalErr := json.Marshal(msg)
 		if marshalErr != nil {

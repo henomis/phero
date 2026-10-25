@@ -134,3 +134,11 @@ const pruneMessagesSQLTemplate = `
 DELETE FROM %s
 WHERE session_id = $1 AND seq <= $2
 `
+
+// lockSessionSQL serializes the transactions that append to one session
+// ($1: table name, $2: session id) until they end: each takes its seq after
+// the previous one committed, so a session's rows commit in seq order and a
+// snapshot up to a seq never hides a row committed after it.
+const lockSessionSQL = `
+SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))
+`

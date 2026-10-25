@@ -451,3 +451,55 @@ func TestMemoryPostgres_Snapshots(t *testing.T) {
 		_ = other.Clear(ctx)
 	}
 }
+
+// TestMemoryPostgres_SaveWaitsForTheSessionsWriter checks that a Save waits
+// while another transaction appends to the same session, so the session's
+// rows commit in seq order.
+func TestMemoryPostgres_SaveWaitsForTheSessionsWriter(t *testing.T) {
+	db := requirePostgres(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	const table = "conversation_memory"
+
+	sessionID := "e2e-test-" + uuid.New().String()
+
+	mem, err := memorypsql.New(db, sessionID, memorypsql.WithEnsureSchema(true), memorypsql.WithTable(table))
+	if err != nil {
+		t.Fatalf("psql.New: %v", err)
+	}
+
+	if err = mem.EnsureSchema(ctx); err != nil {
+		t.Fatalf("EnsureSchema: %v", err)
+	}
+
+	// Another writer holds the session's lock, as a Save in progress does.
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`, table, sessionID); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+
+	go func() { done <- mem.Save(ctx, []llm.Message{llm.UserMessage(llm.Text("after"))}) }()
+
+	select {
+	case err = <-done:
+		t.Fatalf("Save returned (%v) while another writer held the session", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err = <-done; err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+}
