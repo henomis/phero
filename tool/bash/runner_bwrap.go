@@ -43,7 +43,8 @@ import (
 // Tools installed or caching outside the system directories need those paths
 // mounted, for example WithReadOnlyPaths for a toolchain under $HOME and
 // WithWritablePaths for the Go build and module caches. A workspace or extra
-// path that is / or contains $HOME is refused (ErrPathTooBroad), and the
+// path that is / or contains $HOME, symlinks resolved, is refused
+// (ErrPathTooBroad), and the
 // command runs in a new session, detached from the caller's terminal.
 type BubblewrapRunner struct {
 	bwrap     string
@@ -133,19 +134,39 @@ func NewBubblewrapRunner(workspace string, opts ...BubblewrapOption) (*Bubblewra
 }
 
 // checkPaths refuses a mounted path that is / or contains $HOME: it would
-// bring back the host sockets and files the sandbox hides.
+// bring back the host sockets and files the sandbox hides. Paths and $HOME
+// are compared with their symlinks resolved, as bwrap mounts what a path
+// points to.
 func (r *BubblewrapRunner) checkPaths() error {
 	paths := append([]string{r.workspace}, r.writable...)
 	paths = append(paths, r.readOnly...)
 
+	homes := []string{}
+	if r.home != "" {
+		homes = append(homes, r.home, resolvedPath(r.home))
+	}
+
 	for _, p := range paths {
-		p = filepath.Clean(p)
-		if p == "/" || (r.home != "" && (p == r.home || strings.HasPrefix(r.home, p+"/"))) {
-			return fmt.Errorf("%w: %s", ErrPathTooBroad, p)
+		for _, candidate := range []string{filepath.Clean(p), resolvedPath(p)} {
+			if candidate == "/" || slices.ContainsFunc(homes, func(home string) bool {
+				return candidate == home || strings.HasPrefix(home, candidate+"/")
+			}) {
+				return fmt.Errorf("%w: %s", ErrPathTooBroad, p)
+			}
 		}
 	}
 
 	return nil
+}
+
+// resolvedPath returns path with its symlinks resolved, or path cleaned when
+// it cannot be resolved (it does not exist yet).
+func resolvedPath(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+
+	return filepath.Clean(path)
 }
 
 // Command returns the bwrap invocation that runs `bash -c command` in the

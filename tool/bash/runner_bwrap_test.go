@@ -276,3 +276,47 @@ func TestBubblewrap_NewSession(t *testing.T) {
 		t.Fatalf("args = %q, want --new-session", cmd.Args)
 	}
 }
+
+func TestNewBubblewrapRunner_RefusesBroadPathsThroughSymlinks(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+
+	if err := os.Mkdir(home, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("HOME", home)
+
+	for name, target := range map[string]string{"home": home, "root": "/"} {
+		link := filepath.Join(root, "ln-"+name)
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err := NewBubblewrapRunner(link)
+		if errors.Is(err, ErrBubblewrapNotFound) {
+			t.Skip("bwrap not installed")
+		}
+
+		if !errors.Is(err, ErrPathTooBroad) {
+			t.Errorf("workspace %s -> %s: err = %v, want ErrPathTooBroad", link, target, err)
+		}
+	}
+
+	// A symlinked $HOME, with the workspace given as its real path.
+	realHome := filepath.Join(root, "data")
+	if err := os.Mkdir(realHome, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	linkedHome := filepath.Join(root, "linked-home")
+	if err := os.Symlink(realHome, linkedHome); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("HOME", linkedHome)
+
+	if _, err := NewBubblewrapRunner(realHome); !errors.Is(err, ErrPathTooBroad) {
+		t.Errorf("real path of a symlinked home: err = %v, want ErrPathTooBroad", err)
+	}
+}
