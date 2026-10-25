@@ -79,8 +79,8 @@ a.SetMemory(conversationMemory)</code></pre>
         A memory that implements <code>memory.SnapshotStore</code> keeps a log of messages plus a stored
         <code>memory.Snapshot</code>: a summary (and a few pinned messages, such as the task) that stands for the oldest
         messages. <code>Retrieve</code> then returns the summary followed by the messages after it, so a long
-        conversation stays short without losing its log. <code>memory/simple</code>, <code>memory/jsonfile</code>
-        and <code>memory/psql</code> implement it; the agent's compaction uses it.
+        conversation stays short without losing its log. <code>memory/simple</code>, <code>memory/jsonfile</code>,
+        <code>memory/psql</code> and <code>memory/nats</code> implement it; the agent's compaction uses it.
       </p>
 
       <pre><code class="language-go">snap, tail, err := store.LoadSnapshot(ctx) // latest snapshot (or nil) and the messages after it, with cursors
@@ -98,7 +98,8 @@ err = store.SaveSnapshot(ctx, memory.Snapshot{Summary: text}, tail[len(tail)-5].
           with the new messages, in fixed sections: task, decisions and facts, files and commands, user preferences,
           open items.</li>
         <li>The messages a snapshot covers are kept by default; <code>WithPruneCompacted(true)</code> (simple, jsonfile,
-          psql) drops them. Snapshots can't be combined with a backend's own <code>WithSummarization</code>, which rewrites the log
+          psql) drops them; <code>memory/nats</code> drops them by default, as a session must fit in one NATS
+          message. Snapshots can't be combined with a backend's own <code>WithSummarization</code>, which rewrites the log
           (<code>memory.ErrSnapshotsUnsupported</code>).</li>
       </ul>
     </section>
@@ -239,6 +240,12 @@ a.SetMemory(conversationMemory)</code></pre>
         The full walkthrough is in the
         <a href="https://github.com/henomis/phero/tree/main/examples/nats-memory">NATS Memory example</a>,
         which demonstrates session resumption across two process runs.
+      </p>
+      <p>
+        A session is one KV value, so it must fit in one NATS message (1 MB by default). It keeps
+        <a href="#snapshots">snapshots</a>, written with the same compare-and-swap as <code>Save</code>, and saving one
+        drops the messages it covers by default, so a long session stays under the limit;
+        <code>natsmemory.WithPruneCompacted(false)</code> keeps them.
       </p>
     </section>
 

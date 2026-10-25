@@ -27,9 +27,13 @@
 // server's max_payload (1MB by default), or the bucket's MaxValueSize if that
 // is smaller. Images count base64-encoded. Past the limit Save returns
 // [ErrSessionTooLarge], and so will every later Save to that session. To stay
-// under it, enable [WithSummarization] (which also drops the images of the
-// messages it summarizes), start a new session, raise max_payload, or use
-// memory/psql, which stores each message as its own row.
+// under it, use the agent's compaction (agent.SetCompaction): Memory is a
+// memory.SnapshotStore, and saving a snapshot drops the messages it stands for
+// unless WithPruneCompacted(false). Otherwise start a new session, raise
+// max_payload, or use memory/psql, which stores each message as its own row.
+// The value stays a plain JSON array of messages until the first snapshot,
+// which older versions read; then it holds the messages, the absolute position
+// of the first one, and the snapshot.
 //
 // Requirements:
 //   - A NATS server with JetStream enabled (start with: nats -js).

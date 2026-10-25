@@ -27,6 +27,9 @@ var (
 	// ErrConcurrentUpdate is returned by Save when other writers kept updating
 	// the session between its read and its write, on every attempt.
 	ErrConcurrentUpdate = errors.New("session updated concurrently")
+	// ErrUnknownValueVersion is returned when a session's value was written
+	// in a format this version does not know.
+	ErrUnknownValueVersion = errors.New("unknown session value version")
 	// ErrSessionTooLarge is returned by Save when the session no longer fits in
 	// one NATS message; see [SessionTooLargeError].
 	ErrSessionTooLarge = errors.New("session too large to store")

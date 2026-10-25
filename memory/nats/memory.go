@@ -28,11 +28,26 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/henomis/phero/v2/internal/natskv"
+	"github.com/henomis/phero/v2/internal/snaplog"
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/memory"
 )
 
-var _ memory.Memory = (*Memory)(nil)
+var _ memory.SnapshotStore = (*Memory)(nil)
+
+// valueVersion is the value format with a snapshot: an object holding the
+// messages, the absolute position of the first one, and the snapshot. A
+// session without a snapshot stays a plain JSON array of messages, which
+// older versions read.
+const valueVersion = 2
+
+// session is the decoded value of a session's key.
+type session struct {
+	Version  int              `json:"version"`
+	Offset   int              `json:"offset"`
+	Messages []llm.Message    `json:"messages"`
+	Snapshot *memory.Snapshot `json:"snapshot,omitempty"`
+}
 
 // Option configures a Memory instance.
 type Option func(*Memory)
@@ -50,6 +65,18 @@ type Memory struct {
 	llm              llm.LLM
 	summaryThreshold uint
 	summarySize      uint
+
+	prune bool
+}
+
+// WithPruneCompacted sets whether saving a snapshot drops the messages it
+// stands for. It is on by default: the whole session is one KV value, which
+// must fit in one NATS message (see SessionTooLargeError), so a long session
+// needs its covered messages dropped.
+func WithPruneCompacted(prune bool) Option {
+	return func(m *Memory) {
+		m.prune = prune
+	}
 }
 
 // New creates a new NATS JetStream KV-backed memory bound to sessionID.
@@ -65,6 +92,7 @@ func New(kv nats.KeyValue, sessionID string, options ...Option) (*Memory, error)
 	m := &Memory{
 		kv:        kv,
 		sessionID: sessionID,
+		prune:     true,
 	}
 
 	for _, opt := range options {
@@ -115,35 +143,59 @@ const saveAttempts = 5
 // doubles with each attempt, so writers that collided spread out.
 const saveBackoff = 10 * time.Millisecond
 
-// load retrieves and JSON-decodes the current message list from the KV store,
-// with the key's revision for a later compare-and-swap write. It returns an
-// empty slice and revision 0 when the key does not exist yet (or was cleared).
+// load retrieves and JSON-decodes the session from the KV store, with the
+// key's revision for a later compare-and-swap write. It returns an empty
+// session and revision 0 when the key does not exist yet (or was cleared).
 // The caller must hold m.mu.
-func (m *Memory) load() ([]llm.Message, uint64, error) {
+func (m *Memory) load() (*session, uint64, error) {
 	entry, err := m.kv.Get(m.sessionID)
 	if err != nil {
 		if errors.Is(err, nats.ErrKeyNotFound) {
-			return []llm.Message{}, 0, nil
+			return &session{Messages: []llm.Message{}}, 0, nil
 		}
 
 		return nil, 0, err
 	}
 
-	var msgs []llm.Message
-	if unmarshalErr := json.Unmarshal(entry.Value(), &msgs); unmarshalErr != nil {
+	sess := &session{}
+
+	if bytes.HasPrefix(bytes.TrimSpace(entry.Value()), []byte("{")) {
+		if unmarshalErr := json.Unmarshal(entry.Value(), sess); unmarshalErr != nil {
+			return nil, 0, unmarshalErr
+		}
+
+		if sess.Version != valueVersion {
+			return nil, 0, fmt.Errorf("%w: %d", ErrUnknownValueVersion, sess.Version)
+		}
+
+		return sess, entry.Revision(), nil
+	}
+
+	if unmarshalErr := json.Unmarshal(entry.Value(), &sess.Messages); unmarshalErr != nil {
 		return nil, 0, unmarshalErr
 	}
 
-	return msgs, entry.Revision(), nil
+	return sess, entry.Revision(), nil
 }
 
-// store JSON-encodes the message list and writes it back to the KV store, only
-// if the key is still at revision: Create when there was no value, Update
+// store JSON-encodes the session and writes it back to the KV store, only if
+// the key is still at revision: Create when there was no value, Update
 // otherwise. A write that lost a race fails with an error matching
 // nats.ErrKeyExists; one too large to store, with a *SessionTooLargeError.
 // The caller must hold m.mu.
-func (m *Memory) store(msgs []llm.Message, revision uint64) error {
-	data, err := json.Marshal(msgs)
+func (m *Memory) store(sess *session, revision uint64) error {
+	var (
+		data []byte
+		err  error
+	)
+
+	if sess.Snapshot == nil && sess.Offset == 0 {
+		data, err = json.Marshal(sess.Messages)
+	} else {
+		sess.Version = valueVersion
+		data, err = json.Marshal(sess)
+	}
+
 	if err != nil {
 		return err
 	}
@@ -212,17 +264,17 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 			}
 		}
 
-		existing, revision, err := m.load()
+		sess, revision, err := m.load()
 		if err != nil {
 			return err
 		}
 
-		merged, err := m.merge(ctx, existing, messages, &summary)
+		sess.Messages, err = m.merge(ctx, sess.Messages, messages, &summary)
 		if err != nil {
 			return err
 		}
 
-		err = m.store(merged, revision)
+		err = m.store(sess, revision)
 		if err == nil {
 			return nil
 		}
@@ -310,13 +362,101 @@ func sleepBackoff(ctx context.Context, attempt int) error {
 // Retrieve returns all messages currently in memory, ordered from oldest to newest.
 //
 // query is ignored (matching the behaviour of memory/simple and memory/psql).
+//
+// With a snapshot, the messages it stands for are replaced by
+// memory.SummaryMessages.
 func (m *Memory) Retrieve(_ context.Context, _ string) ([]llm.Message, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	msgs, _, err := m.load()
+	sess, _, err := m.load()
+	if err != nil {
+		return nil, err
+	}
 
-	return msgs, err
+	if sess.Snapshot != nil && m.llm == nil {
+		return snaplog.View(sess.Messages, sess.Offset, *sess.Snapshot), nil
+	}
+
+	return sess.Messages, nil
+}
+
+// LoadSnapshot returns the session's latest snapshot (nil when there is none)
+// and the messages after it, with their cursors. It returns
+// memory.ErrSnapshotsUnsupported with WithSummarization, which rewrites the
+// session.
+func (m *Memory) LoadSnapshot(_ context.Context) (*memory.Snapshot, []memory.LoggedMessage, error) {
+	if m.llm != nil {
+		return nil, nil, memory.ErrSnapshotsUnsupported
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sess, _, err := m.load()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return sess.Snapshot, snaplog.Tail(sess.Messages, sess.Offset, sess.Snapshot), nil
+}
+
+// SaveSnapshot stores s as standing for every message up to and including
+// upTo, when the latest snapshot is still prev (memory.ErrSnapshotConflict
+// otherwise, even against another process). upTo must be a cursor of this
+// session after prev's (memory.ErrInvalidCursor otherwise). The write is a
+// compare-and-swap on the key's revision, retried as Save's is, so messages
+// another process appends meanwhile are kept. Covered messages are dropped
+// unless WithPruneCompacted(false).
+func (m *Memory) SaveSnapshot(ctx context.Context, s memory.Snapshot, upTo memory.Cursor, prev *memory.Snapshot) error {
+	if m.llm != nil {
+		return memory.ErrSnapshotsUnsupported
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var lastErr error
+
+	for attempt := range saveAttempts {
+		if attempt > 0 {
+			if err := sleepBackoff(ctx, attempt); err != nil {
+				return err
+			}
+		}
+
+		sess, revision, err := m.load()
+		if err != nil {
+			return err
+		}
+
+		pos, err := snaplog.Cutoff(sess.Snapshot, prev, upTo, sess.Offset+len(sess.Messages))
+		if err != nil {
+			return err
+		}
+
+		snap := s
+		snap.UpTo = upTo
+		sess.Snapshot = &snap
+
+		if m.prune && pos >= sess.Offset {
+			sess.Messages = sess.Messages[pos+1-sess.Offset:]
+			sess.Offset = pos + 1
+		}
+
+		err = m.store(sess, revision)
+		if err == nil {
+			return nil
+		}
+
+		if !errors.Is(err, nats.ErrKeyExists) {
+			return err
+		}
+
+		lastErr = err
+	}
+
+	return fmt.Errorf("%w: %w", ErrConcurrentUpdate, lastErr)
 }
 
 // Clear removes all messages for this session.
