@@ -49,11 +49,17 @@ var defaultSubjects = map[string]string{
 	"web_fetch":  "url",
 }
 
-// isPathTool reports whether tool is a built-in tool whose subject is a file
-// path: its subjects and rule patterns are cleaned, made absolute against the
-// working directory and resolved through symlinks before they are matched.
-func isPathTool(tool string) bool {
-	arg := defaultSubjects[tool]
+// isPathTool reports whether tool's subject argument is a file path
+// (file_path or path, as for the built-in file tools or by WithSubject): its
+// subjects and rule patterns are cleaned, made absolute against the working
+// directory and resolved through symlinks before they are matched. Tool names
+// in rules match case-insensitively, so a lower-case name is looked up too.
+func (p *Policy) isPathTool(tool string) bool {
+	arg, ok := p.args[tool]
+	if !ok {
+		arg = p.args[strings.ToLower(tool)]
+	}
+
 	return arg == argFilePath || arg == argPath
 }
 
@@ -94,6 +100,7 @@ type Policy struct {
 	asker      Asker
 	args       map[string]string // the subject argument of each tool
 	workingDir string
+	home       string // expands a leading ~ in paths
 
 	mu     sync.Mutex // serializes questions and guards always
 	always map[string][]string
@@ -185,6 +192,10 @@ func New(opts ...Option) (*Policy, error) {
 
 	if wd, err := os.Getwd(); err == nil {
 		p.workingDir = wd
+	}
+
+	if home, err := os.UserHomeDir(); err == nil {
+		p.home = home
 	}
 
 	for _, opt := range opts {
@@ -332,7 +343,18 @@ func (p *Policy) check(ctx context.Context, tool, arguments string) error {
 // (see subjects). The caller holds p.mu.
 func (p *Policy) decide(tool string, subjects, written []string) Decision {
 	if subjects == nil {
-		return Ask // a command line it cannot see through
+		// A command line it cannot see through is asked. Its visible parts
+		// (written) are still checked against the deny rules, so
+		// "rm -rf ~ $(true)" is not turned from a deny into a question.
+		for _, part := range written {
+			for _, r := range p.rules {
+				if r.decision == Deny && r.matches(tool, part) {
+					return Deny
+				}
+			}
+		}
+
+		return Ask
 	}
 
 	result := Allow
@@ -396,7 +418,7 @@ func (p *Policy) subjects(tool, arguments string) ([]string, []string, bool) {
 		return []string{""}, nil, false
 	}
 
-	if isPathTool(tool) {
+	if p.isPathTool(tool) {
 		written := p.absPath(value)
 
 		return []string{resolveSymlinks(written)}, []string{written}, false
@@ -408,7 +430,8 @@ func (p *Policy) subjects(tool, arguments string) ([]string, []string, bool) {
 
 	commands, ok := splitShell(value)
 	if !ok {
-		return nil, nil, false
+		// Asked, unless a deny rule matches what can be seen of it.
+		return nil, splitOperators(value), false
 	}
 
 	if len(commands) == 0 {
@@ -478,7 +501,7 @@ func topLevelString(arguments, key string) (string, int) {
 // parseRule parses a rule and, for a file tool, resolves its path pattern.
 func (p *Policy) parseRule(spec string, decision Decision) (rule, error) {
 	return parseRule(spec, decision, func(tool, pattern string) string {
-		if !isPathTool(strings.ToLower(tool)) {
+		if !p.isPathTool(tool) {
 			return pattern
 		}
 
@@ -494,10 +517,15 @@ func (p *Policy) resolvePath(path string) string {
 }
 
 // absPath cleans path and makes it absolute against the working directory.
-// An empty path is the working directory.
+// An empty path is the working directory, and a leading ~ is the home
+// directory.
 func (p *Policy) absPath(path string) string {
 	if path == "" {
 		path = p.workingDir
+	}
+
+	if p.home != "" && (path == "~" || strings.HasPrefix(path, "~/")) {
+		path = filepath.Join(p.home, strings.TrimPrefix(path, "~"))
 	}
 
 	if !filepath.IsAbs(path) && p.workingDir != "" {

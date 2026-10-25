@@ -451,12 +451,13 @@ policy.Apply(readTool.Tool(), bashTool.Tool(), editTool.Tool())</code></pre>
           rule matches, else given the default (<code>Ask</code>; change it with <code>WithDefault</code>).</li>
         <li>A bash command line is split on <code>&amp;&amp;</code>, <code>||</code>, <code>;</code>, <code>|</code>,
           <code>&amp;</code> and newlines, and every part must be allowed: <code>go test ./... &amp;&amp; rm -rf /</code>
-          does not pass <code>bash(go test *)</code>. Command or process substitution is always asked, and so is a
+          does not pass <code>bash(go test *)</code>. Command or process substitution is asked (still denied when a deny rule
+          matches one of its parts: <code>rm -rf ~ $(true)</code> meets <code>bash(rm *)</code>), and so is a
           redirection to a file (<code>cat a &gt;&gt; ~/.bashrc</code> does not pass <code>bash(cat *)</code>);
           <code>2&gt;&amp;1</code> and <code>&gt;/dev/null</code> write no file and are allowed.</li>
         <li>File paths are matched as the file tools open them: cleaned, made absolute against the working directory
-          (<code>WithWorkingDir</code>, the process's by default; set it to the file tools' working directory) and
-          resolved through symlinks. Path patterns in rules are resolved the same way, so <code>/repo/src/../secrets/k</code>
+          (<code>WithWorkingDir</code>, the process's by default; set it to the file tools' working directory), with
+          a leading <code>~</code> read as the home directory, and resolved through symlinks. Path patterns in rules are resolved the same way, so <code>/repo/src/../secrets/k</code>
           and a symlink into <code>secrets</code> both meet <code>read(/repo/secrets/*)</code>. Deny and ask rules also
           match the path as written, so <code>read(/repo/*/.env)</code> still covers a symlinked package.</li>
         <li>Arguments that give the subject twice (<code>{"command":"go test","COMMAND":"rm -rf ~"}</code>) are denied:
@@ -466,7 +467,8 @@ policy.Apply(readTool.Tool(), bashTool.Tool(), editTool.Tool())</code></pre>
           allows the same subject from then on. Without an <code>Asker</code>, calls that need asking are denied.</li>
         <li>A denied call returns a <code>*permission.DeniedError</code> (matches <code>permission.ErrDenied</code>),
           which the model sees as a failed tool call. The <code>Request</code> carries the model's tool call ID.</li>
-        <li><code>WithSubject(tool, argument)</code> sets the subject argument of other tools, such as an MCP tool's URL.</li>
+        <li><code>WithSubject(tool, argument)</code> sets the subject argument of other tools, such as an MCP tool's URL.
+          A subject argument named <code>file_path</code> or <code>path</code> is matched as a file path.</li>
       </ul>
     </section>
 

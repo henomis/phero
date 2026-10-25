@@ -47,10 +47,16 @@ func splitShell(line string) ([]string, bool) {
 		return nil, false
 	}
 
+	return splitOperators(line), true
+}
+
+// splitOperators splits a command line on its operators, with no check of
+// what it runs.
+func splitOperators(line string) []string {
 	parts := []string{line}
 
 	for _, op := range shellOperators {
-		var next []string
+		next := make([]string, 0, len(parts))
 
 		for _, p := range parts {
 			next = append(next, strings.Split(p, op)...)
@@ -67,5 +73,5 @@ func splitShell(line string) ([]string, bool) {
 		}
 	}
 
-	return commands, true
+	return commands
 }

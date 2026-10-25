@@ -430,3 +430,60 @@ func TestDecide_DenyMatchesThePathAsWritten(t *testing.T) {
 		}
 	}
 }
+
+func TestDecide_DenyWinsOverUnparseableCommands(t *testing.T) {
+	p := mustPolicy(t, permission.WithAllow("bash(go test *)"), permission.WithDeny("bash(rm *)"))
+
+	cases := []struct {
+		command string
+		want    permission.Decision
+	}{
+		{"rm -rf ~ $(true)", permission.Deny},
+		{"go test ./... && rm -rf ~ `true`", permission.Deny},
+		{"rm -rf ~ > log", permission.Deny},
+		{"go test $(go list ./...)", permission.Ask}, // no deny rule matches: still asked
+	}
+
+	for _, tc := range cases {
+		if got, _ := p.Decide("bash", bashArgs(tc.command)); got != tc.want {
+			t.Errorf("Decide(%q) = %s, want %s", tc.command, got, tc.want)
+		}
+	}
+}
+
+func TestDecide_TildeInPaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	p := mustPolicy(t, permission.WithAllow("read"), permission.WithDeny("read(~/.ssh/*)"))
+
+	for path, want := range map[string]permission.Decision{
+		home + "/.ssh/id_ed25519": permission.Deny,
+		"~/.ssh/id_ed25519":       permission.Deny,
+		home + "/notes.txt":       permission.Allow,
+	} {
+		if got, subjects := p.Decide("read", `{"file_path":"`+path+`"}`); got != want {
+			t.Errorf("Decide(%s) = %s (subjects %q), want %s", path, got, subjects, want)
+		}
+	}
+}
+
+func TestDecide_PathToolFollowsSubject(t *testing.T) {
+	repo := t.TempDir()
+
+	p := mustPolicy(t,
+		permission.WithWorkingDir(repo),
+		permission.WithSubject("fetch_file", "path"), // a custom tool with a path subject
+		permission.WithSubject("read", "name"),       // read's subject is no longer a path
+		permission.WithDeny("fetch_file("+repo+"/secrets/*)", "read(./x)"),
+		permission.WithAllow("fetch_file", "read"),
+	)
+
+	if got, subjects := p.Decide("fetch_file", `{"path":"`+repo+`/src/../secrets/k"}`); got != permission.Deny {
+		t.Errorf("custom path tool: %s (subjects %q), want the path resolved and denied", got, subjects)
+	}
+
+	if got, subjects := p.Decide("read", `{"name":"./x"}`); got != permission.Deny {
+		t.Errorf("read with a non-path subject: %s (subjects %q), want it matched as written", got, subjects)
+	}
+}

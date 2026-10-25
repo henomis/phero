@@ -28,12 +28,14 @@
 // prefix form some agents use, as in "Bash(git:*)"). The subject is the
 // argument that says what a call touches: the command for bash, the file path
 // for read, write, edit and multi_edit, the search path for glob and grep, the
-// URL for web_fetch; WithSubject sets it for other tools. A rule with no
+// URL for web_fetch; WithSubject sets it for other tools. A subject argument
+// named file_path or path is a file path, for any tool. A rule with no
 // pattern matches every call of its tool.
 //
 // File paths, in subjects and in rule patterns, are matched as the file tools
 // open them: cleaned, made absolute against the working directory
-// (WithWorkingDir, the process's by default) and resolved through symlinks,
+// (WithWorkingDir, the process's by default), with a leading ~ read as the
+// home directory, and resolved through symlinks,
 // so "/repo/src/../secrets/k" meets read(/repo/secrets/*). Deny and ask rules
 // also match the path as written, before its symlinks are resolved, so
 // read(/repo/*/.env) still covers a symlinked package. Arguments that
@@ -47,7 +49,8 @@
 // A bash command is split on &&, ||, ;, |, & and newlines, and every part must
 // be allowed on its own, so "go test ./... && rm -rf /" does not pass
 // bash(go test *). A command with $(...), backticks or process substitution is
-// always asked, and so is a redirection to a file ("cat a >> ~/.bashrc" does
+// asked, unless a deny rule matches one of its parts ("rm -rf ~ $(true)" is
+// still denied by bash(rm *)), and so is a redirection to a file ("cat a >> ~/.bashrc" does
 // not pass bash(cat *)); "2>&1" and ">/dev/null" write no file. The split does
 // not understand quotes: a quoted operator splits too, which can only make a
 // command asked, never allowed.
