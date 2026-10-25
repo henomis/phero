@@ -253,7 +253,9 @@ if err := a.AddTool(bashTool.KillTool());   err != nil { panic(err) }</code></pr
         are mounted, read-only, plus the workspace. <code>/tmp</code>, <code>/run</code> and <code>$HOME</code> are
         private and empty, so host Unix sockets (<code>docker.sock</code>, the D-Bus buses, agent sockets) and files
         such as <code>~/.ssh</code> are out of reach: <code>connect()</code> on a socket ignores read-only mounts, so
-        the sandbox does not mount them at all. There is no network, the environment is limited to
+        the sandbox does not mount them at all. A workspace or extra path that is <code>/</code> or contains
+        <code>$HOME</code> is refused (<code>bash.ErrPathTooBroad</code>), and commands run in a new session, detached
+        from the caller's terminal. There is no network, the environment is limited to
         <code>DefaultEnvAllowlist</code>, and the sandbox has its own PID namespace, so a timeout kills everything a
         command started.
       </p>

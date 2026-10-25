@@ -16,6 +16,7 @@ package bash
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -41,7 +42,9 @@ import (
 //
 // Tools installed or caching outside the system directories need those paths
 // mounted, for example WithReadOnlyPaths for a toolchain under $HOME and
-// WithWritablePaths for the Go build and module caches.
+// WithWritablePaths for the Go build and module caches. A workspace or extra
+// path that is / or contains $HOME is refused (ErrPathTooBroad), and the
+// command runs in a new session, detached from the caller's terminal.
 type BubblewrapRunner struct {
 	bwrap     string
 	workspace string
@@ -119,7 +122,27 @@ func NewBubblewrapRunner(workspace string, opts ...BubblewrapOption) (*Bubblewra
 		r.home = filepath.Clean(home)
 	}
 
+	if err = r.checkPaths(); err != nil {
+		return nil, err
+	}
+
 	return r, nil
+}
+
+// checkPaths refuses a mounted path that is / or contains $HOME: it would
+// bring back the host sockets and files the sandbox hides.
+func (r *BubblewrapRunner) checkPaths() error {
+	paths := append([]string{r.workspace}, r.writable...)
+	paths = append(paths, r.readOnly...)
+
+	for _, p := range paths {
+		p = filepath.Clean(p)
+		if p == "/" || (r.home != "" && (p == r.home || strings.HasPrefix(r.home, p+"/"))) {
+			return fmt.Errorf("%w: %s", ErrPathTooBroad, p)
+		}
+	}
+
+	return nil
 }
 
 // Command returns the bwrap invocation that runs `bash -c command` in the
@@ -153,7 +176,9 @@ func (r *BubblewrapRunner) Command(ctx context.Context, command string, opts Run
 		args = append(args, "--share-net")
 	}
 
-	args = append(args, "--die-with-parent", "--chdir", dir, "--", "bash", "-c", command)
+	// A new session detaches the command from the caller's terminal: no
+	// TIOCSTI input injection.
+	args = append(args, "--new-session", "--die-with-parent", "--chdir", dir, "--", "bash", "-c", command)
 
 	env := opts.Env
 	if env == nil {

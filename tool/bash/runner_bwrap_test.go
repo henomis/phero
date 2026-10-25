@@ -19,6 +19,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -219,5 +220,59 @@ func TestBubblewrap_InnerMountWins(t *testing.T) {
 	got := runOK(t, tool, "(echo x > .git/config) 2>/dev/null || echo git-ro; (echo x > ro/f) 2>/dev/null || echo ro-ro; echo x > ro/cache/f && echo cache-rw")
 	if got != "git-ro\nro-ro\ncache-rw" {
 		t.Fatalf("got %q, want the innermost mount to decide", got)
+	}
+}
+
+func TestNewBubblewrapRunner_RefusesBroadPaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	project := filepath.Join(home, "project")
+
+	cases := []struct {
+		name      string
+		workspace string
+		opts      []BubblewrapOption
+		wantErr   bool
+	}{
+		{"home", home, nil, true},
+		{"home parent", filepath.Dir(home), nil, true},
+		{"root", "/", nil, true},
+		{"read-only home", project, []BubblewrapOption{WithReadOnlyPaths(home)}, true},
+		{"writable root", project, []BubblewrapOption{WithWritablePaths("/")}, true},
+		{"project under home", project, []BubblewrapOption{WithReadOnlyPaths(filepath.Join(home, "go"))}, false},
+	}
+
+	for _, tc := range cases {
+		_, err := NewBubblewrapRunner(tc.workspace, tc.opts...)
+		if errors.Is(err, ErrBubblewrapNotFound) {
+			t.Skip("bwrap not installed")
+		}
+
+		if got := errors.Is(err, ErrPathTooBroad); got != tc.wantErr {
+			t.Errorf("%s: err = %v, want ErrPathTooBroad: %v", tc.name, err, tc.wantErr)
+		}
+	}
+}
+
+func TestBubblewrap_NewSession(t *testing.T) {
+	runner, err := NewBubblewrapRunner(t.TempDir())
+	if errors.Is(err, ErrBubblewrapNotFound) {
+		t.Skip("bwrap not installed")
+	}
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd, err := runner.Command(context.Background(), "true", RunOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Without a new session the command shares the caller's terminal, and
+	// TIOCSTI could push input into it.
+	if !slices.Contains(cmd.Args, "--new-session") {
+		t.Fatalf("args = %q, want --new-session", cmd.Args)
 	}
 }
