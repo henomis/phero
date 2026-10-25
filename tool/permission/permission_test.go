@@ -608,3 +608,27 @@ func TestDecide_ShellCodeInDataIsAsked(t *testing.T) {
 		}
 	}
 }
+
+func TestDecide_AssignmentPrefixIsPartOfTheCommand(t *testing.T) {
+	p := mustPolicy(t, permission.WithAllow("bash(go test *)", "bash(CGO_ENABLED=0 go test *)"))
+
+	cases := []struct {
+		command string
+		want    permission.Decision
+	}{
+		// An assignment can change what an allowed program runs, so a rule
+		// for the program does not cover it...
+		{"GOFLAGS=-toolexec=./x go test ./...", permission.Ask},
+		{"LD_PRELOAD=./x.so go test ./...", permission.Ask},
+		// ...and a rule that names the assignment does.
+		{"CGO_ENABLED=0 go test ./...", permission.Allow},
+		{"CGO_ENABLED=0  go test ./...", permission.Allow},
+		{"CGO_ENABLED=1 go test ./...", permission.Ask},
+	}
+
+	for _, tc := range cases {
+		if got, subjects := p.Decide("bash", bashArgs(tc.command)); got != tc.want {
+			t.Errorf("Decide(%q) = %s (subjects %q), want %s", tc.command, got, subjects, tc.want)
+		}
+	}
+}

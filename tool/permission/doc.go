@@ -51,7 +51,11 @@
 // | and &, and those inside subshells, if/for/while bodies, function bodies
 // and substitutions. So "go test ./... && rm -rf /" does not pass
 // bash(go test *), quoted operators do not split ("echo 'a && b'" is one
-// command), and commands are matched in a normal form, single-spaced. A line
+// command), and commands are matched in a normal form, single-spaced. An
+// assignment before a command is part of it: "CGO_ENABLED=0 go test" does
+// not pass bash(go test *), because a variable can change what an allowed
+// program runs (GOFLAGS=-toolexec=..., LD_PRELOAD); a rule that names it
+// does, as bash(CGO_ENABLED=0 go test *). A line
 // is asked, unless a deny rule matches one of its commands, when it does not
 // parse; holds the text of a command or process substitution anywhere, even
 // quoted (bash runs "$(...)" from an array subscript or ${x@P}); evaluates

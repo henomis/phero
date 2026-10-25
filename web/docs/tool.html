@@ -463,7 +463,10 @@ policy.Apply(readTool.Tool(), bashTool.Tool(), editTool.Tool())</code></pre>
           <code>|</code> and <code>&amp;</code>, and those inside subshells, <code>if</code>/<code>for</code> bodies,
           functions and substitutions. <code>go test ./... &amp;&amp; rm -rf /</code> does not pass
           <code>bash(go test *)</code>; a quoted operator does not split (<code>echo 'a &amp;&amp; b'</code> is one
-          command), and commands are matched single-spaced. A line is asked (still denied when a deny rule matches
+          command), and commands are matched single-spaced. An assignment before a command is part of it:
+          <code>CGO_ENABLED=0 go test</code> does not pass <code>bash(go test *)</code>, because a variable can change
+          what an allowed program runs (<code>GOFLAGS=-toolexec=...</code>, <code>LD_PRELOAD</code>); a rule that
+          names it does, as <code>bash(CGO_ENABLED=0 go test *)</code>. A line is asked (still denied when a deny rule matches
           one of its commands) when it does not parse; holds the text of a command or process substitution anywhere,
           even quoted (bash runs <code>$(...)</code> found in an array subscript or <code>${x@P}</code>); evaluates
           arithmetic or indirection (<code>$((...))</code>, <code>((...))</code>, <code>[[ ... ]]</code>,
