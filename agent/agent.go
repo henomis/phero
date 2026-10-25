@@ -16,6 +16,7 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -488,6 +489,11 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 		MaxIterations: max(a.maxIterations, 0),
 	}}
 	ctx, rs.span = trace.Start(ctx, string(trace.KindRun)+" "+a.name, rs.run)
+
+	// Tool calls see the run they belong to (llm.RunFromContext). It ends when
+	// the run returns, after finishRun, which is deferred later.
+	ctx, endRun := llm.ContextWithRun(ctx, rand.Text())
+	defer endRun()
 
 	var (
 		session      []llm.Message

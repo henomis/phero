@@ -81,18 +81,23 @@ type catalogEntry struct {
 }
 
 // WithRoots reads skills from several roots, such as the user's own and the
-// project's; when two hold a skill directory of the same name, the later
-// root wins. It replaces the root given to New.
+// project's; when two hold a skill directory of the same name, the earlier
+// root wins, so pass the user's root first: a cloned project then cannot
+// shadow a skill the user trusts. It replaces the root given to New.
 func WithRoots(roots ...string) Option {
 	return func(t *Tool) {
 		t.parser = skillpkg.NewMulti(roots...)
 	}
 }
 
-// WithOnLoad calls fn each time the model loads a skill, for example to
-// pre-approve the skill's allowed tools in a permission policy:
+// WithOnLoad calls fn each time the model loads a skill, with the tool call's
+// context, for example to pre-approve the skill's allowed tools in a
+// permission policy for the current run only, leaving out broad bash grants:
 //
-//	skilltool.WithOnLoad(func(_ context.Context, s *skill.Skill) { _ = policy.Allow(s.Tools()...) })
+//	skilltool.WithOnLoad(func(ctx context.Context, s *skill.Skill) {
+//		granted, _ := permission.SkillGrants(s.Tools())
+//		_ = policy.AllowForRun(ctx, granted...)
+//	})
 func WithOnLoad(fn func(ctx context.Context, skill *skillpkg.Skill)) Option {
 	return func(t *Tool) {
 		t.onLoad = fn

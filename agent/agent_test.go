@@ -20,6 +20,7 @@ import (
 	"math"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1173,5 +1174,54 @@ func TestRun_ToolSeesItsCallInContext(t *testing.T) {
 
 	if seen.ID != "call-42" || seen.Function.Name != "probe" {
 		t.Fatalf("tool call in context = %+v", seen)
+	}
+}
+
+func TestRun_ToolSeesItsRunInContext(t *testing.T) {
+	var (
+		runs  []llm.Run
+		ended atomic.Int32
+	)
+
+	tool := mustTool(t, "probe", func(ctx context.Context, _ *struct{}) (string, error) {
+		run, ok := llm.RunFromContext(ctx)
+		if !ok {
+			return "", errors.New("no run in context")
+		}
+
+		runs = append(runs, run)
+		run.AfterEnd(func() { ended.Add(1) })
+
+		return "ok", nil
+	})
+
+	for range 2 {
+		stub := &stubLLM{
+			responses: []*llm.Result{toolCallResult("probe", "c", "{}"), textResult("done")},
+			errs:      []error{nil, nil},
+		}
+
+		a := mustNew(t, stub, "agent", "desc")
+		if err := a.AddTool(tool); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := a.Run(context.Background(), llm.Text("go")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if len(runs) != 2 || runs[0].ID == "" || runs[0].ID == runs[1].ID {
+		t.Fatalf("runs = %+v, want two runs with distinct IDs", runs)
+	}
+
+	// The run's scope ends when Run returns.
+	deadline := time.Now().Add(time.Second)
+	for ended.Load() != 2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+
+	if ended.Load() != 2 {
+		t.Fatalf("ended = %d, want both runs ended", ended.Load())
 	}
 }

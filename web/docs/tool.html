@@ -375,9 +375,11 @@ if err := a.AddTool(dispatcher.Tool()); err != nil {
       </p>
       <p>Available options:</p>
       <ul>
-        <li><code>WithRoots(roots...)</code>: read skills from several roots (user and project); later roots win</li>
+        <li><code>WithRoots(roots...)</code>: read skills from several roots (user and project); earlier roots win,
+          so pass the user's first</li>
         <li><code>WithOnLoad(fn)</code>: called each time the model loads a skill, for example to pre-approve its
-          <code>allowed-tools</code> in a permission policy</li>
+          <code>allowed-tools</code> for the run (<code>policy.AllowForRun</code>, filtered by
+          <code>permission.SkillGrants</code>)</li>
         <li><code>WithParser(parser)</code>: inject a custom <code>Parser</code> implementation (useful for testing)</li>
       </ul>
       <p>

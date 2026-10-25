@@ -190,7 +190,7 @@ func TestSkill_Tools(t *testing.T) {
 	}
 }
 
-func TestMultiParser_LaterRootWins(t *testing.T) {
+func TestMultiParser_EarlierRootWins(t *testing.T) {
 	user, project := t.TempDir(), t.TempDir()
 
 	write := func(root, dir, description string) {
@@ -224,8 +224,9 @@ func TestMultiParser_LaterRootWins(t *testing.T) {
 		t.Fatalf("List = %v", names)
 	}
 
-	if sk, parseErr := m.Parse("review"); parseErr != nil || sk.Description != "project review" {
-		t.Fatalf("Parse(review) = %+v, %v; want the project's", sk, parseErr)
+	// A cloned project must not shadow the user's own skill.
+	if sk, parseErr := m.Parse("review"); parseErr != nil || sk.Description != "user review" {
+		t.Fatalf("Parse(review) = %+v, %v; want the user's", sk, parseErr)
 	}
 
 	if sk, parseErr := m.Parse("notes"); parseErr != nil || sk.Description != "user notes" {

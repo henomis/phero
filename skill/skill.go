@@ -155,12 +155,13 @@ func (p *Parser) Parse(skillName string) (*Skill, error) {
 
 // MultiParser discovers skills under several roots, such as a user's own
 // skills and a project's. When two roots hold a skill directory of the same
-// name, the later root wins.
+// name, the earlier root wins: pass the user's root before the project's, so
+// a cloned project cannot shadow a skill the user trusts.
 type MultiParser struct {
 	parsers []*Parser
 }
 
-// NewMulti returns a MultiParser over roots, in increasing precedence. A
+// NewMulti returns a MultiParser over roots, in decreasing precedence. A
 // root that does not exist holds no skills.
 func NewMulti(roots ...string) *MultiParser {
 	m := &MultiParser{}
@@ -198,10 +199,10 @@ func (m *MultiParser) List() ([]string, error) {
 	return names, nil
 }
 
-// Parse parses skillName from the last root that holds it.
+// Parse parses skillName from the first root that holds it.
 func (m *MultiParser) Parse(skillName string) (*Skill, error) {
-	for i := len(m.parsers) - 1; i >= 0; i-- {
-		skill, err := m.parsers[i].Parse(skillName)
+	for _, p := range m.parsers {
+		skill, err := p.Parse(skillName)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}

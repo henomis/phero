@@ -102,8 +102,12 @@ type Policy struct {
 	workingDir string
 	home       string // expands a leading ~ in paths
 
-	mu     sync.Mutex // serializes questions and guards always
+	mu     sync.Mutex // serializes questions and guards always and runRules
 	always map[string][]string
+
+	// runRules are allow rules that last for one agent run (AllowForRun),
+	// keyed by llm.Run ID.
+	runRules map[string][]rule
 }
 
 // pendingRule is a rule given as an option.
@@ -185,7 +189,9 @@ func WithSubject(tool, argument string) Option {
 // New returns a Policy with the given rules. It returns ErrInvalidRule for a
 // rule it cannot parse.
 func New(opts ...Option) (*Policy, error) {
-	p := &Policy{fallback: Ask, args: map[string]string{}, always: map[string][]string{}}
+	p := &Policy{
+		fallback: Ask, args: map[string]string{}, always: map[string][]string{}, runRules: map[string][]rule{},
+	}
 	for tool, argument := range defaultSubjects {
 		p.args[tool] = argument
 	}
@@ -217,9 +223,9 @@ func New(opts ...Option) (*Policy, error) {
 	return p, nil
 }
 
-// Allow adds allow rules while the Policy is in use, for example the tools a
-// skill pre-approves when it is loaded. It returns ErrInvalidRule for a rule
-// it cannot parse, and then adds none.
+// Allow adds allow rules while the Policy is in use, for the rest of its
+// life. For the tools a skill pre-approves, use AllowForRun instead. It
+// returns ErrInvalidRule for a rule it cannot parse, and then adds none.
 func (p *Policy) Allow(specs ...string) error {
 	rules := make([]rule, 0, len(specs))
 
@@ -236,6 +242,55 @@ func (p *Policy) Allow(specs ...string) error {
 	defer p.mu.Unlock()
 
 	p.rules = append(p.rules, rules...)
+
+	return nil
+}
+
+// AllowForRun adds allow rules for the agent run ctx belongs to only (see
+// llm.RunFromContext): they are dropped when the run ends. Use it for the
+// tools a skill pre-approves when it is loaded (see SkillGrants), as Claude
+// Code scopes such grants to the turn. It returns ErrNoRun when ctx carries
+// no run, and ErrInvalidRule for a rule it cannot parse; it then adds none.
+func (p *Policy) AllowForRun(ctx context.Context, specs ...string) error {
+	run, ok := llm.RunFromContext(ctx)
+	if !ok {
+		return ErrNoRun
+	}
+
+	rules := make([]rule, 0, len(specs))
+
+	for _, spec := range specs {
+		r, err := p.parseRule(spec, Allow)
+		if err != nil {
+			return err
+		}
+
+		rules = append(rules, r)
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if _, started := p.runRules[run.ID]; !started {
+		run.AfterEnd(func() {
+			p.mu.Lock()
+			defer p.mu.Unlock()
+
+			delete(p.runRules, run.ID)
+		})
+	}
+
+	p.runRules[run.ID] = append(p.runRules[run.ID], rules...)
+
+	return nil
+}
+
+// runRulesFor returns the allow rules of the run ctx belongs to. The caller
+// holds p.mu.
+func (p *Policy) runRulesFor(ctx context.Context) []rule {
+	if run, ok := llm.RunFromContext(ctx); ok {
+		return p.runRules[run.ID]
+	}
 
 	return nil
 }
@@ -261,16 +316,23 @@ func (p *Policy) Middleware() llm.ToolMiddleware {
 }
 
 // Decide returns what the Policy does with a call of tool with arguments,
-// before asking anyone, and the subjects it decided on.
+// before asking anyone, and the subjects it decided on. Rules added with
+// AllowForRun are not seen: use DecideContext for a call inside a run.
 func (p *Policy) Decide(tool, arguments string) (Decision, []string) {
-	decision, subjects, _ := p.evaluate(tool, arguments)
+	return p.DecideContext(context.Background(), tool, arguments)
+}
+
+// DecideContext is Decide for a call made in ctx: the rules AllowForRun added
+// for ctx's run apply too.
+func (p *Policy) DecideContext(ctx context.Context, tool, arguments string) (Decision, []string) {
+	decision, subjects, _ := p.evaluate(ctx, tool, arguments)
 
 	return decision, subjects
 }
 
-// evaluate is Decide, and also returns the subjects as written (see
+// evaluate is DecideContext, and also returns the subjects as written (see
 // subjects).
-func (p *Policy) evaluate(tool, arguments string) (Decision, []string, []string) {
+func (p *Policy) evaluate(ctx context.Context, tool, arguments string) (Decision, []string, []string) {
 	subjects, written, ambiguous := p.subjects(tool, arguments)
 	if ambiguous {
 		return Deny, subjects, written
@@ -279,12 +341,12 @@ func (p *Policy) evaluate(tool, arguments string) (Decision, []string, []string)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	return p.decide(tool, subjects, written), subjects, written
+	return p.decide(tool, subjects, written, p.runRulesFor(ctx)), subjects, written
 }
 
 // check enforces the Policy on one call.
 func (p *Policy) check(ctx context.Context, tool, arguments string) error {
-	decision, subjects, written := p.evaluate(tool, arguments)
+	decision, subjects, written := p.evaluate(ctx, tool, arguments)
 
 	subject := joinSubjects(subjects)
 	if subjects == nil {
@@ -308,7 +370,7 @@ func (p *Policy) check(ctx context.Context, tool, arguments string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.decide(tool, subjects, written) == Allow {
+	if p.decide(tool, subjects, written, p.runRulesFor(ctx)) == Allow {
 		return nil
 	}
 
@@ -340,8 +402,9 @@ func (p *Policy) check(ctx context.Context, tool, arguments string) error {
 
 // decide combines the decisions of every subject: deny wins over ask, which
 // wins over allow. written holds the subjects as written, when they differ
-// (see subjects). The caller holds p.mu.
-func (p *Policy) decide(tool string, subjects, written []string) Decision {
+// (see subjects), and runRules the allow rules of the call's run. The caller
+// holds p.mu.
+func (p *Policy) decide(tool string, subjects, written []string, runRules []rule) Decision {
 	if subjects == nil {
 		// A command line it cannot see through is asked. Its visible parts
 		// (written) are still checked against the deny rules, so
@@ -365,7 +428,7 @@ func (p *Policy) decide(tool string, subjects, written []string) Decision {
 			asWritten = written[i]
 		}
 
-		switch d := p.decideOne(tool, subject, asWritten); d {
+		switch d := p.decideOne(tool, subject, asWritten, runRules); d {
 		case Deny:
 			return Deny
 		case Ask:
@@ -382,10 +445,10 @@ func (p *Policy) decide(tool string, subjects, written []string) Decision {
 // symlink, with a wildcard the resolution cannot see through ("/repo/*/.env",
 // or a tool name pattern), still matches. Allow rules apply to the resolved
 // subject only, which is what the tool opens.
-func (p *Policy) decideOne(tool, subject, written string) Decision {
+func (p *Policy) decideOne(tool, subject, written string, runRules []rule) Decision {
 	matched := map[Decision]bool{}
 
-	for _, r := range p.rules {
+	for _, r := range slices.Concat(p.rules, runRules) {
 		if r.matches(tool, subject) || (written != "" && r.decision != Allow && r.matches(tool, written)) {
 			matched[r.decision] = true
 		}

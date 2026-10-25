@@ -55,6 +55,10 @@
 // not understand quotes: a quoted operator splits too, which can only make a
 // command asked, never allowed.
 //
+// AllowForRun grants rules for the current agent run only (llm.Run), as for
+// the tools a skill pre-approves; SkillGrants leaves out the grants too broad
+// for a skill, such as bare bash.
+//
 // Asking goes through an Asker, one question at a time even when the agent
 // runs tool calls in parallel. An answer of AllowAlways allows the same subject
 // for the rest of the Policy's life. A denied call returns a *DeniedError,

@@ -20,6 +20,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -485,5 +486,67 @@ func TestDecide_PathToolFollowsSubject(t *testing.T) {
 
 	if got, subjects := p.Decide("read", `{"name":"./x"}`); got != permission.Deny {
 		t.Errorf("read with a non-path subject: %s (subjects %q), want it matched as written", got, subjects)
+	}
+}
+
+func TestPolicy_AllowForRunEndsWithTheRun(t *testing.T) {
+	p := mustPolicy(t, permission.WithAllow("read"))
+
+	if err := p.AllowForRun(context.Background(), "bash(go test *)"); !errors.Is(err, permission.ErrNoRun) {
+		t.Fatalf("err = %v, want ErrNoRun outside a run", err)
+	}
+
+	ctx, end := llm.ContextWithRun(context.Background(), "run-1")
+
+	if err := p.AllowForRun(ctx, "bash(go test *)"); err != nil {
+		t.Fatal(err)
+	}
+
+	decide := func(ctx context.Context, command string) permission.Decision {
+		d, _ := p.DecideContext(ctx, "bash", bashArgs(command))
+		return d
+	}
+
+	if got := decide(ctx, "go test ./..."); got != permission.Allow {
+		t.Fatalf("in the run: %s, want allow", got)
+	}
+
+	// A tool outside the grant is still asked.
+	if got := decide(ctx, "go build ./..."); got != permission.Ask {
+		t.Fatalf("outside the grant: %s, want ask", got)
+	}
+
+	// Another run does not see the grant.
+	other, endOther := llm.ContextWithRun(context.Background(), "run-2")
+	defer endOther()
+
+	if got := decide(other, "go test ./..."); got != permission.Ask {
+		t.Fatalf("another run: %s, want ask", got)
+	}
+
+	end()
+
+	deadline := time.Now().Add(time.Second)
+	for decide(ctx, "go test ./...") != permission.Ask && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+
+	if got := decide(ctx, "go test ./..."); got != permission.Ask {
+		t.Fatalf("after the run: %s, want the grant gone", got)
+	}
+}
+
+func TestSkillGrants_RefusesBroadBash(t *testing.T) {
+	granted, refused := permission.SkillGrants([]string{
+		"Read", "Bash(git status:*)", "bash(go test *)",
+		"Bash", "Bash(*)", "bash(:*)", "*", "b*", "Bash(sh -c *)", "bash(sudo *)", "Bash(env *)",
+	})
+
+	if want := []string{"Read", "Bash(git status:*)", "bash(go test *)"}; !slices.Equal(granted, want) {
+		t.Errorf("granted = %q, want %q", granted, want)
+	}
+
+	if len(refused) != 8 {
+		t.Errorf("refused = %q, want the 8 broad rules", refused)
 	}
 }

@@ -25,6 +25,9 @@ var ErrDenied = errors.New("tool call denied")
 // ErrInvalidRule is returned by New for a rule that cannot be parsed.
 var ErrInvalidRule = errors.New("invalid permission rule")
 
+// ErrNoRun is returned by AllowForRun when the context carries no agent run.
+var ErrNoRun = errors.New("permission: no agent run in context")
+
 // DeniedError is returned for a tool call the Policy denied.
 type DeniedError struct {
 	// Tool is the tool's name.

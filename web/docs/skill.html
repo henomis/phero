@@ -107,18 +107,26 @@ Use this skill when the user asks for a random quote (inspirational, motivationa
         of the Agent Skills spec (<code>Read Grep</code>) or the comma-separated form with patterns
         (<code>Bash(git:*), Read</code>). <code>Skill.Tools()</code> returns the entries, the <code>skill</code> tool
         returns them to the model, and <code>WithOnLoad</code> lets the application grant them, for example in a
-        <a href="tool.html">permission policy</a>:
+        <a href="tool.html">permission policy</a>. As in Claude Code, the grant should last only for the run that
+        loaded the skill (<code>AllowForRun</code>), and <code>permission.SkillGrants</code> leaves out grants too
+        broad for a skill a cloned project may ship: bash with no fixed command (<code>Bash</code>,
+        <code>Bash(*)</code>, a <code>*</code> tool name) or with a command that runs others (<code>sh</code>,
+        <code>sudo</code>, <code>env</code>, <code>python</code>, …).
       </p>
       <pre><code class="language-go">skillTool, err := skilltool.New("",
-    skilltool.WithRoots(userSkillsDir, "./skills"), // later roots win on the same skill name
-    skilltool.WithOnLoad(func(_ context.Context, s *skill.Skill) {
-        _ = policy.Allow(s.Tools()...) // pre-approve the skill's allowed tools
+    skilltool.WithRoots(userSkillsDir, "./skills"), // earlier roots win on the same skill name
+    skilltool.WithOnLoad(func(ctx context.Context, s *skill.Skill) {
+        granted, refused := permission.SkillGrants(s.Tools())
+        _ = policy.AllowForRun(ctx, granted...) // pre-approved for this run only
+        if len(refused) > 0 {
+            log.Printf("skill %s: not granted: %v", s.Name, refused)
+        }
     }),
 )</code></pre>
       <p>
         <code>skill.NewMulti(roots...)</code> is the parser behind <code>WithRoots</code>: a user's own skills and a
-        project's, with the project's winning when both have a skill directory of the same name. A missing root holds no
-        skills.
+        project's, with the earlier root winning when both have a skill directory of the same name. Pass the user's
+        root first, so a cloned project cannot shadow a skill the user trusts. A missing root holds no skills.
       </p>
     </section>
 

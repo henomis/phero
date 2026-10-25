@@ -415,7 +415,7 @@ func TestWithRoots(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !strings.Contains(tool.Tool().Description(), "project version") || strings.Contains(tool.Tool().Description(), "user version") {
-		t.Fatalf("catalog = %s, want the project's skill only", tool.Tool().Description())
+	if !strings.Contains(tool.Tool().Description(), "user version") || strings.Contains(tool.Tool().Description(), "project version") {
+		t.Fatalf("catalog = %s, want the user's skill only", tool.Tool().Description())
 	}
 }
