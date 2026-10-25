@@ -17,15 +17,22 @@ package file
 type toolOptions struct {
 	workingDir  string
 	maxFileSize int64
+	maxOutput   int
 	noOverwrite bool
 	maxResults  int
 	noIgnore    bool
 	tracker     *ReadTracker
 }
 
-// DefaultMaxFileSize is the read tool's size limit when WithMaxFileSize is not
-// given: 10 MiB, beyond which a file would not fit a model's context anyway.
+// DefaultMaxFileSize is the read tool's size limit for a whole-file read
+// (no offset or limit) when WithMaxFileSize is not given: 10 MiB. It guards
+// memory; a page of a larger file can still be read with offset and limit.
 const DefaultMaxFileSize = 10 << 20
+
+// DefaultMaxOutputChars is how much text the read tool returns at most when
+// WithMaxOutputChars is not given, as the bash tool's output cap: about
+// 7,500 tokens, so one read cannot fill the model's context.
+const DefaultMaxOutputChars = 30_000
 
 // Option configures fs tools.
 type Option func(*toolOptions)
@@ -37,11 +44,21 @@ func WithWorkingDirectory(dir string) Option {
 	}
 }
 
-// WithMaxFileSize sets the maximum file size in bytes for read operations.
-// The default is DefaultMaxFileSize; a value of 0 disables the limit.
+// WithMaxFileSize sets the maximum file size in bytes for a whole-file read,
+// one without offset or limit. The default is DefaultMaxFileSize; a value of 0
+// disables the limit.
 func WithMaxFileSize(bytes int64) Option {
 	return func(o *toolOptions) {
 		o.maxFileSize = bytes
+	}
+}
+
+// WithMaxOutputChars sets how many characters the read tool returns at most.
+// Output cut short ends with a note giving the offset to read on from. The
+// default is DefaultMaxOutputChars; a value of 0 or less removes the cap.
+func WithMaxOutputChars(n int) Option {
+	return func(o *toolOptions) {
+		o.maxOutput = n
 	}
 }
 
@@ -81,7 +98,7 @@ func WithReadTracker(tracker *ReadTracker) Option {
 }
 
 func applyOptions(opts ...Option) *toolOptions {
-	o := &toolOptions{maxResults: DefaultMaxResults, maxFileSize: DefaultMaxFileSize}
+	o := &toolOptions{maxResults: DefaultMaxResults, maxFileSize: DefaultMaxFileSize, maxOutput: DefaultMaxOutputChars}
 	for _, opt := range opts {
 		opt(o)
 	}

@@ -15,8 +15,11 @@
 package file
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"unicode/utf8"
@@ -25,6 +28,8 @@ import (
 )
 
 const (
+	// defaultReadLimit is the number of lines read when no limit is given,
+	// and the most a limit can ask for.
 	defaultReadLimit = 2000
 	maxLineChars     = 2000
 )
@@ -46,6 +51,7 @@ type ReadTool struct {
 	tool        *llm.Tool
 	workingDir  string
 	maxFileSize int64
+	maxOutput   int
 	tracker     *ReadTracker
 }
 
@@ -56,12 +62,14 @@ func NewReadTool(opts ...Option) (*ReadTool, error) {
 	r := &ReadTool{
 		workingDir:  o.workingDir,
 		maxFileSize: o.maxFileSize,
+		maxOutput:   o.maxOutput,
 		tracker:     o.tracker,
 	}
 
 	tool, err := llm.NewTool(
 		"read",
-		"Read file contents from an absolute path with optional line offset/limit.",
+		fmt.Sprintf("Read file contents from an absolute path with optional line offset/limit "+
+			"(at most %d lines per read). Page through large files with offset and limit.", defaultReadLimit),
 		r.read,
 	)
 	if err != nil {
@@ -101,47 +109,100 @@ func (r *ReadTool) read(_ context.Context, input *ReadInput) (*ReadOutput, error
 		return nil, fmt.Errorf("%s is a directory", resolvedPath)
 	}
 
-	if r.maxFileSize > 0 && info.Size() > r.maxFileSize {
+	// The size cap guards memory for a whole-file read: a page of a larger
+	// file is read line by line.
+	whole := input.Offset <= 0 && input.Limit <= 0
+	if whole && r.maxFileSize > 0 && info.Size() > r.maxFileSize {
 		return nil, &TooLargeError{Path: resolvedPath, Size: info.Size(), Limit: r.maxFileSize}
 	}
 
-	contentBytes, err := os.ReadFile(resolvedPath) //nolint:gosec // path is resolved and validated above
+	f, err := os.Open(resolvedPath) //nolint:gosec // path is resolved and validated above
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	content, err := r.readLines(bufio.NewReader(f), max(input.Offset, 0), readLimit(input.Limit))
 	if err != nil {
 		return nil, err
 	}
 
 	r.tracker.record(resolvedPath)
 
-	content := bytesToUTF8WithHexEscapes(contentBytes)
-	lines := strings.Split(content, "\n")
+	return &ReadOutput{Content: content}, nil
+}
 
-	offset := input.Offset
-	if offset < 0 {
-		offset = 0
+// readLimit returns the number of lines to read for a requested limit.
+func readLimit(limit int) int {
+	if limit <= 0 || limit > defaultReadLimit {
+		return defaultReadLimit
 	}
 
-	limit := input.Limit
-	if limit <= 0 {
-		limit = defaultReadLimit
-	}
+	return limit
+}
 
-	if offset >= len(lines) {
-		return &ReadOutput{Content: ""}, nil
-	}
-
-	end := offset + limit
-	if end > len(lines) {
-		end = len(lines)
-	}
-
+// readLines returns limit lines of rd from line offset (0-based), numbered
+// cat -n style. Output that would pass the output cap stops at the last whole
+// line, with a note giving the offset to read on from.
+func (r *ReadTool) readLines(rd *bufio.Reader, offset, limit int) (string, error) {
 	var b strings.Builder
 
-	for i := offset; i < end; i++ {
-		line := truncateRunes(lines[i], maxLineChars)
-		fmt.Fprintf(&b, "%6d\t%s\n", i+1, line)
+	for i := 0; i < offset+limit; i++ {
+		line, err := readLine(rd)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+
+		if err != nil {
+			return "", err
+		}
+
+		if i < offset {
+			continue
+		}
+
+		numbered := fmt.Sprintf("%6d\t%s\n", i+1, truncateRunes(bytesToUTF8WithHexEscapes(line), maxLineChars))
+		if r.maxOutput > 0 && b.Len()+len(numbered) > r.maxOutput && b.Len() > 0 {
+			fmt.Fprintf(&b, "[output cut at %d characters: read on with offset=%d]", r.maxOutput, i)
+			return b.String(), nil
+		}
+
+		b.WriteString(numbered)
 	}
 
-	return &ReadOutput{Content: strings.TrimRight(b.String(), "\n")}, nil
+	return strings.TrimRight(b.String(), "\n"), nil
+}
+
+// readLine returns the next line of rd without its line ending, keeping at
+// most the bytes maxLineChars characters can take, so a huge line does not
+// fill memory. It returns io.EOF when no line is left.
+func readLine(rd *bufio.Reader) ([]byte, error) {
+	const maxLineBytes = maxLineChars * utf8.UTFMax
+
+	var line []byte
+
+	for {
+		chunk, isPrefix, err := rd.ReadLine()
+		if err != nil {
+			if errors.Is(err, io.EOF) && line != nil {
+				return line, nil
+			}
+
+			return nil, err
+		}
+
+		if room := maxLineBytes - len(line); room > 0 {
+			line = append(line, chunk[:min(len(chunk), room)]...)
+		}
+
+		if line == nil {
+			line = []byte{}
+		}
+
+		if !isPrefix {
+			return line, nil
+		}
+	}
 }
 
 func bytesToUTF8WithHexEscapes(b []byte) string {

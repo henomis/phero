@@ -134,8 +134,13 @@ if err := a.AddTool(readTool.Tool()); err != nil {
       <p>Available options:</p>
       <ul>
         <li><code>WithWorkingDirectory(dir)</code>: confine all operations to a directory; paths are validated against it to prevent traversal</li>
-        <li><code>WithMaxFileSize(bytes)</code>: limit the file size the read and edit tools accept (default
-          <code>file.DefaultMaxFileSize</code>, 10 MiB; 0 = unlimited)</li>
+        <li><code>WithMaxFileSize(bytes)</code>: limit the file size the edit tools accept, and the read tool for a
+          whole-file read (default <code>file.DefaultMaxFileSize</code>, 10 MiB; 0 = unlimited). A read with
+          <code>offset</code> or <code>limit</code> pages a file of any size.</li>
+        <li><code>WithMaxOutputChars(n)</code>: cap the text one read returns (default
+          <code>file.DefaultMaxOutputChars</code>, 30,000; 0 = no cap). A cut read ends with
+          <code>[output cut at … characters: read on with offset=N]</code>, and <code>limit</code> is capped at 2,000
+          lines.</li>
         <li><code>WithReadTracker(tracker)</code>: share a <code>file.NewReadTracker()</code> between the tools so that
           write, edit and multi_edit refuse to change an existing file the model has not read
           (<code>ErrFileNotRead</code>), or that changed on disk since it read it (<code>*ChangedError</code>).
