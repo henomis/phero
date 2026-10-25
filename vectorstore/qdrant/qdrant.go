@@ -96,6 +96,9 @@ func WithDistance(distance Distance) Option {
 }
 
 // WithWait configures whether write operations should wait until applied.
+// Without it, Qdrant's default applies (no wait): a write returns before its
+// points can be searched, so a search right after it, as a semantic cache's
+// lookup after a store, may miss them.
 func WithWait(wait bool) Option {
 	return func(s *Store) {
 		s.wait = qdrantapi.PtrOf(wait)

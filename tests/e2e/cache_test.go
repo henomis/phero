@@ -51,7 +51,7 @@ func (constEmbedder) Embed(_ context.Context, texts []string) ([]embedding.Vecto
 func TestSemanticCache_ContractFilter(t *testing.T) {
 	stores := map[string]func(t *testing.T) vectorstore.Store{
 		"qdrant": func(t *testing.T) vectorstore.Store {
-			s, err := vsqdrant.New(requireQdrant(t), "e2e-cache-"+uuid.NewString(), vsqdrant.WithVectorSize(4))
+			s, err := vsqdrant.New(requireQdrant(t), "e2e-cache-"+uuid.NewString(), vsqdrant.WithVectorSize(4), vsqdrant.WithWait(true))
 			if err != nil {
 				t.Fatalf("vsqdrant.New: %v", err)
 			}

@@ -43,7 +43,7 @@ func TestVectorStoreQdrant_UpsertQuery(t *testing.T) {
 
 	const vectorSize = 4
 
-	store, err := vsqdrant.New(qc, collection, vsqdrant.WithVectorSize(vectorSize))
+	store, err := vsqdrant.New(qc, collection, vsqdrant.WithVectorSize(vectorSize), vsqdrant.WithWait(true))
 	if err != nil {
 		t.Fatalf("vsqdrant.New: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestVectorStoreQdrant_Delete(t *testing.T) {
 
 	const vectorSize = 4
 
-	store, err := vsqdrant.New(qc, collection, vsqdrant.WithVectorSize(vectorSize))
+	store, err := vsqdrant.New(qc, collection, vsqdrant.WithVectorSize(vectorSize), vsqdrant.WithWait(true))
 	if err != nil {
 		t.Fatalf("vsqdrant.New: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestVectorStoreQdrant_Clear(t *testing.T) {
 
 	const vectorSize = 4
 
-	store, err := vsqdrant.New(qc, collection, vsqdrant.WithVectorSize(vectorSize))
+	store, err := vsqdrant.New(qc, collection, vsqdrant.WithVectorSize(vectorSize), vsqdrant.WithWait(true))
 	if err != nil {
 		t.Fatalf("vsqdrant.New: %v", err)
 	}

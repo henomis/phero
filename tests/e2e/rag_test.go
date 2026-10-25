@@ -49,7 +49,7 @@ func TestRAG_IngestAndQuery(t *testing.T) {
 	collection := "e2e-rag-" + uuid.New().String()
 
 	store, err := vsqdrant.New(qc, collection,
-		vsqdrant.WithVectorSize(vectorSize),
+		vsqdrant.WithVectorSize(vectorSize), vsqdrant.WithWait(true),
 	)
 	if err != nil {
 		t.Fatalf("vsqdrant.New: %v", err)
@@ -138,7 +138,7 @@ func TestRAG_AsTool(t *testing.T) {
 	collection := "e2e-rag-tool-" + uuid.New().String()
 
 	store, err := vsqdrant.New(qc, collection,
-		vsqdrant.WithVectorSize(vectorSize),
+		vsqdrant.WithVectorSize(vectorSize), vsqdrant.WithWait(true),
 	)
 	if err != nil {
 		t.Fatalf("vsqdrant.New: %v", err)
@@ -214,7 +214,7 @@ func TestRAG_AsMemory(t *testing.T) {
 	collection := "e2e-rag-mem-" + uuid.New().String()
 
 	store, err := vsqdrant.New(qc, collection,
-		vsqdrant.WithVectorSize(vectorSize),
+		vsqdrant.WithVectorSize(vectorSize), vsqdrant.WithWait(true),
 	)
 	if err != nil {
 		t.Fatalf("vsqdrant.New: %v", err)
