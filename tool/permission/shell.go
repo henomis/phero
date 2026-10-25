@@ -32,7 +32,13 @@ var shellOperators = []string{"&&", "||", ";", "|", "&", "\n"}
 // reports false when the line cannot be judged from them:
 //   - it does not parse;
 //   - a command or process substitution runs a command whose output becomes
-//     part of another;
+//     part of another, or its text appears anywhere, even quoted: bash runs
+//     "$(...)" found in an array subscript during arithmetic, or in ${x@P};
+//   - it evaluates arithmetic or indirection ($((...)), ((...)), [[ ... ]],
+//     let, ${a[i]}, ${a:i}, ${!a}, ${a@op}), which can run such text from a
+//     variable;
+//   - a statement only assigns variables, or declares them (export, local,
+//     declare, readonly), which changes what later commands do (PATH=.);
 //   - a command's name is not a plain word ("$CMD", a quoted name), or names a
 //     function the line defines;
 //   - a redirection writes a file ("cat a > ~/.bashrc"); "2>&1", ">&-",
@@ -45,45 +51,67 @@ func splitShell(line string) ([]string, bool) {
 		return splitOperators(line), false
 	}
 
-	var (
-		commands []string
-		safe     = true
-		funcs    = map[string]bool{}
-		printer  = syntax.NewPrinter(syntax.SingleLine(true))
-	)
+	scan := &shellScan{
+		safe:    !strings.ContainsAny(line, "`") && !containsAny(line, "$(", "<(", ">("),
+		funcs:   map[string]bool{},
+		printer: syntax.NewPrinter(syntax.SingleLine(true)),
+	}
 
-	syntax.Walk(file, func(node syntax.Node) bool {
-		switch n := node.(type) {
-		case *syntax.CmdSubst, *syntax.ProcSubst:
-			safe = false
-		case *syntax.FuncDecl:
-			funcs[n.Name.Value] = true
-		case *syntax.Stmt:
-			for _, r := range n.Redirs {
-				safe = safe && harmlessRedirect(r)
-			}
-		case *syntax.CallExpr:
-			if len(n.Args) == 0 {
-				return true // assignments only
-			}
+	syntax.Walk(file, scan.visit)
 
-			var b bytes.Buffer
-			if printer.Print(&b, n) != nil {
-				safe = false
-				return true
-			}
+	return scan.commands, scan.safe
+}
 
-			commands = append(commands, strings.TrimSpace(b.String()))
+// shellScan collects a parsed line's simple commands and whether the line
+// can be judged from them (see splitShell).
+type shellScan struct {
+	commands []string
+	safe     bool
+	funcs    map[string]bool
+	printer  *syntax.Printer
+}
 
-			if name := n.Args[0].Lit(); name == "" || funcs[name] {
-				safe = false
-			}
+// visit inspects one node of the syntax tree; it always walks on.
+func (s *shellScan) visit(node syntax.Node) bool {
+	switch n := node.(type) {
+	case *syntax.CmdSubst, *syntax.ProcSubst, *syntax.ArithmExp, *syntax.ArithmCmd,
+		*syntax.TestClause, *syntax.LetClause, *syntax.DeclClause, *syntax.TestDecl:
+		s.safe = false
+	case *syntax.ParamExp:
+		if n.Index != nil || n.Slice != nil || n.Excl || (n.Exp != nil && n.Exp.Op == syntax.OtherParamOps) {
+			s.safe = false
 		}
+	case *syntax.FuncDecl:
+		s.funcs[n.Name.Value] = true
+	case *syntax.Stmt:
+		for _, r := range n.Redirs {
+			s.safe = s.safe && harmlessRedirect(r)
+		}
+	case *syntax.CallExpr:
+		s.call(n)
+	}
 
-		return true
-	})
+	return true
+}
 
-	return commands, safe
+// call records a simple command, printed in normal form.
+func (s *shellScan) call(n *syntax.CallExpr) {
+	if len(n.Args) == 0 {
+		s.safe = false // assignments only: they change what later commands do
+		return
+	}
+
+	var b bytes.Buffer
+	if s.printer.Print(&b, n) != nil {
+		s.safe = false
+		return
+	}
+
+	s.commands = append(s.commands, strings.TrimSpace(b.String()))
+
+	if name := n.Args[0].Lit(); name == "" || s.funcs[name] {
+		s.safe = false
+	}
 }
 
 // harmlessRedirect reports whether r writes no file: an input redirection, a
@@ -132,4 +160,15 @@ func splitOperators(line string) []string {
 	}
 
 	return commands
+}
+
+// containsAny reports whether s contains any of subs.
+func containsAny(s string, subs ...string) bool {
+	for _, sub := range subs {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+
+	return false
 }

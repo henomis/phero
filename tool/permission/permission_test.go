@@ -581,3 +581,27 @@ func TestDecide_ShellIsParsed(t *testing.T) {
 		}
 	}
 }
+
+func TestDecide_ShellCodeInDataIsAsked(t *testing.T) {
+	p := mustPolicy(t, permission.WithAllow("bash(echo *)", "bash(test *)", "bash(printf *)", "bash(ls*)", "bash(git status*)"))
+
+	// Bash runs $(...) found in an array subscript during arithmetic, and in
+	// a ${x@P} expansion, even when the text came from a quoted literal.
+	for _, command := range []string{
+		"x='a[$(touch p)]'; echo $((x))",
+		"x='a[$(touch p)]'; echo $[x]",
+		"x='a[$(touch p)]'; echo ${y:x}",
+		"x='a[$(touch p)]'; echo ${y[x]}",
+		"x='$(touch p)'; echo ${x@P}",
+		"test -v 'a[$(touch p)]'",
+		"printf -v 'a[`touch p`]' %s x",
+		"((x)); echo hi",
+		"[[ $x -eq 1 ]]; echo hi",
+		"PATH=.:$PATH; ls",
+		"HOME=.; git status",
+	} {
+		if got, subjects := p.Decide("bash", bashArgs(command)); got != permission.Ask {
+			t.Errorf("Decide(%q) = %s (subjects %q), want ask", command, got, subjects)
+		}
+	}
+}

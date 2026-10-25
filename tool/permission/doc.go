@@ -53,11 +53,14 @@
 // bash(go test *), quoted operators do not split ("echo 'a && b'" is one
 // command), and commands are matched in a normal form, single-spaced. A line
 // is asked, unless a deny rule matches one of its commands, when it does not
-// parse, uses a command or process substitution, names its command with
-// something other than a plain word ("$CMD", a function it defines), or
-// redirects output to a file ("cat a >> ~/.bashrc" does not pass
-// bash(cat *)); "2>&1", ">&-", ">/dev/null", input redirections and heredocs
-// write no file.
+// parse; holds the text of a command or process substitution anywhere, even
+// quoted (bash runs "$(...)" from an array subscript or ${x@P}); evaluates
+// arithmetic or indirection ($((...)), ((...)), [[ ... ]], let, ${a[i]},
+// ${a:i}, ${!a}, ${a@op}); only assigns or declares variables (PATH=.,
+// export); names its command with something other than a plain word ("$CMD",
+// a function it defines); or redirects output to a file ("cat a >> ~/.bashrc"
+// does not pass bash(cat *)). "2>&1", ">&-", ">/dev/null", input redirections
+// and heredocs write no file.
 //
 // Bash rules are advisory, not a security boundary. They match the command
 // text, so a deny rule misses the same program written another way:

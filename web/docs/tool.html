@@ -464,8 +464,12 @@ policy.Apply(readTool.Tool(), bashTool.Tool(), editTool.Tool())</code></pre>
           functions and substitutions. <code>go test ./... &amp;&amp; rm -rf /</code> does not pass
           <code>bash(go test *)</code>; a quoted operator does not split (<code>echo 'a &amp;&amp; b'</code> is one
           command), and commands are matched single-spaced. A line is asked (still denied when a deny rule matches
-          one of its commands) when it does not parse, uses a command or process substitution, names its command with
-          something other than a plain word (<code>$CMD</code>, a function it defines), or redirects output to a file
+          one of its commands) when it does not parse; holds the text of a command or process substitution anywhere,
+          even quoted (bash runs <code>$(...)</code> found in an array subscript or <code>${x@P}</code>); evaluates
+          arithmetic or indirection (<code>$((...))</code>, <code>((...))</code>, <code>[[ ... ]]</code>,
+          <code>${a[i]}</code>, <code>${!a}</code>, …); only assigns or declares variables (<code>PATH=.</code>,
+          <code>export</code>); names its command with something other than a plain word (<code>$CMD</code>, a
+          function it defines); or redirects output to a file
           (<code>cat a &gt;&gt; ~/.bashrc</code> does not pass <code>bash(cat *)</code>); <code>2&gt;&amp;1</code>,
           <code>&gt;/dev/null</code>, input redirections and heredocs write no file.</li>
         <li>File paths are matched as the file tools open them: cleaned, made absolute against the working directory
