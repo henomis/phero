@@ -532,3 +532,38 @@ func TestExecute_InvalidStoredToolArgumentsSentAsEmptyObject(t *testing.T) {
 		}
 	}
 }
+
+func TestExecute_CompactedSessionKeepsTurnOrder(t *testing.T) {
+	f := newFake(t)
+	client := newClient(f)
+
+	// A compacted session whose kept messages start with a tool call: the
+	// summary is a user message, so the function call follows a user turn, as
+	// Gemini requires.
+	msgs := []llm.Message{
+		llm.SystemMessage("you are a coding agent"),
+		llm.UserMessage(llm.Text("Summary of previous conversation:\n- read the repo")),
+		llm.UserMessage(llm.Text("fix the test")),
+		llm.AssistantMessage(nil, llm.ToolCall{ID: "c", Function: llm.FunctionCall{Name: "f", Arguments: "{}"}}),
+		llm.ToolResultMessage("c", llm.Text("PASS")),
+	}
+
+	if _, err := client.Execute(context.Background(), msgs); err != nil {
+		t.Fatal(err)
+	}
+
+	req := f.request(t, f.count()-1)
+
+	roles := make([]any, 0, 3)
+	for i := range 3 {
+		roles = append(roles, get(t, req, "contents", i, "role"))
+	}
+
+	if fmt.Sprint(roles) != "[user model user]" {
+		t.Fatalf("roles = %v, want the summary and task as one user turn, then the call and its result", roles)
+	}
+
+	if parts, _ := get(t, req, "contents", 0, "parts").([]any); len(parts) != 2 {
+		t.Fatalf("first turn parts = %v, want the summary and the task", parts)
+	}
+}

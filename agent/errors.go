@@ -39,6 +39,10 @@ var (
 	// ErrInvalidCompaction is returned when a Compactor's result does not
 	// keep the session's last messages as they were (see Compaction.Kept).
 	ErrInvalidCompaction = errors.New("invalid compaction")
+	// ErrSnapshotMismatch is recorded when a compaction's snapshot cannot be
+	// stored because the compacted messages are not found in the memory's
+	// log; the snapshot then lives in the run only.
+	ErrSnapshotMismatch = errors.New("compacted messages not found in the memory log")
 )
 
 // StopRun returns the error a tool's handler returns to end the agent's run

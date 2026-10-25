@@ -25,6 +25,7 @@ import (
 	"github.com/henomis/phero/v2/agent"
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/memory"
+	"github.com/henomis/phero/v2/memory/simple"
 )
 
 // summaryLLM answers every call with "summary" and records the prompts.
@@ -501,5 +502,153 @@ func TestEstimateTokens(t *testing.T) {
 	// 400/4 + 40/4 + 80/4 = 130, plus an overhead per message.
 	if got := agent.EstimateTokens(msgs); got < 130 || got > 160 {
 		t.Fatalf("EstimateTokens = %d, want about 130 plus overhead", got)
+	}
+}
+
+// twoRunsWithSnapshots runs an agent twice on store: the first run compacts
+// (its first call reports 5000 tokens over a 1000 threshold), the second
+// starts from what the first stored. It returns the second run's first prompt.
+func twoRunsWithSnapshots(t *testing.T, store memory.Memory, checkpoint bool) []llm.Message {
+	t.Helper()
+
+	first := &scriptedLLM{fn: func(call int, _ []llm.Message) (*llm.Result, error) {
+		switch call {
+		case 1, 2:
+			return toolCallResultWithUsage("echo", fmt.Sprintf("c%d", call), "{}", &llm.Usage{InputTokens: 5000}), nil
+		default:
+			return textResult("first done"), nil
+		}
+	}}
+
+	a := mustNew(t, first, "agent", "desc")
+	addEchoTool(t, a)
+	a.SetMemory(store)
+	a.SetCheckpoint(checkpoint)
+
+	compactions := 0
+	a.SetCompaction(keepLastCompactor(&compactions), 1000)
+
+	if _, err := a.Run(context.Background(), llm.Text("task one")); err != nil {
+		t.Fatal(err)
+	}
+
+	if compactions == 0 {
+		t.Fatal("the first run did not compact")
+	}
+
+	second := &scriptedLLM{fn: func(int, []llm.Message) (*llm.Result, error) { return textResult("second done"), nil }}
+
+	b := mustNew(t, second, "agent", "desc")
+	b.SetMemory(store)
+
+	if _, err := b.Run(context.Background(), llm.Text("task two")); err != nil {
+		t.Fatal(err)
+	}
+
+	return second.prompts[0]
+}
+
+func TestRun_SnapshotCarriesToTheNextRun(t *testing.T) {
+	for _, checkpoint := range []bool{false, true} {
+		store := simple.New(100)
+		prompt := twoRunsWithSnapshots(t, store, checkpoint)
+
+		// system, the stored summary, then only the messages after it.
+		if !isSummary(prompt[1], "compacted") {
+			t.Fatalf("checkpoint %v: prompt = %+v, want the stored summary after the system prompt", checkpoint, prompt)
+		}
+
+		assertValidConversation(t, prompt)
+
+		if last := prompt[len(prompt)-1]; last.TextContent() != "task two" {
+			t.Fatalf("checkpoint %v: last message = %q", checkpoint, last.TextContent())
+		}
+
+		// The log holds every message once, and no summary.
+		all := store.Len()
+		seen := map[string]int{}
+
+		snap, logged, err := store.LoadSnapshot(context.Background())
+		if err != nil || snap == nil {
+			t.Fatalf("checkpoint %v: LoadSnapshot = %v, %v", checkpoint, snap, err)
+		}
+
+		for _, lm := range logged {
+			for _, tc := range lm.Message.ToolCalls {
+				seen[tc.ID]++
+			}
+
+			if strings.HasPrefix(lm.Message.TextContent(), memory.SummarySystemMessagePrefix) {
+				t.Fatalf("checkpoint %v: a summary was saved to the log", checkpoint)
+			}
+		}
+
+		for id, n := range seen {
+			if n > 1 {
+				t.Fatalf("checkpoint %v: tool call %s logged %d times (log of %d)", checkpoint, id, n, all)
+			}
+		}
+	}
+}
+
+// conflictingStore is a simple memory where another writer saves a snapshot
+// just before the agent does.
+type conflictingStore struct {
+	*simple.Memory
+}
+
+func (c conflictingStore) SaveSnapshot(ctx context.Context, s memory.Snapshot, upTo memory.Cursor, prev *memory.Snapshot) error {
+	_, logged, _ := c.LoadSnapshot(ctx)
+	if err := c.Memory.SaveSnapshot(ctx, memory.Snapshot{Summary: "other writer"}, logged[0].Cursor, prev); err != nil {
+		return err
+	}
+
+	return c.Memory.SaveSnapshot(ctx, s, upTo, prev)
+}
+
+func TestRun_SnapshotConflictKeepsTheRunGoing(t *testing.T) {
+	store := conflictingStore{simple.New(100)}
+
+	client := &scriptedLLM{fn: func(call int, _ []llm.Message) (*llm.Result, error) {
+		if call == 1 {
+			return toolCallResultWithUsage("echo", "c1", "{}", &llm.Usage{InputTokens: 5000}), nil
+		}
+
+		return textResult("done"), nil
+	}}
+
+	a := mustNew(t, client, "agent", "desc")
+	addEchoTool(t, a)
+	a.SetMemory(store)
+
+	compactions := 0
+	a.SetCompaction(keepLastCompactor(&compactions), 1000)
+
+	if res, err := a.Run(context.Background(), llm.Text("go")); err != nil || res.TextContent() != "done" {
+		t.Fatalf("Run = %v, %v; want the run to finish with its in-run summary", res, err)
+	}
+
+	if snap, _, _ := store.LoadSnapshot(context.Background()); snap == nil || snap.Summary != "other writer" {
+		t.Fatalf("stored snapshot = %+v, want the other writer's kept", snap)
+	}
+}
+
+func TestRun_SnapshotsUnsupportedFallsBack(t *testing.T) {
+	store := simple.New(100, simple.WithSummarization(&summaryLLM{}, 50, 10))
+	if err := store.Save(context.Background(), []llm.Message{llm.UserMessage(llm.Text("old")), llm.AssistantMessage([]llm.ContentPart{llm.Text("ok")})}); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &scriptedLLM{fn: func(int, []llm.Message) (*llm.Result, error) { return textResult("done"), nil }}
+
+	a := mustNew(t, client, "agent", "desc")
+	a.SetMemory(store)
+
+	if _, err := a.Run(context.Background(), llm.Text("go")); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := client.prompts[0][1].TextContent(); got != "old" {
+		t.Fatalf("prompt = %+v, want the history retrieved as before", client.prompts[0])
 	}
 }

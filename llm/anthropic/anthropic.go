@@ -318,8 +318,10 @@ func anthropicOutputSchema(f *llm.ResponseFormat) map[string]any {
 // API allows. Anthropic caches the request prefix (tools, then system, then
 // messages) up to and including a breakpoint:
 //   - the last tool definition, which caches the tool list;
-//   - the first system block (the agent's stable system prompt) and the last
-//     one, when there are several (summaries that change more often);
+//   - the first system block (the agent's stable system prompt);
+//   - the end of the first message, when there are several: after a
+//     compaction, the summary and the pinned task, which change only at the
+//     next compaction (otherwise the task the conversation started with);
 //   - the last content block of the last message. This one moves forward with
 //     every request, so each call of a long tool-using conversation reads the
 //     previous call's whole prompt from the cache and pays full price only for
@@ -336,20 +338,27 @@ func applyPromptCaching(params *anthropicapi.MessageNewParams, ttl CacheTTL) {
 		}
 	}
 
-	if n := len(params.System); n > 0 {
+	if len(params.System) > 0 {
 		params.System[0].CacheControl = cc
-		params.System[n-1].CacheControl = cc
+	}
+
+	if n := len(params.Messages); n > 1 {
+		markLastBlock(params.Messages[0].Content, cc)
 	}
 
 	if n := len(params.Messages); n > 0 {
-		blocks := params.Messages[n-1].Content
-		for i := len(blocks) - 1; i >= 0; i-- {
-			// Thinking blocks cannot carry a breakpoint; the block before can.
-			if c := blocks[i].GetCacheControl(); c != nil {
-				*c = cc
+		markLastBlock(params.Messages[n-1].Content, cc)
+	}
+}
 
-				break
-			}
+// markLastBlock puts cc on the last block of blocks that can carry one.
+func markLastBlock(blocks []anthropicapi.ContentBlockParamUnion, cc anthropicapi.CacheControlEphemeralParam) {
+	for i := len(blocks) - 1; i >= 0; i-- {
+		// Thinking blocks cannot carry a breakpoint; the block before can.
+		if c := blocks[i].GetCacheControl(); c != nil {
+			*c = cc
+
+			return
 		}
 	}
 }

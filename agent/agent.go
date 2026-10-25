@@ -289,11 +289,15 @@ func (a *Agent) SetResponseFormat(format *llm.ResponseFormat) {
 //     ends the run.
 //
 // Each compaction is traced as a memory span with op trace.MemoryCompact.
-// Compaction does not change what memory holds: before compacting, the run
-// saves the messages it has not saved yet, and after it, only the messages
-// added later. Each message is stored once and the summary is not stored, so
-// the next run loads the full history and compacts again when it needs to (a
-// memory backend's own summarization keeps the stored history short).
+// Memory keeps every message once: before compacting, the run saves the
+// messages it has not saved yet, and after it, only the messages added later.
+// With a memory.SnapshotStore, the compaction's snapshot is stored too
+// (traced as op trace.MemorySnapshot), and the next run starts from it: the
+// summary, then only the messages after it. Storing it fails without failing
+// the run when another writer stored a snapshot first, or the log no longer
+// holds the compacted messages; the summary then lives in the run only, as it
+// does with any other memory, and the next run loads the full history and
+// compacts again when it needs to.
 //
 // Pass a nil Compactor to disable compaction.
 func (a *Agent) SetCompaction(c Compactor, atTokens int) {
@@ -411,6 +415,10 @@ func (a *Agent) compactSession(
 		return session, sessionIndex, err
 	}
 
+	if store, ok := a.memory.(memory.SnapshotStore); ok {
+		a.storeSnapshot(ctx, store, rs, in, compaction)
+	}
+
 	summary := memory.SummaryMessages(compaction.Snapshot)
 
 	newSession := make([]llm.Message, 0, 1+len(summary)+len(compaction.Kept))
@@ -432,6 +440,89 @@ func (a *Agent) compactSession(
 	rs.savedTo = len(newSession)
 
 	return newSession, rs.tailStart(), nil
+}
+
+// storeSnapshot stores the compaction's snapshot in store, inside a memory
+// span, so the next run starts from it. The session's messages are all in the
+// log by now; the snapshot covers them up to the last one not kept. Failing
+// to store it does not fail the run: the snapshot then lives in the run only,
+// as with a plain memory, and the error is recorded on the span.
+func (a *Agent) storeSnapshot(
+	ctx context.Context, store memory.SnapshotStore, rs *runState, in CompactInput, compaction *Compaction,
+) {
+	payload := &trace.Memory{Op: trace.MemorySnapshot}
+	ctx, span := trace.Start(context.WithoutCancel(ctx), string(trace.KindMemory)+" snapshot", payload)
+
+	upTo, err := snapshotCursor(ctx, store, rs, in, compaction)
+	if err == nil {
+		err = store.SaveSnapshot(ctx, compaction.Snapshot, upTo, rs.stored)
+	}
+
+	if err != nil {
+		span.End(err)
+		return
+	}
+
+	saved := compaction.Snapshot
+	saved.UpTo = upTo
+	rs.stored = &saved
+
+	payload.Messages = memory.SummaryMessages(saved)
+	payload.Count = len(payload.Messages)
+
+	span.End(nil)
+}
+
+// snapshotCursor returns the cursor of the last message the compaction's
+// snapshot covers, by finding the compacted messages at the end of the log.
+func snapshotCursor(
+	ctx context.Context, store memory.SnapshotStore, rs *runState, in CompactInput, compaction *Compaction,
+) (memory.Cursor, error) {
+	current, logged, err := store.LoadSnapshot(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	if !memory.SameSnapshot(current, rs.stored) {
+		return "", memory.ErrSnapshotConflict
+	}
+
+	// Empty answers are not saved: match the messages the log can hold.
+	covered := replayable(in.Messages[:len(in.Messages)-len(compaction.Kept)])
+	tail := replayable(in.Messages)
+
+	loggedMsgs := make([]memory.LoggedMessage, 0, len(logged))
+	for _, lm := range logged {
+		if !isEmptyAnswer(lm.Message) {
+			loggedMsgs = append(loggedMsgs, lm)
+		}
+	}
+
+	if len(covered) == 0 {
+		return "", fmt.Errorf("%w: it covers no saved message", ErrSnapshotMismatch)
+	}
+
+	// The tail is at the end of the log, or followed by another writer's
+	// messages.
+	for start := len(loggedMsgs) - len(tail); start >= 0; start-- {
+		if alignedWithLog(loggedMsgs[start:start+len(tail)], tail) {
+			return loggedMsgs[start+len(covered)-1].Cursor, nil
+		}
+	}
+
+	return "", ErrSnapshotMismatch
+}
+
+// alignedWithLog reports whether logged holds msgs, one for one.
+func alignedWithLog(logged []memory.LoggedMessage, msgs []llm.Message) bool {
+	for i, m := range msgs {
+		l := logged[i].Message
+		if l.Role != m.Role || l.ToolCallID != m.ToolCallID || l.TextContent() != m.TextContent() || !sameToolCalls(l, m) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // tailStart returns the index of the session's first message after the
@@ -492,6 +583,10 @@ type runState struct {
 	// prompt (nil for none): the session is [system, SummaryMessages(snapshot),
 	// tail], and only the tail is compacted again.
 	snapshot *memory.Snapshot
+	// stored is the latest snapshot the memory holds as far as this run
+	// knows: what a SaveSnapshot compares against. It lags snapshot when
+	// storing one failed.
+	stored *memory.Snapshot
 	// contextTokens estimates the tokens of the next prompt: the previous
 	// call's prompt and output tokens, as the provider reported them. It is 0
 	// when unknown, as after a compaction, and EstimateTokens is used then.
@@ -537,7 +632,7 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 		err = a.finishRun(ctx, rs, session, iteration, result, err)
 	}()
 
-	session, sessionIndex, err = a.prepareSession(ctx, parts)
+	session, sessionIndex, err = a.prepareSession(ctx, rs, parts)
 	if err != nil {
 		return &Result{}, err
 	}
@@ -990,13 +1085,19 @@ func (a *Agent) runToolBatch(
 }
 
 // prepareSession prepares the messages for the LLM call, including the system prompt, memory messages, and user input.
-func (a *Agent) prepareSession(ctx context.Context, parts []llm.ContentPart) ([]llm.Message, int, error) {
+func (a *Agent) prepareSession(ctx context.Context, rs *runState, parts []llm.ContentPart) ([]llm.Message, int, error) {
 	messages := []llm.Message{llm.SystemMessage(a.description)}
 
 	if a.memory != nil {
-		memoryMessages, err := a.retrieveMemory(ctx, parts)
+		snapshot, memoryMessages, err := a.loadMemory(ctx, parts)
 		if err != nil {
 			return nil, 0, err
+		}
+
+		// A stored snapshot starts the session, as after a compaction.
+		if snapshot != nil {
+			rs.snapshot, rs.stored = snapshot, snapshot
+			messages = append(messages, memory.SummaryMessages(*snapshot)...)
 		}
 
 		messages = append(messages, memoryMessages...)
@@ -1013,6 +1114,47 @@ func (a *Agent) prepareSession(ctx context.Context, parts []llm.ContentPart) ([]
 	}
 
 	return messages, sessionIndex, nil
+}
+
+// loadMemory loads the latest snapshot (nil for none) and the replayable
+// messages after it from a memory.SnapshotStore, or the messages from any
+// other memory, or from a store set up without snapshot support.
+func (a *Agent) loadMemory(ctx context.Context, parts []llm.ContentPart) (*memory.Snapshot, []llm.Message, error) {
+	store, ok := a.memory.(memory.SnapshotStore)
+	if !ok {
+		msgs, err := a.retrieveMemory(ctx, parts)
+		return nil, msgs, err
+	}
+
+	payload := &trace.Memory{Op: trace.MemoryRetrieve, Query: llm.TextContent(parts...)}
+	ctx, span := trace.Start(ctx, string(trace.KindMemory)+" retrieve", payload)
+
+	snapshot, logged, err := store.LoadSnapshot(ctx)
+	if errors.Is(err, memory.ErrSnapshotsUnsupported) {
+		span.End(nil)
+
+		msgs, retrieveErr := a.retrieveMemory(ctx, parts)
+
+		return nil, msgs, retrieveErr
+	}
+
+	if err != nil {
+		span.End(err)
+		return nil, nil, err
+	}
+
+	msgs := make([]llm.Message, 0, len(logged))
+	for _, lm := range logged {
+		msgs = append(msgs, lm.Message)
+	}
+
+	msgs = replayable(msgs)
+	payload.Messages = msgs
+	payload.Count = len(msgs)
+
+	span.End(nil)
+
+	return snapshot, msgs, nil
 }
 
 // retrieveMemory loads the replayable messages from memory inside a span.

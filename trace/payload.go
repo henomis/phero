@@ -208,6 +208,9 @@ const (
 	// MemoryCompact replaces older messages of a running session with a
 	// shorter version, such as a summary, to fit the model's context window.
 	MemoryCompact MemoryOp = "compact"
+	// MemorySnapshot stores a compaction's snapshot in a memory that keeps
+	// snapshots, so later runs start from it.
+	MemorySnapshot MemoryOp = "snapshot"
 )
 
 // Memory is the payload of a memory span.

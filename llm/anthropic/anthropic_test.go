@@ -983,7 +983,7 @@ func TestExecute_ToolChoiceWithoutTools_IsOmitted(t *testing.T) {
 // TestExecute_WithPromptCacheTTL_MarksConversationEnd checks the breakpoints
 // of a tool-using conversation with a summary: last tool, first and last
 // system blocks and the last block of the last message, all with the TTL.
-func TestExecute_WithPromptCacheTTL_MarksConversationEnd(t *testing.T) {
+func TestExecute_WithPromptCacheTTL_MarksSummaryAndConversationEnd(t *testing.T) {
 	var body []byte
 
 	srv := capturingServer(t, &body)
@@ -996,9 +996,11 @@ func TestExecute_WithPromptCacheTTL_MarksConversationEnd(t *testing.T) {
 
 	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL), anthropic.WithPromptCacheTTL(anthropic.CacheTTL1h))
 
+	// A compacted session: the summary is a user message after the system
+	// prompt, then the pinned task.
 	msgs := []llm.Message{
 		llm.SystemMessage("you are a coding agent"),
-		llm.SystemMessage("Summary of previous conversation: ..."),
+		llm.UserMessage(llm.Text("Summary of previous conversation: ...")),
 		llm.UserMessage(llm.Text("fix the test")),
 		llm.AssistantMessage(nil, llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "t", Arguments: "{}"}}),
 		llm.ToolResultMessage("c1", llm.Text("FAIL")),
@@ -1032,8 +1034,8 @@ func TestExecute_WithPromptCacheTTL_MarksConversationEnd(t *testing.T) {
 
 	marked := func(cc *cacheControl) bool { return cc != nil && cc.Type == "ephemeral" && cc.TTL == "1h" }
 
-	if len(req.System) != 2 || !marked(req.System[0].CacheControl) || !marked(req.System[1].CacheControl) {
-		t.Fatalf("system blocks not both marked: %s", body)
+	if len(req.System) != 1 || !marked(req.System[0].CacheControl) {
+		t.Fatalf("system block not marked: %s", body)
 	}
 
 	if len(req.Tools) != 1 || !marked(req.Tools[0].CacheControl) {
@@ -1045,10 +1047,17 @@ func TestExecute_WithPromptCacheTTL_MarksConversationEnd(t *testing.T) {
 		t.Fatalf("last message block not marked: %s", body)
 	}
 
-	for _, m := range req.Messages[:len(req.Messages)-1] {
+	// The first turn (summary and task, merged) ends with a breakpoint: it
+	// changes only at the next compaction.
+	first := req.Messages[0].Content
+	if len(first) != 2 || !marked(first[1].CacheControl) || first[0].CacheControl != nil {
+		t.Fatalf("first turn not marked at its end: %s", body)
+	}
+
+	for _, m := range req.Messages[1 : len(req.Messages)-1] {
 		for _, b := range m.Content {
 			if b.CacheControl != nil {
-				t.Fatalf("earlier block marked: %s", body)
+				t.Fatalf("a middle block is marked: %s", body)
 			}
 		}
 	}

@@ -159,8 +159,9 @@ llmClient := anthropic.New(
         <li><code>WithMaxTokens(n)</code>: maximum completion tokens</li>
         <li><code>WithTemperature(t)</code>: sampling temperature (0&ndash;1)</li>
         <li><code>WithBaseURL(url)</code>: override the API endpoint (useful for proxies or tests)</li>
-        <li><code>WithPromptCaching()</code>: mark the tool list, the system prompt and the end of the conversation
-          as cacheable, so repeated requests reuse them at the cheaper cache-read rate. The conversation breakpoint
+        <li><code>WithPromptCaching()</code>: mark the tool list, the system prompt, the first turn (after a
+          compaction, the summary and the pinned task) and the end of the conversation as cacheable, so repeated
+          requests reuse them at the cheaper cache-read rate. The conversation breakpoint
           moves forward with every request, so each call of a long agent run reads the previous call's whole prompt
           from the cache. Cache token counts appear on <code>Result.Usage</code>
           (<code>CacheReadTokens</code> / <code>CacheWriteTokens</code>).</li>

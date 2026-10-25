@@ -382,10 +382,12 @@ a.SetCompaction(agent.NewSummaryCompactor(cheapLLM, agent.WithKeepRecent(20)), 1
           returns an <code>agent.Compaction</code>: a <code>memory.Snapshot</code> and the last input messages it
           keeps, possibly shortened. Kept messages that are not the input's last ones, or that start with a tool
           result, fail with <code>agent.ErrInvalidCompaction</code>; <code>nil</code> means nothing to compact.</li>
-        <li>Compaction does not change what memory holds. Memory only appends, so before compacting the run saves
-          the messages it has not saved yet, and after it only the messages added later. Each message is stored
-          once and the summary is not stored: the next run compacts again when it needs to, and a memory backend's
-          own summarization keeps the stored history short. Each compaction is traced as a memory span with op
+        <li>Memory keeps every message once: before compacting the run saves the messages it has not saved yet, and
+          after it only the messages added later. With a memory that keeps snapshots
+          (<code>memory.SnapshotStore</code>, such as <code>memory/simple</code>), the summary is stored as a
+          snapshot and the next run starts from it: the summary, then only the messages after it. If another writer
+          stored a snapshot first, or the log no longer holds the compacted messages, the summary lives in the run
+          only, as with any other memory, and the run goes on. Each compaction is traced as a memory span with op
           <code>compact</code>; a failure returns an <code>*agent.CompactionError</code>.</li>
       </ul>
     </section>
