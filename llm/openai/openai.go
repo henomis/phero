@@ -360,6 +360,13 @@ func messageToOpenAI(m llm.Message) openai.ChatCompletionMessage {
 		}
 	}
 
+	// One text part left once the reasoning is dropped: send it as a string,
+	// which servers that accept only string content need.
+	if len(multi) == 1 && multi[0].Type == openai.ChatMessagePartTypeText {
+		msg.Content = multi[0].Text
+		return msg
+	}
+
 	msg.MultiContent = multi
 
 	return msg

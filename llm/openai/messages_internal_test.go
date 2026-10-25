@@ -149,3 +149,20 @@ func TestOpenAITools_Strictness(t *testing.T) {
 		t.Fatalf("WithStrictTools(false): strict = %v, required = %d; want loose", perClient.Strict, requiredLen(perClient))
 	}
 }
+
+func TestMessageToOpenAI_ReasoningAndTextSendsPlainContent(t *testing.T) {
+	// Some OpenAI-compatible servers accept only string content: once the
+	// reasoning is dropped, a single text part must not go out as an array.
+	got := messageToOpenAI(llm.AssistantMessage([]llm.ContentPart{
+		llm.Reasoning("thinking", ""),
+		llm.Text("answer"),
+	}))
+	if got.Content != "answer" || got.MultiContent != nil {
+		t.Fatalf("content = %q, multi = %+v; want plain content", got.Content, got.MultiContent)
+	}
+
+	withImage := messageToOpenAI(llm.UserMessage(llm.Text("look"), llm.ImageURL("https://example.com/a.png")))
+	if withImage.Content != "" || len(withImage.MultiContent) != 2 {
+		t.Fatalf("content = %q, multi = %+v; want parts for text and image", withImage.Content, withImage.MultiContent)
+	}
+}
