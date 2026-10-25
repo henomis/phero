@@ -101,6 +101,13 @@ func New(filePath string, options ...Option) (*Memory, error) {
 //
 // This mirrors the behavior of memory/simple.WithSummarization: the oldest summarySize
 // messages, moved past tool results, are replaced by a summary.
+//
+// Deprecated: use agent.SetCompaction with this memory instead: it keeps
+// snapshots (memory.SnapshotStore), so the agent's summary is stored and the
+// log is not rewritten. Summarization here counts messages rather than
+// tokens, calls the LLM inside Save, and replaces the oldest messages. It
+// keeps working as before, and cannot be combined with snapshots
+// (memory.ErrSnapshotsUnsupported).
 func WithSummarization(summaryLLM llm.LLM, summarizeThreshold, summarySize uint) Option {
 	return func(m *Memory) {
 		m.llm = summaryLLM

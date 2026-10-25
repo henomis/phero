@@ -40,7 +40,7 @@ KnowledgeExtractor  ──► world facts
 | MiroFish feature | Phero approach | Tradeoff |
 |---|---|---|
 | GraphRAG (entity graph) | LLM-based extraction → flat world facts | Relationships stored as prose, not traversable |
-| Zep Cloud long-term memory | `simple.Memory` per agent (bounded FIFO + summarization option) | No cross-session persistence by default |
+| Zep Cloud long-term memory | `simple.Memory` per agent (bounded FIFO; summarize with `agent.SetCompaction`) | No cross-session persistence by default |
 | OASIS (1 M agents) | Goroutine fan-out, all agents concurrent per round | Practical cap ~20 agents (LLM cost/latency) |
 | Dual-platform social graph | Shared `WorldFeed` transcript | No follower graph; all agents see the same feed |
 | Deep agent chat | Interactive REPL with `ReportAgent` backed by memory | Chat with report analyst, not individual personas |

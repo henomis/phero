@@ -129,28 +129,24 @@ a.SetMemory(conversationMemory)</code></pre>
     </section>
 
     <section>
-      <h2>Optional summarization</h2>
+      <h2>Summarization: use the agent's compaction</h2>
       <p>
-        The in-process and persistent memories can optionally summarize history when the number of stored messages reaches a threshold.
-        The idea is to keep a compact “state snapshot” plus the most recent turns.
+        To keep a long conversation short, let the agent summarize it: <code>agent.SetCompaction</code> compacts by
+        tokens, during the run, and stores the summary as a <a href="#snapshots">snapshot</a> in any of these memories,
+        so the log is never rewritten and the next run starts from the summary.
       </p>
 
-      <pre><code class="language-go">// From examples/conversational-agent (edited for brevity)
+      <pre><code class="language-go">conversationMemory := memory.New(200)
 
-conversationMemory := memory.New(
-    20,
-    memory.WithSummarization(llmClient, 8, 15),
-)
-
-a.SetMemory(conversationMemory)</code></pre>
+a.SetMemory(conversationMemory)
+a.SetCompaction(agent.NewSummaryCompactor(llmClient, agent.WithKeepRecent(20)), 150_000)</code></pre>
 
       <p>
-        <code>WithSummarization(llm, threshold, size)</code> summarizes once <code>threshold</code> messages are stored:
-        the oldest <code>size</code> messages are replaced by one summary system message, and the newer ones are kept.
-        The split never separates a tool call from its results: it moves forward past tool results, because providers
-        reject a tool result whose call is missing. The summary prompt lists tool calls with their arguments and tool
-        results with their text (both clipped), so the summary records what the agent did, not only what it said.
-        <code>memory/simple</code> also leaves out tool results whose call was evicted from its buffer.
+        <strong>Deprecated:</strong> the backends' own <code>WithSummarization(llm, threshold, size)</code> still works
+        as before, but it counts messages rather than tokens, calls the LLM inside <code>Save</code>, and replaces the
+        oldest <code>size</code> messages with a summary system message, rewriting the stored history. It can't be
+        combined with snapshots (<code>memory.ErrSnapshotsUnsupported</code>). The size must be below the threshold:
+        a larger one is lowered to <code>threshold - 1</code>.
       </p>
     </section>
 
@@ -206,7 +202,7 @@ a.SetMemory(conversationMemory)</code></pre>
         <code>Save</code> returns <code>ErrSessionTooLarge</code> (a <code>*SessionTooLargeError</code> with the
         session and its size). Through an agent, this shows up as <code>agent.ErrSessionSaveFailed</code>: the
         answer is still returned, but the turn is not stored, and later turns will not be either. To stay under
-        it, enable <code>WithSummarization</code>, which also drops the images of the messages it summarizes;
+        it, use the agent's compaction, whose snapshots drop the messages they cover (and their images);
         start a new session or <code>Clear</code> this one; raise <code>max_payload</code> on the NATS server;
         or, for long sessions with many images, use <code>memory/psql</code>, which stores each message as its
         own row.
@@ -253,7 +249,7 @@ a.SetMemory(conversationMemory)</code></pre>
       <h2>PostgreSQL conversation memory (persistent)</h2>
       <p>
         If you want conversation history to survive process restarts (or be shared across replicas), use <code>memory/psql</code>.
-        It's a session-scoped store backed by PostgreSQL (JSONB rows), with optional automatic summarization similar to <code>memory/simple</code>.
+        It's a session-scoped store backed by PostgreSQL (JSONB rows) that keeps <a href="#snapshots">snapshots</a>, as <code>memory/simple</code> does.
       </p>
 
       <pre><code class="language-go">import (
@@ -270,11 +266,7 @@ if err != nil {
     // handle error
 }
 
-conversationMemory, err := psql.New(
-    db,
-    "session-123",
-    psql.WithSummarization(llmClient, 50, 25),
-)
+conversationMemory, err := psql.New(db, "session-123")
 if err != nil {
     // handle error
 }
@@ -303,7 +295,7 @@ a.SetMemory(conversationMemory)</code></pre>
     <section>
       <h2>Run an example</h2>
       <p>
-        The conversational agent example uses simple FIFO memory, with an option to enable summarization.
+        The conversational agent example uses simple FIFO memory, with an option to enable the agent's compaction.
       </p>
 
       <pre><code class="language-bash"># from repo root
@@ -312,7 +304,7 @@ go run ./examples/conversational-agent
 
 # with summarization enabled
 
-go run ./examples/conversational-agent -summarize -summary-threshold 8 -summary-size 15 -max-messages 20</code></pre>
+go run ./examples/conversational-agent -summarize -compact-at 2000 -keep-recent 6 -max-messages 20</code></pre>
 
       <p>
         The skills example uses local JSON-backed memory:
@@ -340,7 +332,7 @@ go run ./examples/nats-memory -session my-session</code></pre>
         <li><strong>Local persistence</strong>: use <code>memory/jsonfile</code> when you want history to survive restarts on one machine</li>
         <li><strong>Shared persistence</strong>: use <code>memory/psql</code> when sessions should live in PostgreSQL</li>
         <li><strong>Lightweight network persistence</strong>: use <code>memory/nats</code> when you want NATS JetStream KV as the store (easy Docker setup, named sessions)</li>
-        <li><strong>Long conversations</strong>: enable summarization to keep context compact</li>
+        <li><strong>Long conversations</strong>: use the agent's compaction (<code>SetCompaction</code>) to keep context compact</li>
         <li><strong>Long-term recall</strong>: use semantic memory via <code>memory/rag</code></li>
       </ul>
     </section>

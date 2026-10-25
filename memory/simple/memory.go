@@ -82,6 +82,13 @@ func New(maxItems uint, options ...Option) *Memory {
 // the buffer is full. If summarySize is set to 0, it will default to half of
 // summarizeThreshold (rounded down). To avoid an infinite summarization loop, summarySize
 // must be less than summarizeThreshold.
+//
+// Deprecated: use agent.SetCompaction with this memory instead: it keeps
+// snapshots (memory.SnapshotStore), so the agent's summary is stored and the
+// log is not rewritten. Summarization here counts messages rather than
+// tokens, calls the LLM inside Save, and replaces the oldest messages. It
+// keeps working as before, and cannot be combined with snapshots
+// (memory.ErrSnapshotsUnsupported).
 func WithSummarization(summaryLLM llm.LLM, summarizeThreshold, summarySize uint) Option {
 	return func(m *Memory) {
 		m.llm = summaryLLM

@@ -634,6 +634,7 @@ func TestRun_SnapshotConflictKeepsTheRunGoing(t *testing.T) {
 }
 
 func TestRun_SnapshotsUnsupportedFallsBack(t *testing.T) {
+	//nolint:staticcheck // the deprecated summarization is what this test falls back from
 	store := simple.New(100, simple.WithSummarization(&summaryLLM{}, 50, 10))
 	if err := store.Save(context.Background(), []llm.Message{llm.UserMessage(llm.Text("old")), llm.AssistantMessage([]llm.ContentPart{llm.Text("ok")})}); err != nil {
 		t.Fatal(err)

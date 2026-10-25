@@ -19,6 +19,7 @@ package e2e_test
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -27,6 +28,8 @@ import (
 
 	"github.com/henomis/phero/v2/agent"
 	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/memory"
+	memoryjsonfile "github.com/henomis/phero/v2/memory/jsonfile"
 )
 
 // compactionChunks is how many chunks the long-run test asks the agent to read,
@@ -36,7 +39,9 @@ const compactionChunks = 40
 // TestAgent_LongRunCompaction drives an agent through many tool-calling
 // iterations whose results together exceed the model's context window, and
 // checks that compaction keeps the run alive: no context-length error, at
-// least one compaction, and the run reaches the last chunk.
+// least one compaction, and the run reaches the last chunk. The agent has a
+// jsonfile memory, and a second run on it must start from the stored
+// snapshot, not the whole history, again without a context-length error.
 //
 // Run it against a local model with a small context, for example llama.cpp
 // with -c 8192: OPENAI_BASE_URL=http://localhost:8080/v1 OPENAI_MODEL=MiniCPM5-2B.
@@ -88,6 +93,13 @@ func TestAgent_LongRunCompaction(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	store, err := memoryjsonfile.New(filepath.Join(t.TempDir(), "memory.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a.SetMemory(store)
+
 	var compactions atomic.Int32
 
 	summarizer := agent.NewSummaryCompactor(client, agent.WithKeepRecent(6))
@@ -113,5 +125,37 @@ func TestAgent_LongRunCompaction(t *testing.T) {
 
 	if highest.Load() < int64(chunks) {
 		t.Fatalf("the agent stopped at chunk %d of %d", highest.Load(), chunks)
+	}
+
+	// The second run starts from the stored snapshot.
+	snap, logged, err := store.LoadSnapshot(ctx)
+	if err != nil || snap == nil {
+		t.Fatalf("no snapshot stored after the run: %v, %v", snap, err)
+	}
+
+	t.Logf("stored snapshot covers up to %s; %d messages after it", snap.UpTo, len(logged))
+
+	var firstPrompt []llm.Message
+
+	b, err := agent.New(llm.Func(func(ctx context.Context, msgs []llm.Message, opts ...llm.CallOption) (*llm.Result, error) {
+		if firstPrompt == nil {
+			firstPrompt = msgs
+		}
+
+		return client.Execute(ctx, msgs, opts...)
+	}), "reader", "Answer briefly.")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b.SetMemory(store)
+	b.SetCompaction(summarizer, 5000)
+
+	if _, err = b.Run(ctx, llm.Text("Which chunk did you read last? Answer with the number only.")); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+
+	if len(firstPrompt) < 2 || !strings.HasPrefix(firstPrompt[1].TextContent(), memory.SummarySystemMessagePrefix) {
+		t.Fatalf("second run's first prompt does not start from the snapshot: %d messages", len(firstPrompt))
 	}
 }
