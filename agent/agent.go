@@ -275,7 +275,9 @@ func (a *Agent) SetResponseFormat(format *llm.ResponseFormat) {
 
 // SetCompaction makes the agent compact its session during a run, so a long
 // run keeps fitting the model's context window. The session, without the
-// system prompt, is handed to c (NewSummaryCompactor is the default choice):
+// system prompt and the current summary, is handed to c (NewSummaryCompactor
+// is the default choice), and becomes [system, the summary as a user message,
+// its pinned messages, the kept messages]. It is compacted:
 //   - before an LLM call, when the previous call's prompt and output tokens,
 //     as the provider reported them, reached atTokens; 0 disables this check.
 //     Before any size is reported (the first call of a run, after a
@@ -370,18 +372,30 @@ func (a *Agent) compactAfterError(
 	return err == nil, err
 }
 
-// compactSession replaces the session after its system prompt with what the
-// compactor returns, inside a memory span, and returns the new session and
-// the index from which it is saved to memory at the end of the run. On error
-// the session is returned unchanged.
+// compactSession compacts the session after its system prompt and its
+// current summary, inside a memory span. It returns the new session,
+// [system, summary messages, kept messages], and the index where the kept
+// messages start (where a cancelled run's partial result is read from). On
+// error, or when there is nothing to compact, the session is returned
+// unchanged.
 func (a *Agent) compactSession(
 	ctx context.Context, rs *runState, session []llm.Message, sessionIndex int,
 ) ([]llm.Message, int, error) {
 	payload := &trace.Memory{Op: trace.MemoryCompact}
 	ctx, span := trace.Start(ctx, string(trace.KindMemory)+" compact", payload)
 
-	compacted, err := a.compactor.Compact(ctx, slices.Clone(session[1:]))
-	if err != nil {
+	in := CompactInput{
+		Previous:   rs.snapshot,
+		Messages:   slices.Clone(session[rs.tailStart():]),
+		KeepTokens: a.compactAtTokens / 4, //nolint:mnd // a quarter of the threshold for the kept messages
+	}
+
+	compaction, err := a.compactor.Compact(ctx, in)
+	if err == nil && compaction != nil {
+		err = compaction.check(in)
+	}
+
+	if err != nil || compaction == nil {
 		span.End(err)
 
 		return session, sessionIndex, err
@@ -397,23 +411,37 @@ func (a *Agent) compactSession(
 		return session, sessionIndex, err
 	}
 
-	payload.Messages = compacted
-	payload.Count = len(compacted)
+	summary := memory.SummaryMessages(compaction.Snapshot)
+
+	newSession := make([]llm.Message, 0, 1+len(summary)+len(compaction.Kept))
+	newSession = append(newSession, session[0])
+	newSession = append(newSession, summary...)
+	newSession = append(newSession, compaction.Kept...)
+
+	payload.Messages = newSession[1:]
+	payload.Count = len(newSession) - 1
 
 	span.End(nil)
 
-	newSession := make([]llm.Message, 0, 1+len(compacted))
-	newSession = append(newSession, session[0])
-	newSession = append(newSession, compacted...)
+	rs.snapshot = &compaction.Snapshot
 
 	// The next call's prompt size is unknown until the provider reports it,
 	// and its trace payload records the whole new session.
 	rs.contextTokens = 0
 	rs.promptLen = 0
-
 	rs.savedTo = len(newSession)
 
-	return newSession, 1, nil
+	return newSession, rs.tailStart(), nil
+}
+
+// tailStart returns the index of the session's first message after the
+// system prompt and the summary messages.
+func (rs *runState) tailStart() int {
+	if rs.snapshot == nil {
+		return 1
+	}
+
+	return 1 + len(memory.SummaryMessages(*rs.snapshot))
 }
 
 // callOptions returns the per-call LLM options every iteration of the loop sends.
@@ -460,6 +488,10 @@ type runState struct {
 	// promptLen is the prompt length of the previous LLM call, where the next
 	// call's message delta starts.
 	promptLen int
+	// snapshot is the summary the session starts from, after the system
+	// prompt (nil for none): the session is [system, SummaryMessages(snapshot),
+	// tail], and only the tail is compacted again.
+	snapshot *memory.Snapshot
 	// contextTokens estimates the tokens of the next prompt: the previous
 	// call's prompt and output tokens, as the provider reported them. It is 0
 	// when unknown, as after a compaction, and EstimateTokens is used then.

@@ -367,11 +367,21 @@ a.SetCompaction(agent.NewSummaryCompactor(cheapLLM, agent.WithKeepRecent(20)), 1
           is compacted before it is sent.</li>
         <li>When a call fails with <code>llm.ErrContextLengthExceeded</code>, the session is compacted and the call
           made again, once. A second such error in a row ends the run.</li>
-        <li><code>NewSummaryCompactor</code> replaces the older messages with one summary, written from a prompt that
-          lists tool calls and results. It never separates a tool call from its results, and it keeps the latest
-          user request word for word, so the task is not lost.</li>
-        <li>Any <code>agent.Compactor</code> (or <code>agent.CompactorFunc</code>) can replace it. The result must
-          stay a valid conversation: no tool result without its call before it.</li>
+        <li>The session becomes the system prompt, the summary as a user message
+          (<code>memory.SummaryMessages</code>: a user message keeps its place, where Anthropic and Gemini would move
+          a system message into the system prompt), the pinned task, and the kept messages. A later compaction
+          updates that summary instead of summarizing it again.</li>
+        <li><code>NewSummaryCompactor</code> writes the summary from a prompt that lists tool calls and results, in
+          fixed sections (task, decisions, files and commands, preferences, open items). It keeps at most
+          <code>WithKeepRecent</code> messages, fewer when they pass a token budget (a quarter of the threshold, or
+          <code>WithKeepTokens</code>), and cuts kept tool results longer than
+          <code>agent.DefaultKeptToolResultChars</code>. It never separates a tool call from its results, and it
+          pins the latest user request word for word, so the task is not lost.</li>
+        <li>Any <code>agent.Compactor</code> (or <code>agent.CompactorFunc</code>) can replace it. It gets an
+          <code>agent.CompactInput</code> (the previous snapshot, the messages after it, the token budget) and
+          returns an <code>agent.Compaction</code>: a <code>memory.Snapshot</code> and the last input messages it
+          keeps, possibly shortened. Kept messages that are not the input's last ones, or that start with a tool
+          result, fail with <code>agent.ErrInvalidCompaction</code>; <code>nil</code> means nothing to compact.</li>
         <li>Compaction does not change what memory holds. Memory only appends, so before compacting the run saves
           the messages it has not saved yet, and after it only the messages added later. Each message is stored
           once and the summary is not stored: the next run compacts again when it needs to, and a memory backend's

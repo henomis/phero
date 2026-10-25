@@ -81,25 +81,28 @@ func TestSummaryCompactor_KeepsRecentAndTask(t *testing.T) {
 	sum := &summaryLLM{}
 	c := agent.NewSummaryCompactor(sum, agent.WithKeepRecent(3))
 
-	out, err := c.Compact(context.Background(), toolSession(5))
-	if err != nil {
-		t.Fatal(err)
+	in := agent.CompactInput{Messages: toolSession(5)}
+
+	out, err := c.Compact(context.Background(), in)
+	if err != nil || out == nil {
+		t.Fatalf("Compact = %+v, %v", out, err)
 	}
 
-	assertValidConversation(t, out)
-
-	// summary, the task, and the last 3 messages moved past the tool result
-	// at the split: [result d, assistant e, result e] -> [assistant e, result e].
-	if len(out) != 4 {
-		t.Fatalf("got %d messages, want 4: %+v", len(out), out)
+	// The last 3 messages moved past the tool result at the split:
+	// [result d, assistant e, result e] -> [assistant e, result e].
+	if len(out.Kept) != 2 || out.Kept[0].Role != llm.RoleAssistant {
+		t.Fatalf("kept = %+v, want the last tool turn", out.Kept)
 	}
 
-	if out[0].Role != llm.RoleSystem || out[0].TextContent() != memory.SummarySystemMessagePrefix+"summary" {
-		t.Fatalf("first message = %+v, want the summary", out[0])
+	assertValidConversation(t, out.Kept)
+
+	if out.Snapshot.Summary != "summary" {
+		t.Fatalf("summary = %q", out.Snapshot.Summary)
 	}
 
-	if out[1].TextContent() != "fix the failing test" {
-		t.Fatalf("second message = %+v, want the task", out[1])
+	// The kept messages hold no user message: the task is pinned verbatim.
+	if len(out.Snapshot.Pinned) != 1 || out.Snapshot.Pinned[0].TextContent() != "fix the failing test" {
+		t.Fatalf("pinned = %+v, want the task", out.Snapshot.Pinned)
 	}
 
 	if len(sum.prompts) != 1 || !strings.Contains(sum.prompts[0], "tool call a: bash") {
@@ -107,25 +110,104 @@ func TestSummaryCompactor_KeepsRecentAndTask(t *testing.T) {
 	}
 }
 
+func TestSummaryCompactor_UpdatesThePreviousSnapshot(t *testing.T) {
+	sum := &summaryLLM{}
+	c := agent.NewSummaryCompactor(sum, agent.WithKeepRecent(2))
+
+	task := llm.UserMessage(llm.Text("the original task"))
+	previous := &memory.Snapshot{Summary: "- earlier work", Pinned: []llm.Message{task}}
+
+	// Only tool turns since the previous snapshot: no user message to pin.
+	out, err := c.Compact(context.Background(), agent.CompactInput{Previous: previous, Messages: toolSession(4)[1:]})
+	if err != nil || out == nil {
+		t.Fatalf("Compact = %+v, %v", out, err)
+	}
+
+	if !strings.Contains(sum.prompts[0], "- earlier work") {
+		t.Fatalf("prompt = %q, want the previous summary in it", sum.prompts[0])
+	}
+
+	if len(out.Snapshot.Pinned) != 1 || out.Snapshot.Pinned[0].TextContent() != "the original task" {
+		t.Fatalf("pinned = %+v, want the previous snapshot's task kept", out.Snapshot.Pinned)
+	}
+}
+
+func TestSummaryCompactor_KeepsByTokens(t *testing.T) {
+	sum := &summaryLLM{}
+	c := agent.NewSummaryCompactor(sum, agent.WithKeepRecent(20))
+
+	// Tool results of 40k characters: 20 messages would keep about 100k tokens.
+	msgs := toolSession(10)
+	for i := range msgs {
+		if msgs[i].Role == llm.RoleTool {
+			msgs[i] = llm.ToolResultMessage(msgs[i].ToolCallID, llm.Text(strings.Repeat("x", 40_000)))
+		}
+	}
+
+	out, err := c.Compact(context.Background(), agent.CompactInput{Messages: msgs, KeepTokens: 5_000})
+	if err != nil || out == nil {
+		t.Fatalf("Compact = %+v, %v", out, err)
+	}
+
+	if got := agent.EstimateTokens(out.Kept); got > 5_000 || len(out.Kept) == 0 {
+		t.Fatalf("kept %d messages of about %d tokens, want some within the 5000 budget", len(out.Kept), got)
+	}
+
+	for _, m := range out.Kept {
+		if m.Role == llm.RoleTool && len(m.TextContent()) > agent.DefaultKeptToolResultChars+100 {
+			t.Fatalf("kept tool result of %d characters, want it cut", len(m.TextContent()))
+		}
+	}
+
+	assertValidConversation(t, out.Kept)
+}
+
 func TestSummaryCompactor_NothingToSummarize(t *testing.T) {
 	sum := &summaryLLM{}
-	msgs := toolSession(1)
 
-	out, err := agent.NewSummaryCompactor(sum, agent.WithKeepRecent(10)).Compact(context.Background(), msgs)
-	if err != nil || len(out) != len(msgs) || len(sum.prompts) != 0 {
-		t.Fatalf("out = %d messages, err = %v, prompts = %d; want the input unchanged", len(out), err, len(sum.prompts))
+	out, err := agent.NewSummaryCompactor(sum, agent.WithKeepRecent(10)).Compact(context.Background(), agent.CompactInput{Messages: toolSession(1)})
+	if err != nil || out != nil || len(sum.prompts) != 0 {
+		t.Fatalf("out = %+v, err = %v, prompts = %d; want nothing to compact", out, err, len(sum.prompts))
 	}
 }
 
 func TestSummaryCompactor_ErrorIsCompactionError(t *testing.T) {
 	cause := errors.New("summary model down")
 
-	_, err := agent.NewSummaryCompactor(&summaryLLM{err: cause}, agent.WithKeepRecent(1)).Compact(context.Background(), toolSession(3))
+	_, err := agent.NewSummaryCompactor(&summaryLLM{err: cause}, agent.WithKeepRecent(1)).Compact(context.Background(), agent.CompactInput{Messages: toolSession(3)})
 
 	var cErr *agent.CompactionError
 	if !errors.As(err, &cErr) || !errors.Is(err, cause) {
 		t.Fatalf("err = %v, want a CompactionError wrapping the cause", err)
 	}
+}
+
+func TestRun_RejectsAnInvalidCompaction(t *testing.T) {
+	for name, kept := range map[string]func(in agent.CompactInput) []llm.Message{
+		"starts with a tool result": func(in agent.CompactInput) []llm.Message { return in.Messages[len(in.Messages)-1:] },
+		"not the last messages":     func(in agent.CompactInput) []llm.Message { return in.Messages[:1] },
+		"keeps everything":          func(in agent.CompactInput) []llm.Message { return in.Messages },
+	} {
+		client := &scriptedLLM{fn: func(call int, _ []llm.Message) (*llm.Result, error) {
+			return toolCallResultWithUsage("echo", fmt.Sprintf("c%d", call), "{}", &llm.Usage{InputTokens: 5000}), nil
+		}}
+
+		a := mustNew(t, client, "agent", "desc")
+		addEchoTool(t, a)
+		a.SetCompaction(agent.CompactorFunc(func(_ context.Context, in agent.CompactInput) (*agent.Compaction, error) {
+			return &agent.Compaction{Snapshot: memory.Snapshot{Summary: "s"}, Kept: kept(in)}, nil
+		}), 1000)
+
+		if _, err := a.Run(context.Background(), llm.Text("go")); !errors.Is(err, agent.ErrInvalidCompaction) {
+			t.Errorf("%s: err = %v, want ErrInvalidCompaction", name, err)
+		}
+	}
+}
+
+// isSummary reports whether m is the summary message of a snapshot whose
+// summary is text.
+func isSummary(m llm.Message, text string) bool {
+	return m.Role == llm.RoleUser && m.TextContent() == memory.SummarySystemMessagePrefix+text
 }
 
 // scriptedLLM answers from fn and records the prompt of every call.
@@ -140,15 +222,18 @@ func (s *scriptedLLM) Execute(_ context.Context, msgs []llm.Message, _ ...llm.Ca
 	return s.fn(len(s.prompts), msgs)
 }
 
-// keepLastCompactor replaces everything but the last message with a marker
-// and counts its calls.
+// keepLastCompactor summarizes everything but the last message (moved past
+// tool results) as "compacted", and counts its calls.
 func keepLastCompactor(calls *int) agent.Compactor {
-	return agent.CompactorFunc(func(_ context.Context, msgs []llm.Message) ([]llm.Message, error) {
+	return agent.CompactorFunc(func(_ context.Context, in agent.CompactInput) (*agent.Compaction, error) {
 		*calls++
 
-		split := memory.SplitPoint(msgs, len(msgs)-1)
+		split := memory.SplitPoint(in.Messages, len(in.Messages)-1)
+		if split == 0 {
+			return nil, nil
+		}
 
-		return append([]llm.Message{llm.SystemMessage("compacted")}, msgs[split:]...), nil
+		return &agent.Compaction{Snapshot: memory.Snapshot{Summary: "compacted"}, Kept: in.Messages[split:]}, nil
 	})
 }
 
@@ -188,7 +273,7 @@ func TestRun_CompactsAtTokenThreshold(t *testing.T) {
 	for i, prompt := range client.prompts[1:] {
 		assertValidConversation(t, prompt)
 
-		if prompt[1].TextContent() != "compacted" {
+		if !isSummary(prompt[1], "compacted") {
 			t.Fatalf("call %d prompt = %+v, want the compacted session", i+2, prompt)
 		}
 	}
@@ -400,7 +485,7 @@ func TestRun_CompactsBeforeTheFirstCallOnEstimate(t *testing.T) {
 		}
 
 		// The provider never saw the oversized prompt.
-		if tc.compactions > 0 && client.prompts[0][1].TextContent() != "compacted" {
+		if tc.compactions > 0 && !isSummary(client.prompts[0][1], "compacted") {
 			t.Errorf("%s: first prompt = %+v, want the compacted session", tc.name, client.prompts[0])
 		}
 	}

@@ -36,6 +36,9 @@ var (
 	// ErrIncompleteStream is returned by RunStream when the LLM stream ended without
 	// a terminal chunk carrying the assembled message.
 	ErrIncompleteStream = errors.New("llm stream ended without a complete message")
+	// ErrInvalidCompaction is returned when a Compactor's result does not
+	// keep the session's last messages as they were (see Compaction.Kept).
+	ErrInvalidCompaction = errors.New("invalid compaction")
 )
 
 // StopRun returns the error a tool's handler returns to end the agent's run
