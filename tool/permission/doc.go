@@ -55,6 +55,17 @@
 // not understand quotes: a quoted operator splits too, which can only make a
 // command asked, never allowed.
 //
+// Bash rules are advisory, not a security boundary. They match the command
+// text, so a deny rule misses the same program written another way:
+// bash(rm -rf *) does not match "rm  -rf", "rm -fr", "/bin/rm -rf" or
+// "\rm -rf", nor rm run from inside "sh -c", a script or a Makefile. Use deny
+// rules to stop mistakes, allow rules for commands safe to run unasked, and a
+// sandbox (bash.NewBubblewrapRunner) where a restriction must hold.
+//
+// A glob or grep call with no path searches the working directory, so a rule
+// such as glob(/repo/secrets*) does not cover it: deny the directory itself
+// (grep(/repo)) or keep secrets outside the working directory.
+//
 // AllowForRun grants rules for the current agent run only (llm.Run), as for
 // the tools a skill pre-approves; SkillGrants leaves out the grants too broad
 // for a skill, such as bare bash.
@@ -66,7 +77,7 @@
 //
 //	policy, err := permission.New(
 //		permission.WithAllow("read", "grep", "glob", "bash(go test *)", "bash(go build *)"),
-//		permission.WithDeny("bash(rm -rf *)", "bash(git push *)"),
+//		permission.WithDeny("bash(git push *)"), // a guard against mistakes, not a boundary
 //		permission.WithAsker(askInTerminal),
 //	)
 //	policy.Apply(readTool.Tool(), bashTool.Tool(), editTool.Tool())

@@ -71,7 +71,10 @@ func SystemPaths() []string {
 type BubblewrapOption func(*BubblewrapRunner)
 
 // WithNetwork lets sandboxed commands use the host network. It is off by
-// default.
+// default. On, the sandbox shares the host's network namespace: besides the
+// internet, commands reach every service listening on localhost (a Docker TCP
+// socket, databases, a local LLM server) and the host's abstract Unix sockets,
+// such as X11's. Turn it on only for commands that need it.
 func WithNetwork(enabled bool) BubblewrapOption {
 	return func(r *BubblewrapRunner) { r.network = enabled }
 }

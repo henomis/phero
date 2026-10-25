@@ -260,7 +260,9 @@ if err := a.AddTool(bashTool.KillTool());   err != nil { panic(err) }</code></pr
         such as <code>~/.ssh</code> are out of reach: <code>connect()</code> on a socket ignores read-only mounts, so
         the sandbox does not mount them at all. A workspace or extra path that is <code>/</code> or contains
         <code>$HOME</code> is refused (<code>bash.ErrPathTooBroad</code>), and commands run in a new session, detached
-        from the caller's terminal. There is no network, the environment is limited to
+        from the caller's terminal. There is no network by default; <code>WithNetwork(true)</code> shares the host's
+        network namespace, so commands also reach every service on localhost (a Docker TCP socket, databases, a local
+        LLM server) and abstract Unix sockets such as X11's. The environment is limited to
         <code>DefaultEnvAllowlist</code>, and the sandbox has its own PID namespace, so a timeout kills everything a
         command started.
       </p>
@@ -268,7 +270,7 @@ if err := a.AddTool(bashTool.KillTool());   err != nil { panic(err) }</code></pr
     bash.WithWritablePaths(goBuildCache, goModCache), // tools that write outside the workspace
     bash.WithReadOnlyPaths(toolchainDir),              // tools installed outside the system directories
     bash.WithReadOnlyPaths(repoDir+"/.git"),           // inside the workspace: the most specific mount wins
-    // bash.WithNetwork(true),                         // only if commands need it
+    // bash.WithNetwork(true),                         // only if commands need it: it shares the host's network
 )
 if err != nil { panic(err) } // bash.ErrBubblewrapNotFound when bwrap is not installed
 
@@ -442,7 +444,7 @@ if err := a.AddTool(todoTool); err != nil { panic(err) }</code></pre>
       <pre><code class="language-go">policy, err := permission.New(
     permission.WithAllow("read", "grep", "glob", "bash(go test *)", "bash(go build *)", "edit(/repo/*)"),
     permission.WithAsk("edit(/repo/go.mod)"),
-    permission.WithDeny("bash(rm -rf *)", "bash(git push *)", "edit(/repo/secrets/*)"),
+    permission.WithDeny("bash(git push *)", "edit(/repo/secrets/*)"), // bash rules guard against mistakes
     permission.WithAsker(func(ctx context.Context, req permission.Request) (permission.Answer, error) {
         fmt.Printf("Allow %s(%s)? [y/a/N] ", req.Tool, req.Subject)
         // read the answer: permission.AllowOnce, permission.AllowAlways or permission.Reject
@@ -474,6 +476,14 @@ policy.Apply(readTool.Tool(), bashTool.Tool(), editTool.Tool())</code></pre>
           allows the same subject from then on. Without an <code>Asker</code>, calls that need asking are denied.</li>
         <li>A denied call returns a <code>*permission.DeniedError</code> (matches <code>permission.ErrDenied</code>),
           which the model sees as a failed tool call. The <code>Request</code> carries the model's tool call ID.</li>
+        <li><strong>Bash rules are advisory, not a security boundary.</strong> They match the command text, so a deny
+          rule misses the same program written another way: <code>bash(rm -rf *)</code> does not match
+          <code>rm  -rf</code>, <code>rm -fr</code>, <code>/bin/rm -rf</code> or <code>\rm -rf</code>, nor rm run from
+          inside <code>sh -c</code>, a script or a Makefile. Use deny rules to stop mistakes, allow rules for commands
+          safe to run unasked, and the bubblewrap sandbox (<code>bash.NewBubblewrapRunner</code>, above) where a restriction must hold.</li>
+        <li>A <code>glob</code> or <code>grep</code> call with no path searches the working directory, so
+          <code>glob(/repo/secrets*)</code> does not cover it: deny the directory itself or keep secrets outside the
+          working directory.</li>
         <li><code>WithSubject(tool, argument)</code> sets the subject argument of other tools, such as an MCP tool's URL.
           A subject argument named <code>file_path</code> or <code>path</code> is matched as a file path.</li>
       </ul>
