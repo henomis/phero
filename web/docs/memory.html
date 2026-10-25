@@ -74,6 +74,36 @@ a.SetMemory(conversationMemory)</code></pre>
     </section>
 
     <section>
+      <h2>Snapshots: a summary that stands for the oldest messages</h2>
+      <p>
+        A memory that implements <code>memory.SnapshotStore</code> keeps a log of messages plus a stored
+        <code>memory.Snapshot</code>: a summary (and a few pinned messages, such as the task) that stands for the oldest
+        messages. <code>Retrieve</code> then returns the summary followed by the messages after it, so a long
+        conversation stays short without losing its log. <code>memory/simple</code> implements it; the agent's
+        compaction uses it.
+      </p>
+
+      <pre><code class="language-go">snap, tail, err := store.LoadSnapshot(ctx) // latest snapshot (or nil) and the messages after it, with cursors
+// ... summarize, then cover everything up to a message:
+err = store.SaveSnapshot(ctx, memory.Snapshot{Summary: text}, tail[len(tail)-5].Cursor, snap)</code></pre>
+
+      <ul>
+        <li>A <code>memory.Cursor</code> is an absolute position in the log: it stays valid while older messages are
+          evicted and newer ones appended, even by another writer.</li>
+        <li><code>SaveSnapshot</code> compares and swaps: it fails with <code>memory.ErrSnapshotConflict</code> when
+          the latest snapshot is no longer <code>prev</code>, and with <code>memory.ErrInvalidCursor</code> for a
+          cursor that does not move past it.</li>
+        <li>The summary is sent as a user message (<code>memory.SummaryMessages</code>), not a system message, so it
+          keeps its place in the conversation. <code>memory.FormatSnapshotPrompt</code> updates the previous summary
+          with the new messages, in fixed sections: task, decisions and facts, files and commands, user preferences,
+          open items.</li>
+        <li>The messages a snapshot covers are kept by default; <code>simple.WithPruneCompacted(true)</code> drops
+          them. Snapshots can't be combined with a backend's own <code>WithSummarization</code>, which rewrites the log
+          (<code>memory.ErrSnapshotsUnsupported</code>).</li>
+      </ul>
+    </section>
+
+    <section>
       <h2>JSON file memory (persistent local state)</h2>
       <p>
         <code>memory/jsonfile</code> stores the full conversation in a JSON file on disk.

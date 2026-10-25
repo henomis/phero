@@ -16,17 +16,22 @@ package simple
 
 import (
 	"context"
+	"fmt"
+	"strconv"
+	"sync"
 
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/memory"
 )
 
-var _ memory.Memory = (*Memory)(nil)
+var _ memory.SnapshotStore = (*Memory)(nil)
 
 // Option configures a Memory instance.
 type Option func(*Memory)
 
-// Memory stores recent llm.Message values in a bounded FIFO buffer.
+// Memory stores recent llm.Message values in a bounded FIFO buffer. It is a
+// memory.SnapshotStore: a snapshot stands for the oldest messages, which are
+// kept unless WithPruneCompacted is set.
 type Memory struct {
 	buffer *ringBuffer[llm.Message]
 	llm    llm.LLM
@@ -34,6 +39,22 @@ type Memory struct {
 	capacity         uint
 	summaryThreshold uint
 	summarySize      uint
+
+	mu sync.Mutex // guards next, snapshot and upTo, and orders Save with them
+	// next is the absolute position of the next message saved: the buffer
+	// holds positions next-Len() to next-1, so a cursor survives eviction.
+	next     int
+	snapshot *memory.Snapshot
+	upTo     int // absolute position of the last message snapshot stands for
+	prune    bool
+}
+
+// WithPruneCompacted drops the messages a snapshot stands for when it is
+// saved. Off by default: the buffer keeps them until they are evicted.
+func WithPruneCompacted(prune bool) Option {
+	return func(m *Memory) {
+		m.prune = prune
+	}
 }
 
 // New creates a new Memory that keeps up to maxItems messages.
@@ -84,9 +105,14 @@ func (m *Memory) needSummarization() bool {
 
 // Save adds messages to memory, evicting oldest if capacity is exceeded.
 func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
+	m.mu.Lock()
+
 	for _, message := range messages {
 		m.buffer.Add(message)
 	}
+
+	m.next += len(messages)
+	m.mu.Unlock()
 
 	if m.needSummarization() {
 		// Summarize the oldest summarySize messages, moved past tool results
@@ -117,14 +143,116 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 
 // Retrieve returns all messages currently in memory, ordered from oldest to newest.
 // Tool results at the start, whose tool call was evicted from the buffer, are
-// left out: providers reject a tool result without its call.
+// left out: providers reject a tool result without its call. With a snapshot,
+// the messages it stands for are replaced by memory.SummaryMessages.
 func (m *Memory) Retrieve(_ context.Context, _ string) ([]llm.Message, error) {
-	return memory.TrimOrphanToolResults(m.buffer.Get()), nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.snapshot == nil || m.llm != nil {
+		return memory.TrimOrphanToolResults(m.buffer.Get()), nil
+	}
+
+	tail := m.tail()
+	out := memory.SummaryMessages(*m.snapshot)
+
+	for _, lm := range tail {
+		out = append(out, lm.Message)
+	}
+
+	return out, nil
 }
 
-// Clear removes all messages from memory.
+// LoadSnapshot returns the latest snapshot (nil when there is none) and the
+// messages after it, with their cursors. It returns
+// memory.ErrSnapshotsUnsupported with WithSummarization, which rewrites the
+// buffer.
+func (m *Memory) LoadSnapshot(_ context.Context) (*memory.Snapshot, []memory.LoggedMessage, error) {
+	if m.llm != nil {
+		return nil, nil, memory.ErrSnapshotsUnsupported
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.snapshot == nil {
+		return nil, m.tail(), nil
+	}
+
+	snap := *m.snapshot
+
+	return &snap, m.tail(), nil
+}
+
+// SaveSnapshot stores s as standing for every message up to and including
+// upTo, when the latest snapshot is still prev (memory.ErrSnapshotConflict
+// otherwise). upTo must be a cursor of this memory after prev's, which may
+// have been evicted since (memory.ErrInvalidCursor otherwise).
+func (m *Memory) SaveSnapshot(_ context.Context, s memory.Snapshot, upTo memory.Cursor, prev *memory.Snapshot) error {
+	if m.llm != nil {
+		return memory.ErrSnapshotsUnsupported
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !memory.SameSnapshot(m.snapshot, prev) {
+		return memory.ErrSnapshotConflict
+	}
+
+	pos, err := strconv.Atoi(string(upTo))
+	if err != nil || pos < 0 || pos >= m.next || (m.snapshot != nil && pos <= m.upTo) {
+		return fmt.Errorf("%w: %q", memory.ErrInvalidCursor, upTo)
+	}
+
+	s.UpTo = upTo
+	m.snapshot, m.upTo = &s, pos
+
+	if m.prune {
+		kept := make([]llm.Message, 0, m.buffer.Len())
+		for _, lm := range m.tail() {
+			kept = append(kept, lm.Message)
+		}
+
+		m.buffer.Replace(kept)
+	}
+
+	return nil
+}
+
+// tail returns the buffered messages after the snapshot (all of them without
+// one), with their cursors, leaving out tool results whose call is not kept.
+// The caller holds m.mu.
+func (m *Memory) tail() []memory.LoggedMessage {
+	msgs := m.buffer.Get()
+	base := m.next - len(msgs)
+
+	start := 0
+	if m.snapshot != nil {
+		start = max(m.upTo+1-base, 0)
+	}
+
+	out := make([]memory.LoggedMessage, 0, len(msgs)-min(start, len(msgs)))
+
+	for i := start; i < len(msgs); i++ {
+		if len(out) == 0 && msgs[i].Role == llm.RoleTool {
+			continue // its tool call was evicted or summarized
+		}
+
+		out = append(out, memory.LoggedMessage{Message: msgs[i], Cursor: memory.Cursor(strconv.Itoa(base + i))})
+	}
+
+	return out
+}
+
+// Clear removes all messages and the snapshot from memory.
 func (m *Memory) Clear(_ context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.buffer.Clear()
+	m.snapshot = nil
+
 	return nil
 }
 
