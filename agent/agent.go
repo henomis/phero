@@ -513,11 +513,18 @@ func snapshotCursor(
 	return "", ErrSnapshotMismatch
 }
 
-// alignedWithLog reports whether logged holds msgs, one for one.
+// alignedWithLog reports whether logged holds msgs, one for one. A tool
+// result is matched by its call ID, not its text: a compaction may have
+// clipped the session's copy (DefaultKeptToolResultChars), while the log keeps
+// the original.
 func alignedWithLog(logged []memory.LoggedMessage, msgs []llm.Message) bool {
 	for i, m := range msgs {
 		l := logged[i].Message
-		if l.Role != m.Role || l.ToolCallID != m.ToolCallID || l.TextContent() != m.TextContent() || !sameToolCalls(l, m) {
+		if l.Role != m.Role || l.ToolCallID != m.ToolCallID || !sameToolCalls(l, m) {
+			return false
+		}
+
+		if m.Role != llm.RoleTool && l.TextContent() != m.TextContent() {
 			return false
 		}
 	}

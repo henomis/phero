@@ -653,3 +653,41 @@ func TestRun_SnapshotsUnsupportedFallsBack(t *testing.T) {
 		t.Fatalf("prompt = %+v, want the history retrieved as before", client.prompts[0])
 	}
 }
+
+func TestRun_SnapshotsStoredAfterClippedToolResults(t *testing.T) {
+	// Tool results longer than DefaultKeptToolResultChars are clipped in the
+	// kept messages; later compactions of the run must still be stored.
+	big := strings.Repeat("y", 20_000)
+
+	client := &scriptedLLM{fn: func(call int, _ []llm.Message) (*llm.Result, error) {
+		if call <= 3 {
+			return toolCallResultWithUsage("big", fmt.Sprintf("c%d", call), "{}", &llm.Usage{InputTokens: 5000}), nil
+		}
+
+		return textResult("done"), nil
+	}}
+
+	a := mustNew(t, client, "agent", "desc")
+	if err := a.AddTool(mustTool(t, "big", func(context.Context, *struct{}) (string, error) { return big, nil })); err != nil {
+		t.Fatal(err)
+	}
+
+	store := simple.New(100)
+	a.SetMemory(store)
+	a.SetCompaction(agent.NewSummaryCompactor(&summaryLLM{}, agent.WithKeepRecent(2), agent.WithKeepTokens(100_000)), 1000)
+
+	if _, err := a.Run(context.Background(), llm.Text("go")); err != nil {
+		t.Fatal(err)
+	}
+
+	snap, logged, err := store.LoadSnapshot(context.Background())
+	if err != nil || snap == nil {
+		t.Fatalf("LoadSnapshot = %v, %v", snap, err)
+	}
+
+	// Three compactions ran; the last stored one keeps only the latest tool
+	// turn and the answer after it.
+	if len(logged) > 3 {
+		t.Fatalf("stored snapshot leaves %d messages after it (up to %s), want the later compactions stored", len(logged), snap.UpTo)
+	}
+}
