@@ -82,7 +82,9 @@
 // for a skill, such as bare bash.
 //
 // Asking goes through an Asker, one question at a time even when the agent
-// runs tool calls in parallel. An answer of AllowAlways allows the same subject
+// runs tool calls in parallel. The Policy is not locked while a question is
+// open: the Asker, or the UI it waits for, may call Always, Forget or Decide,
+// and calls that need no question run meanwhile. An answer of AllowAlways allows the same subject
 // for the rest of the Policy's life, or until Forget drops it; Always lists
 // those answers. A denied call returns a *DeniedError,
 // which the agent reports to the model as a failed tool call.

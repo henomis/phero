@@ -132,7 +132,10 @@ type Request struct {
 }
 
 // Asker asks a human whether a tool call may run. An error denies the call
-// and is returned to the model.
+// and is returned to the model. The Policy asks one question at a time, but
+// it does not hold its lock while the Asker runs: the Asker, and anything it
+// waits for, may call the Policy's methods, such as Always or Decide, and
+// calls that need no question go on.
 type Asker func(ctx context.Context, req Request) (Answer, error)
 
 // Policy decides whether tool calls may run. Install it on tools with Apply.
@@ -146,7 +149,8 @@ type Policy struct {
 	workingDir string
 	home       string // expands a leading ~ in paths
 
-	mu     sync.Mutex // serializes questions and guards always and runRules
+	askMu  sync.Mutex // serializes questions
+	mu     sync.Mutex // guards rules, always and runRules; never held while asking
 	always map[string][]string
 
 	// runRules are allow rules that last for one agent run (AllowForRun),
@@ -432,6 +436,9 @@ func (p *Policy) evaluate(ctx context.Context, tool, arguments string) (Decision
 	return p.decide(tool, subjects, written, p.runRulesFor(ctx)), subjects, written
 }
 
+// reasonDeniedByRule is the DeniedError reason for a call a deny rule matches.
+const reasonDeniedByRule = "denied by a rule"
+
 // check enforces the Policy on one call.
 func (p *Policy) check(ctx context.Context, tool, arguments string) error {
 	decision, subjects, written := p.evaluate(ctx, tool, arguments)
@@ -446,7 +453,7 @@ func (p *Policy) check(ctx context.Context, tool, arguments string) error {
 	case Allow:
 		return nil
 	case Deny:
-		reason := "denied by a rule"
+		reason := reasonDeniedByRule
 		if _, _, ambiguous := p.subjectValue(tool, arguments); ambiguous {
 			reason = "the arguments give the " + p.args[tool] + " argument more than once"
 		}
@@ -456,11 +463,20 @@ func (p *Policy) check(ctx context.Context, tool, arguments string) error {
 	}
 
 	// One question at a time; an earlier answer may have allowed it since.
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.askMu.Lock()
+	defer p.askMu.Unlock()
 
-	if p.decide(tool, subjects, written, p.runRulesFor(ctx)) == Allow {
+	p.mu.Lock()
+	decision = p.decide(tool, subjects, written, p.runRulesFor(ctx))
+	reason := p.askReason(tool, subjects, written)
+	p.mu.Unlock()
+
+	switch decision {
+	case Allow:
 		return nil
+	case Deny:
+		return &DeniedError{Tool: tool, Subject: subject, Reason: reasonDeniedByRule}
+	case Ask:
 	}
 
 	if p.asker == nil {
@@ -469,7 +485,7 @@ func (p *Policy) check(ctx context.Context, tool, arguments string) error {
 
 	req := Request{
 		Tool: tool, Arguments: arguments, Subject: subject, Raw: raw,
-		Subjects: slices.Clone(subjects), Reason: p.askReason(tool, subjects, written),
+		Subjects: slices.Clone(subjects), Reason: reason,
 	}
 	if call, ok := llm.ToolCallFromContext(ctx); ok {
 		req.CallID = call.ID
@@ -482,6 +498,9 @@ func (p *Policy) check(ctx context.Context, tool, arguments string) error {
 
 	switch answer {
 	case AllowAlways:
+		p.mu.Lock()
+		defer p.mu.Unlock()
+
 		for _, s := range subjects {
 			if !slices.Contains(p.always[tool], s) {
 				p.always[tool] = append(p.always[tool], s)

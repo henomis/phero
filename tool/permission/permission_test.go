@@ -355,6 +355,77 @@ func TestMiddleware_AsksOneAtATime(t *testing.T) {
 	}
 }
 
+func TestPolicy_UsableWhileAsking(t *testing.T) {
+	var p *permission.Policy
+
+	asking := make(chan struct{})
+	answer := make(chan struct{})
+
+	p = mustPolicy(t, permission.WithAllow("bash(ls)"), permission.WithAsker(
+		func(context.Context, permission.Request) (permission.Answer, error) {
+			// The Asker may read and change the Policy it answers for.
+			_ = p.Always()
+			_ = p.Forget("bash", "nothing")
+
+			if d, _ := p.Decide("bash", bashArgs("ls")); d != permission.Allow {
+				t.Errorf("Decide(ls) = %v while asking, want Allow", d)
+			}
+
+			close(asking)
+			<-answer
+
+			return permission.AllowAlways, nil
+		}))
+
+	var runs atomic.Int32
+
+	tool := newBashTool(t, &runs)
+	p.Apply(tool)
+
+	asked := make(chan error, 1)
+
+	go func() {
+		_, err := tool.Handle(context.Background(), bashArgs("make test"))
+		asked <- err
+	}()
+
+	select {
+	case <-asking:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the Asker blocked on the Policy")
+	}
+
+	// While the question is open, another goroutine (a UI) reads the Policy,
+	// and a call that needs no question runs.
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		_ = p.Always()
+
+		if _, err := tool.Handle(context.Background(), bashArgs("ls")); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the Policy is locked while a question is open")
+	}
+
+	close(answer)
+
+	if err := <-asked; err != nil {
+		t.Fatal(err)
+	}
+
+	if got := p.Always(); !slices.Equal(got, []permission.Remembered{{Tool: "bash", Subject: "make test"}}) {
+		t.Fatalf("Always = %v, want the answer stored", got)
+	}
+}
+
 // scriptedLLM calls bash once, then answers with the text of the tool result.
 type scriptedLLM struct{ calls int }
 

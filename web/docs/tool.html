@@ -607,7 +607,9 @@ policy.Apply(readTool.Tool(), bashTool.Tool(), editTool.Tool())</code></pre>
         <li>Arguments that give the subject twice (<code>{"command":"go test","COMMAND":"rm -rf ~"}</code>) are denied:
           the tool's handler decodes keys case-insensitively and keeps the last one, so the rules could otherwise see a
           different value from the one that runs.</li>
-        <li>Questions come one at a time, even when the agent runs tool calls in parallel. <code>AllowAlways</code>
+        <li>Questions come one at a time, even when the agent runs tool calls in parallel. The policy is not locked
+          while a question is open: the <code>Asker</code>, or the UI it waits for, can call <code>Always</code>,
+          <code>Forget</code> or <code>Decide</code>, and calls that need no question run meanwhile. <code>AllowAlways</code>
           allows the same subject from then on; <code>policy.Always()</code> lists those answers and
           <code>policy.Forget(tool, subject)</code> drops one. Without an <code>Asker</code>, calls that need asking are
           denied.</li>
