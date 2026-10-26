@@ -71,3 +71,40 @@ func TestResolvePath(t *testing.T) {
 		})
 	}
 }
+
+func TestResolvePath_NoWorkingDirectory(t *testing.T) {
+	root := t.TempDir()
+
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeTree(t, root, map[string]string{"dir/main.go": "package main\n"})
+
+	if err = os.Symlink(filepath.Join(root, "dir"), filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "symlinked parent", path: filepath.Join(root, "link", "main.go"), want: filepath.Join(realRoot, "dir", "main.go")},
+		{name: "missing file under a symlink", path: filepath.Join(root, "link", "new", "x.go"), want: filepath.Join(realRoot, "dir", "new", "x.go")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, resolveErr := ResolvePath("", tt.path)
+			if resolveErr != nil || got != tt.want {
+				t.Fatalf("ResolvePath = %q, %v; want %q", got, resolveErr, tt.want)
+			}
+		})
+	}
+
+	if _, err = ResolvePath("", "main.go"); !errors.Is(err, ErrPathMustBeAbsolute) {
+		t.Fatalf("relative path: err = %v, want ErrPathMustBeAbsolute", err)
+	}
+}

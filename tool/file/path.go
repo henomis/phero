@@ -25,8 +25,8 @@ import (
 // ResolvePath resolves path as the file tools do before they open it: it
 // must be absolute (ErrPathMustBeAbsolute), it is cleaned and its symlinks
 // are resolved, including those of the existing parents of a file that does
-// not exist yet. With a non-empty workingDir, the resolved path must lie
-// inside it (ErrPathOutsideWorkingDirectory). Use it to see the file a call
+// not exist yet, with or without a workingDir. With a non-empty workingDir,
+// the resolved path must lie inside it (ErrPathOutsideWorkingDirectory). Use it to see the file a call
 // will touch, for example to record it before the call runs.
 func ResolvePath(workingDir, path string) (string, error) {
 	return resolveToolPath(workingDir, path)
@@ -43,8 +43,13 @@ func resolveToolPath(workingDir, inputPath string) (string, error) {
 		return "", fmt.Errorf("resolve path: %w", err)
 	}
 
+	resolvedPath, err := resolvePathWithSymlinks(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve path symlinks: %w", err)
+	}
+
 	if workingDir == "" {
-		return path, nil
+		return resolvedPath, nil
 	}
 
 	resolvedWorkingDir, err := filepath.Abs(filepath.Clean(workingDir))
@@ -55,11 +60,6 @@ func resolveToolPath(workingDir, inputPath string) (string, error) {
 	resolvedWorkingDir, err = filepath.EvalSymlinks(resolvedWorkingDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve working directory symlinks: %w", err)
-	}
-
-	resolvedPath, err := resolvePathWithSymlinks(path)
-	if err != nil {
-		return "", fmt.Errorf("resolve path symlinks: %w", err)
 	}
 
 	rel, err := filepath.Rel(resolvedWorkingDir, resolvedPath)
