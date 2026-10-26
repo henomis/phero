@@ -84,7 +84,19 @@ type Request struct {
 	// Arguments is the call's raw JSON arguments.
 	Arguments string
 	// Subject is what the call touches, such as the command or the file path.
+	// For bash, it lists the parsed commands joined by " ; ", without the
+	// pipes and operators between them.
 	Subject string
+	// Raw is the subject argument's value as the call gives it: for bash, the
+	// whole command line as it will run; for a file tool, the path before it
+	// is cleaned and resolved. It is empty for a tool without a subject
+	// argument.
+	Raw string
+	// Subjects are what an AllowAlways answer allows from then on: each
+	// command of a bash command line, or the resolved path of a file tool.
+	// It is nil when a command line cannot be split safely; AllowAlways then
+	// allows this call only.
+	Subjects []string
 }
 
 // Asker asks a human whether a tool call may run. An error denies the call
@@ -347,10 +359,11 @@ func (p *Policy) evaluate(ctx context.Context, tool, arguments string) (Decision
 // check enforces the Policy on one call.
 func (p *Policy) check(ctx context.Context, tool, arguments string) error {
 	decision, subjects, written := p.evaluate(ctx, tool, arguments)
+	raw, _, _ := p.subjectValue(tool, arguments)
 
 	subject := joinSubjects(subjects)
 	if subjects == nil {
-		subject, _, _ = p.subjectValue(tool, arguments)
+		subject = raw
 	}
 
 	switch decision {
@@ -378,7 +391,7 @@ func (p *Policy) check(ctx context.Context, tool, arguments string) error {
 		return &DeniedError{Tool: tool, Subject: subject, Reason: "needs approval and no one can be asked"}
 	}
 
-	req := Request{Tool: tool, Arguments: arguments, Subject: subject}
+	req := Request{Tool: tool, Arguments: arguments, Subject: subject, Raw: raw, Subjects: slices.Clone(subjects)}
 	if call, ok := llm.ToolCallFromContext(ctx); ok {
 		req.CallID = call.ID
 	}

@@ -469,12 +469,8 @@ func asker(lines <-chan string) permission.Asker {
 // line exactly as it will run, uncut, since the request's subject lists the
 // parsed commands without the pipes and operators between them.
 func askSubject(req permission.Request) string {
-	var args struct {
-		Command string `json:"command"`
-	}
-
-	if req.Tool == "bash" && json.Unmarshal([]byte(req.Arguments), &args) == nil && args.Command != "" {
-		return "\n  " + strings.ReplaceAll(args.Command, "\n", "\n  ")
+	if req.Tool == "bash" && req.Raw != "" {
+		return "\n  " + strings.ReplaceAll(req.Raw, "\n", "\n  ")
 	}
 
 	return req.Subject

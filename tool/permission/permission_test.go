@@ -166,6 +166,43 @@ func TestMiddleware_AskAndAllowAlways(t *testing.T) {
 	}
 }
 
+func TestMiddleware_RequestShowsTheCommandAndWhatAlwaysAllows(t *testing.T) {
+	var reqs []permission.Request
+
+	p := mustPolicy(t, permission.WithAsker(func(_ context.Context, req permission.Request) (permission.Answer, error) {
+		reqs = append(reqs, req)
+		return permission.AllowAlways, nil
+	}))
+
+	var runs atomic.Int32
+
+	tool := newBashTool(t, &runs)
+	p.Apply(tool)
+
+	for _, command := range []string{"go test ./... | tee out && make lint", "make lint", "echo $(whoami)"} {
+		if _, err := tool.Handle(context.Background(), bashArgs(command)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if len(reqs) != 2 {
+		t.Fatalf("asked %d times, want 2 (make lint allowed always by the first answer)", len(reqs))
+	}
+
+	first := reqs[0]
+	if first.Raw != "go test ./... | tee out && make lint" {
+		t.Fatalf("Raw = %q, want the command line as written", first.Raw)
+	}
+
+	if want := []string{"go test ./...", "tee out", "make lint"}; !slices.Equal(first.Subjects, want) {
+		t.Fatalf("Subjects = %q, want %q", first.Subjects, want)
+	}
+
+	if second := reqs[1]; second.Raw != "echo $(whoami)" || second.Subjects != nil {
+		t.Fatalf("unsplittable command: Raw = %q, Subjects = %q; want the command and nil", second.Raw, second.Subjects)
+	}
+}
+
 func TestMiddleware_NoAskerDenies(t *testing.T) {
 	var runs atomic.Int32
 
