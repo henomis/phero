@@ -1,24 +1,31 @@
 # Coding agent
 
 A small terminal coding agent built on phero. It reads, edits and tests the code in a workspace.
-It is a starting point, not a product: under 500 lines in one `main.go`.
+It is a starting point, not a product: about 550 lines in one `main.go`.
 
 What it uses:
 
 - **`tool/bash`** in a **bubblewrap sandbox** (Linux): only the system directories, the workspace and the
   Go toolchain and caches are mounted, there is no network, and secrets such as `OPENAI_API_KEY` are not in
-  the commands' environment. A persistent shell keeps `cd` and `export` between commands. Output is shown,
-  dimmed, while a command runs (`WithOutputHandler`). Background shells are killed on exit (`Close`).
+  the commands' environment. A persistent shell keeps `cd` and `export` between commands, and commands
+  run one at a time, in order (`SetExclusive`). Output is shown, dimmed, while a command runs
+  (`WithOutputHandler`). Background shells are killed on exit (`Close`).
 - **`tool/file`**: read, write, edit, multi_edit, glob and grep, confined to the workspace. A shared
   `ReadTracker` makes edit and write refuse a file the model has not read, or that changed since.
+- **output caps** scaled to `-context`: one read or command returns at most about a quarter of the
+  context window, so a single tool result can't overflow it.
 - **`tool/permission`**: reads, searches and a few safe commands (`go test`, `go build`, `git status`, ...)
   run without asking. Everything else asks in the terminal: `y` once, `a` always, `n` no.
 - **`tool/todo`**: the agent plans multi-step tasks. The list is printed on every change and saved to
-  `.phero/todo.json`.
+  `todo.json` in the state directory.
 - **`agent`**: `RunStream` for live text, summary compaction at 80% of the context window, a checkpoint
   after every tool round, and no iteration limit: a deadline per turn bounds it instead.
-- **`memory/jsonfile`**: the session is saved to `.phero/session.json`, so a restart picks up the
-  conversation.
+- **`memory/jsonfile`**: the session is saved to `session.json` in the state directory, so a restart
+  picks up the conversation.
+
+The state directory is outside the workspace, so the model can neither read its own session nor change
+it: by default `<user cache dir>/phero-coding-agent/<workspace name>-<hash>` (on Linux under
+`~/.cache`). The agent prints it at start.
 
 The system prompt includes `AGENTS.md` (or `CLAUDE.md`) from the workspace when there is one.
 
@@ -44,13 +51,14 @@ Flags:
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `-dir` | `.` | workspace the agent works in; its state goes in `<dir>/.phero` |
-| `-context` | `100000` | the model's context window in tokens; compaction starts at 80% |
+| `-dir` | `.` | workspace the agent works in |
+| `-state` | in the user cache dir | directory of the session and the task list |
+| `-context` | `100000` | the model's context window in tokens; compaction starts at 80%, and it sets the output caps |
 | `-turn-timeout` | `30m` | deadline of one turn |
 | `-unsafe-local` | `false` | without bubblewrap, run commands on the host, **unsandboxed** |
 
 Type a request at the `>` prompt. Ctrl-C stops the current turn; at the prompt it quits, as `/exit` does.
-Delete `.phero/` to start a fresh session.
+Delete the state directory to start a fresh session.
 
 ## What it is not
 

@@ -20,6 +20,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -64,6 +66,13 @@ type config struct {
 	turnTimeout time.Duration
 }
 
+// maxOutputChars returns the cap on one read or command output: about a
+// quarter of the context window, at roughly 3 characters per token, so that
+// one tool result can't fill the window by itself.
+func (c config) maxOutputChars() int {
+	return min(c.contextSize*3/4, file.DefaultMaxOutputChars) //nolint:mnd // a quarter of the window, 3 chars per token
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -75,6 +84,7 @@ func run() error {
 	var cfg config
 
 	flag.StringVar(&cfg.dir, "dir", ".", "workspace the agent works in")
+	flag.StringVar(&cfg.stateDir, "state", "", "directory of the session and the task list (default: in the user cache directory)")
 	flag.BoolVar(&cfg.unsafeLocal, "unsafe-local", false, "run commands on the host when bubblewrap is unavailable")
 	flag.IntVar(&cfg.contextSize, "context", 100_000, "model context window, in tokens")
 	flag.DurationVar(&cfg.turnTimeout, "turn-timeout", 30*time.Minute, "deadline of one turn")
@@ -86,7 +96,14 @@ func run() error {
 	}
 
 	cfg.dir = dir
-	cfg.stateDir = filepath.Join(dir, ".phero")
+
+	// The state lives outside the workspace, where the model can neither read
+	// its own session nor change it.
+	if cfg.stateDir == "" {
+		if cfg.stateDir, err = defaultStateDir(dir); err != nil {
+			return err
+		}
+	}
 
 	if err = os.MkdirAll(cfg.stateDir, 0o700); err != nil {
 		return err
@@ -125,7 +142,8 @@ func run() error {
 		return err
 	}
 
-	fmt.Printf("coding agent in %s (%s)\ntype a request, or /exit. Ctrl-C stops a turn.\n", dir, info)
+	fmt.Printf("coding agent in %s (%s)\nstate in %s\ntype a request, or /exit. Ctrl-C stops a turn.\n",
+		dir, info, cfg.stateDir)
 
 	// Ctrl-C cancels the turn in progress, or quits at the prompt.
 	sigs := make(chan os.Signal, 1)
@@ -219,12 +237,26 @@ func printEvent(ev agent.Event) {
 	}
 }
 
+// defaultStateDir returns the state directory of the workspace dir, in the
+// user cache directory: one per workspace, named after it.
+func defaultStateDir(dir string) (string, error) {
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+
+	sum := sha256.Sum256([]byte(dir))
+
+	return filepath.Join(cache, "phero-coding-agent", filepath.Base(dir)+"-"+hex.EncodeToString(sum[:4])), nil
+}
+
 // newBashTool returns the bash tool, in a bubblewrap sandbox unless
 // -unsafe-local is set and bubblewrap is unavailable.
 func newBashTool(cfg config) (*bash.Tool, error) {
 	opts := []bash.Option{
 		bash.WithWorkingDirectory(cfg.dir),
 		bash.WithPersistentShell(),
+		bash.WithMaxOutputChars(cfg.maxOutputChars()),
 		// Keep secrets such as OPENAI_API_KEY out of the commands' environment.
 		bash.WithEnvAllowlist(bash.DefaultEnvAllowlist...),
 		bash.WithOutputHandler(func(_ context.Context, chunk []byte) {
@@ -285,7 +317,11 @@ func goToolchainPaths() ([]bash.BubblewrapOption, []string) {
 func newTools(cfg config, bashTool *bash.Tool) ([]*llm.Tool, error) {
 	// One tracker: edit and write refuse a file the model has not read, or
 	// that changed since it read it.
-	fileOpts := []file.Option{file.WithWorkingDirectory(cfg.dir), file.WithReadTracker(file.NewReadTracker())}
+	fileOpts := []file.Option{
+		file.WithWorkingDirectory(cfg.dir),
+		file.WithReadTracker(file.NewReadTracker()),
+		file.WithMaxOutputChars(cfg.maxOutputChars()),
+	}
 
 	read, err := file.NewReadTool(fileOpts...)
 	if err != nil {
@@ -322,8 +358,13 @@ func newTools(cfg config, bashTool *bash.Tool) ([]*llm.Tool, error) {
 		return nil, err
 	}
 
+	// Commands run one at a time, in order: with a persistent shell, the
+	// next command starts where the previous one left off, and live output
+	// can't print over a permission question.
+	bashCall := bashTool.Tool().SetExclusive(true)
+
 	return []*llm.Tool{
-		bashTool.Tool(), bashTool.OutputTool(), bashTool.KillTool(),
+		bashCall, bashTool.OutputTool(), bashTool.KillTool(),
 		read.Tool(), write.Tool(), edit.Tool(), multiEdit.Tool(), glob.Tool(), grep.Tool(),
 		todoTool,
 	}, nil
@@ -402,7 +443,7 @@ func systemPrompt(dir string) string {
 // asker returns a permission.Asker that asks in the terminal.
 func asker(lines <-chan string) permission.Asker {
 	return func(ctx context.Context, req permission.Request) (permission.Answer, error) {
-		fmt.Printf("\nallow %s: %s ? [y]es / [a]lways / [n]o: ", req.Tool, shorten(req.Subject, 200))
+		fmt.Printf("\nallow %s: %s\n[y]es / [a]lways / [n]o: ", req.Tool, askSubject(req))
 
 		select {
 		case line, ok := <-lines:
@@ -422,6 +463,21 @@ func asker(lines <-chan string) permission.Asker {
 			return permission.Reject, ctx.Err()
 		}
 	}
+}
+
+// askSubject returns what a permission question shows: for bash the command
+// line exactly as it will run, uncut, since the request's subject lists the
+// parsed commands without the pipes and operators between them.
+func askSubject(req permission.Request) string {
+	var args struct {
+		Command string `json:"command"`
+	}
+
+	if req.Tool == "bash" && json.Unmarshal([]byte(req.Arguments), &args) == nil && args.Command != "" {
+		return "\n  " + strings.ReplaceAll(args.Command, "\n", "\n  ")
+	}
+
+	return req.Subject
 }
 
 // readLines sends each line of stdin on the returned channel, and closes it
