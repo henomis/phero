@@ -60,6 +60,21 @@ func TestBashTool_EnvAllowlistAndExtraEnv(t *testing.T) {
 	}
 }
 
+func TestBashTool_ExtraEnvInheritsEnv(t *testing.T) {
+	requireBash(t)
+	t.Setenv("PHERO_TEST_SECRET", "s3cret")
+
+	tool, err := New(WithEnv("PHERO_TEST_EXTRA=extra"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := tool.run(context.Background(), &Input{Command: `echo "[$PHERO_TEST_SECRET][$PHERO_TEST_EXTRA]"`})
+	if err != nil || strings.TrimSpace(out.Output) != "[s3cret][extra]" {
+		t.Fatalf("output = %+v, %v; want the inherited variable and the extra entry", out, err)
+	}
+}
+
 // echoRunner runs every command as `echo <prefix> <command>`.
 type echoRunner struct{ prefix string }
 

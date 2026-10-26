@@ -105,6 +105,17 @@ func TestBubblewrap_MinimalEnvironment(t *testing.T) {
 	}
 }
 
+func TestBubblewrap_ExtraEnvKeepsMinimalEnvironment(t *testing.T) {
+	t.Setenv("PHERO_TEST_SECRET", "s3cret")
+	tool := newSandboxedTool(t, t.TempDir())
+	WithEnv("PHERO_TEST_EXTRA=extra")(tool)
+
+	out, err := tool.run(context.Background(), &Input{Command: `echo "[$PHERO_TEST_SECRET][$PHERO_TEST_EXTRA]"`})
+	if err != nil || strings.TrimSpace(out.Output) != "[][extra]" {
+		t.Fatalf("output = %+v, %v; want the secret left out and the extra entry set", out, err)
+	}
+}
+
 func TestBubblewrap_TimeoutKillsSandbox(t *testing.T) {
 	workspace := t.TempDir()
 	tool := newSandboxedTool(t, workspace)

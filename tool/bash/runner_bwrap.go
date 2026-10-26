@@ -34,7 +34,7 @@ import (
 //   - every namespace is unshared (no network unless WithNetwork(true), own
 //     PID namespace, so killing the command kills everything it started);
 //   - the environment is limited to DefaultEnvAllowlist unless the tool sets
-//     one (WithEnvAllowlist, WithEnv).
+//     its own (WithEnvAllowlist); WithEnv entries are added to it.
 //
 // The rest of the host is not mounted, so host Unix sockets (docker.sock, the
 // D-Bus buses, agent sockets under $HOME) cannot be reached: connect() on a
@@ -208,6 +208,8 @@ func (r *BubblewrapRunner) Command(ctx context.Context, command string, opts Run
 	if env == nil {
 		env = filterEnv(os.Environ(), DefaultEnvAllowlist)
 	}
+
+	env = append(slices.Clip(env), opts.ExtraEnv...)
 
 	cmd := exec.CommandContext(ctx, r.bwrap, args...) //nolint:gosec // the tool runs arbitrary commands by design
 	cmd.Env = env

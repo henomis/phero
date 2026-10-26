@@ -37,19 +37,32 @@ type RunOptions struct {
 	// Dir is the working directory; empty means the current directory.
 	Dir string
 	// Env is the command's environment as KEY=VALUE entries; nil means the
-	// environment of the agent's process.
+	// runner's default: the agent process's environment for LocalRunner,
+	// DefaultEnvAllowlist for BubblewrapRunner.
 	Env []string
+	// ExtraEnv holds KEY=VALUE entries (WithEnv) to add after Env, or after
+	// the runner's default when Env is nil. A Runner must apply them.
+	ExtraEnv []string
 }
 
 // LocalRunner runs commands with bash on the host, with no isolation. It is
 // the default Runner.
 type LocalRunner struct{}
 
-// Command returns `bash -c command` in opts.Dir with opts.Env.
+// Command returns `bash -c command` in opts.Dir with opts.Env and
+// opts.ExtraEnv.
 func (LocalRunner) Command(ctx context.Context, command string, opts RunOptions) (*exec.Cmd, error) {
 	cmd := exec.CommandContext(ctx, "bash", "-c", command) //nolint:gosec // the tool runs arbitrary commands by design
 	cmd.Dir = opts.Dir
+
 	cmd.Env = opts.Env
+	if len(opts.ExtraEnv) > 0 {
+		if cmd.Env == nil {
+			cmd.Env = os.Environ()
+		}
+
+		cmd.Env = append(slices.Clip(cmd.Env), opts.ExtraEnv...)
+	}
 
 	return cmd, nil
 }
@@ -74,26 +87,23 @@ func filterEnv(environ, names []string) []string {
 	return out
 }
 
-// commandEnv returns the environment of a command: the agent's process
-// environment, filtered by the allowlist when one is set, plus the extra
-// entries. It returns nil, inheriting the environment, when neither is set.
+// commandEnv returns the base environment of a command: the agent's process
+// environment filtered by the allowlist, or nil, the runner's default, when
+// no allowlist is set. The WithEnv entries go to the runner separately
+// (RunOptions.ExtraEnv), so they never turn a sandbox's minimal default into
+// the whole environment.
 func (t *Tool) commandEnv() []string {
-	if t.envAllowlist == nil && len(t.extraEnv) == 0 {
+	if t.envAllowlist == nil {
 		return nil
 	}
 
-	env := os.Environ()
-	if t.envAllowlist != nil {
-		env = filterEnv(env, t.envAllowlist)
-	}
-
-	return append(env, t.extraEnv...)
+	return filterEnv(os.Environ(), t.envAllowlist)
 }
 
 // newCommand builds the process for command with the tool's runner, and sets
 // what every command gets: the output wait delay and its own process group.
 func (t *Tool) newCommand(ctx context.Context, command string) (*exec.Cmd, error) {
-	opts := RunOptions{Dir: t.workingDir, Env: t.commandEnv()}
+	opts := RunOptions{Dir: t.workingDir, Env: t.commandEnv(), ExtraEnv: t.extraEnv}
 	if t.persistent {
 		opts.Dir = t.state.dir(t.workingDir)
 	}
