@@ -339,6 +339,10 @@ func newTodoTool(path string) (*llm.Tool, error) {
 		}
 	}
 
+	if len(saved) > 0 {
+		fmt.Printf("restored task list:\n%s\n", todo.Render(saved))
+	}
+
 	list := todo.New(
 		todo.WithItems(saved),
 		todo.WithOnChange(func(items []todo.Item) {
