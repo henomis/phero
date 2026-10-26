@@ -14,7 +14,10 @@
 
 package file
 
-import "strings"
+import (
+	"path/filepath"
+	"strings"
+)
 
 type toolOptions struct {
 	workingDir  string
@@ -54,7 +57,8 @@ func WithWorkingDirectory(dir string) Option {
 // checked after their symlinks are resolved, as for the working directory.
 // The write, edit and multi_edit tools ignore it: they stay confined to the
 // working directory. Without a working directory, every path is reachable and
-// it has no effect. Each call adds to the roots given before.
+// it has no effect. A relative dir is resolved against the working directory.
+// Each call adds to the roots given before.
 func WithReadOnlyRoots(dirs ...string) Option {
 	return func(o *toolOptions) {
 		for _, dir := range dirs {
@@ -133,6 +137,16 @@ func applyOptions(opts ...Option) *toolOptions {
 	o := &toolOptions{maxResults: DefaultMaxResults, maxFileSize: DefaultMaxFileSize, maxOutput: DefaultMaxOutputChars}
 	for _, opt := range opts {
 		opt(o)
+	}
+
+	// Relative read roots follow the working directory, whichever option
+	// came first.
+	if o.workingDir != "" {
+		for i, root := range o.readRoots {
+			if !filepath.IsAbs(root) {
+				o.readRoots[i] = filepath.Join(o.workingDir, root)
+			}
+		}
 	}
 
 	return o

@@ -144,8 +144,8 @@ if err := a.AddTool(readTool.Tool()); err != nil {
         <li><code>WithReadOnlyRoots(dirs...)</code>: let read, grep and glob also reach the files under
           <code>dirs</code>, outside the working directory, such as the user's skill directories, whose
           <code>SKILL.md</code> points to scripts and references. Symlinks are resolved first, so one that leads out of
-          every allowed directory is still refused. Write, edit and multi_edit ignore it and stay in the working
-          directory</li>
+          every allowed directory is still refused. A relative dir is resolved against the working directory. Write,
+          edit and multi_edit ignore it and stay in the working directory</li>
         <li><code>WithMaxFileSize(bytes)</code>: limit the file size the edit tools accept, and the read tool for a
           whole-file read (default <code>file.DefaultMaxFileSize</code>, 10 MiB; 0 = unlimited). A read with
           <code>offset</code> or <code>limit</code> pages a file of any size.</li>

@@ -81,3 +81,53 @@ func TestReadOnlyRoots(t *testing.T) {
 		t.Fatalf("script = %q, want it unchanged", data)
 	}
 }
+
+func TestReadOnlyRoots_Edges(t *testing.T) {
+	parent := t.TempDir()
+	work := filepath.Join(parent, "work")
+	skills := filepath.Join(parent, "skills")
+
+	writeTree(t, parent, map[string]string{
+		"work/main.go":         "package main\n",
+		"skills/review/run.sh": "echo review\n",
+		"skills-evil/key.txt":  "secret\n",
+		"outside.txt":          "secret\n",
+	})
+
+	ctx := context.Background()
+
+	tests := []struct {
+		name  string
+		roots []string
+		path  string
+		ok    bool
+	}{
+		{name: "inside the root", roots: []string{skills}, path: filepath.Join(skills, "review", "run.sh"), ok: true},
+		{name: "relative root follows the working directory", roots: []string{"../skills"}, path: filepath.Join(skills, "review", "run.sh"), ok: true},
+		{name: "sibling with the root as prefix", roots: []string{skills}, path: filepath.Join(parent, "skills-evil", "key.txt")},
+		{name: "dot dot out of the root", roots: []string{skills}, path: filepath.Join(skills, "..", "outside.txt")},
+		{name: "missing root", roots: []string{filepath.Join(parent, "missing")}, path: filepath.Join(parent, "outside.txt")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			read, _ := NewReadTool(WithReadOnlyRoots(tt.roots...), WithWorkingDirectory(work))
+
+			_, err := read.read(ctx, &ReadInput{FilePath: tt.path})
+			if tt.ok && err != nil {
+				t.Fatalf("read = %v, want it allowed", err)
+			}
+
+			if !tt.ok && !errors.Is(err, ErrPathOutsideWorkingDirectory) {
+				t.Fatalf("read: err = %v, want ErrPathOutsideWorkingDirectory", err)
+			}
+
+			glob, _ := NewGlobTool(WithReadOnlyRoots(tt.roots...), WithWorkingDirectory(work))
+
+			_, err = glob.glob(ctx, &GlobInput{Pattern: "*", Path: filepath.Dir(tt.path)})
+			if !tt.ok && !errors.Is(err, ErrPathOutsideWorkingDirectory) {
+				t.Fatalf("glob: err = %v, want ErrPathOutsideWorkingDirectory", err)
+			}
+		})
+	}
+}
