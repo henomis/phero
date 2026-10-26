@@ -76,15 +76,19 @@ const (
 	// CompactContextLength means an LLM call failed with
 	// llm.ErrContextLengthExceeded; the call is made again after it.
 	CompactContextLength
+	// CompactManual means Agent.Compact was called.
+	CompactManual
 )
 
-// String returns "threshold" or "context length".
+// String returns "threshold", "context length" or "manual".
 func (t CompactionTrigger) String() string {
 	switch t {
 	case CompactThreshold:
 		return "threshold"
 	case CompactContextLength:
 		return "context length"
+	case CompactManual:
+		return "manual"
 	default:
 		return fmt.Sprintf("CompactionTrigger(%d)", int(t))
 	}

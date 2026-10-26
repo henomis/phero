@@ -43,6 +43,9 @@ var (
 	// stored because the compacted messages are not found in the memory's
 	// log; the snapshot then lives in the run only.
 	ErrSnapshotMismatch = errors.New("compacted messages not found in the memory log")
+	// ErrNoCompactor is returned by Compact for an agent without a Compactor
+	// (SetCompaction).
+	ErrNoCompactor = errors.New("no compactor set")
 )
 
 // StopRun returns the error a tool's handler returns to end the agent's run

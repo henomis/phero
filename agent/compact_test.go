@@ -578,6 +578,95 @@ func TestRunStream_CompactionEventCarriesTheError(t *testing.T) {
 	}
 }
 
+func TestCompact_StoresTheSnapshotForTheNextRun(t *testing.T) {
+	store := simple.New(100)
+	if err := store.Save(context.Background(), storedHistory()); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &scriptedLLM{fn: func(int, []llm.Message) (*llm.Result, error) { return textResult("done"), nil }}
+	a := mustNew(t, client, "agent", "desc")
+	a.SetMemory(store)
+
+	compactions := 0
+	a.SetCompaction(keepLastCompactor(&compactions), 0)
+
+	info, err := a.Compact(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !info.Compacted || info.Trigger != agent.CompactManual || info.Err != nil ||
+		info.MessagesBefore != 5 || info.MessagesAfter != 3 || info.TokensBefore == 0 || info.TokensAfter == 0 {
+		t.Fatalf("info = %+v, want [system, 4 messages] compacted to [system, summary, last]", info)
+	}
+
+	if len(client.prompts) != 0 {
+		t.Fatalf("Compact called the agent's model %d times, want 0", len(client.prompts))
+	}
+
+	if snap, _, _ := store.LoadSnapshot(context.Background()); snap == nil || snap.Summary != "compacted" {
+		t.Fatalf("stored snapshot = %+v, want the compaction's", snap)
+	}
+
+	if _, err = a.Run(context.Background(), llm.Text("next")); err != nil {
+		t.Fatal(err)
+	}
+
+	prompt := client.prompts[0]
+	if prompt[1].TextContent() != memory.SummarySystemMessagePrefix+"compacted" || len(prompt) != 4 {
+		t.Fatalf("next run's prompt = %+v, want system, the summary, the kept answer, the input", prompt)
+	}
+}
+
+func TestCompact_NothingToCompact(t *testing.T) {
+	a := mustNew(t, &scriptedLLM{}, "agent", "desc")
+	a.SetMemory(simple.New(100))
+
+	compactions := 0
+	a.SetCompaction(keepLastCompactor(&compactions), 0)
+
+	info, err := a.Compact(context.Background())
+	if err != nil || info.Compacted {
+		t.Fatalf("Compact on an empty memory = %+v, %v; want nothing compacted and no error", info, err)
+	}
+}
+
+func TestCompact_Refusals(t *testing.T) {
+	compactions := 0
+
+	noCompactor := mustNew(t, &scriptedLLM{}, "agent", "desc")
+	noCompactor.SetMemory(simple.New(100))
+
+	if _, err := noCompactor.Compact(context.Background()); !errors.Is(err, agent.ErrNoCompactor) {
+		t.Fatalf("without a compactor: err = %v, want ErrNoCompactor", err)
+	}
+
+	plain := mustNew(t, &scriptedLLM{}, "agent", "desc")
+	plain.SetMemory(&appendMemory{msgs: storedHistory()})
+	plain.SetCompaction(keepLastCompactor(&compactions), 0)
+
+	if _, err := plain.Compact(context.Background()); !errors.Is(err, memory.ErrSnapshotsUnsupported) {
+		t.Fatalf("with a memory without snapshots: err = %v, want ErrSnapshotsUnsupported", err)
+	}
+
+	// A snapshot store set up without snapshot support.
+	//nolint:staticcheck // the deprecated summarization is what has no snapshots
+	summarizing := simple.New(100, simple.WithSummarization(&summaryLLM{}, 50, 10))
+	if err := summarizing.Save(context.Background(), storedHistory()); err != nil {
+		t.Fatal(err)
+	}
+
+	legacy := mustNew(t, &scriptedLLM{}, "agent", "desc")
+	legacy.SetMemory(summarizing)
+	legacy.SetCompaction(keepLastCompactor(&compactions), 0)
+
+	info, err := legacy.Compact(context.Background())
+	if !errors.Is(err, memory.ErrSnapshotsUnsupported) || info.Compacted || !errors.Is(info.Err, memory.ErrSnapshotsUnsupported) {
+		t.Fatalf("with snapshots unsupported: %+v, %v; want ErrSnapshotsUnsupported and nothing compacted", info, err)
+	}
+}
+
 // bigHistory is a stored history of n user/assistant turns of size chars each.
 func bigHistory(n, size int) []llm.Message {
 	text := strings.Repeat("x", size)

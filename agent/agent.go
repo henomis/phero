@@ -329,6 +329,65 @@ func (a *Agent) SetCompaction(c Compactor, atTokens int) {
 	a.compactAtTokens = max(atTokens, 0)
 }
 
+// Compact compacts the conversation in memory now, as a run does when it
+// reaches the SetCompaction threshold, for example for a /compact command. It
+// loads the session from memory, hands it to the Compactor, and stores the
+// compaction's snapshot, so the next run starts from the summary. Call it
+// between runs, not during one.
+//
+// It needs a Compactor (ErrNoCompactor) and a memory that keeps snapshots: it
+// returns memory.ErrSnapshotsUnsupported for a memory that is not a
+// memory.SnapshotStore, or one that is set up without snapshot support, and
+// the error that stopped the snapshot from being stored otherwise. The
+// returned CompactionInfo has Trigger CompactManual; its Compacted is false,
+// with a nil error, when the Compactor found nothing to compact. Compact is
+// traced as a run's compaction is.
+func (a *Agent) Compact(ctx context.Context) (CompactionInfo, error) {
+	info := CompactionInfo{Trigger: CompactManual}
+
+	if a.compactor == nil {
+		return info, ErrNoCompactor
+	}
+
+	if _, ok := a.memory.(memory.SnapshotStore); !ok {
+		return info, memory.ErrSnapshotsUnsupported
+	}
+
+	if a.tracing != nil {
+		ctx = trace.WithProvider(ctx, a.tracing)
+	}
+
+	// The end event carries the sizes before and after.
+	rs := &runState{emit: func(ev Event) bool {
+		if ev.Type == EventCompactionEnd {
+			info = *ev.Compaction
+		}
+
+		return true
+	}}
+
+	session, sessionIndex, err := a.prepareSession(ctx, rs, nil)
+	if err != nil {
+		return info, err
+	}
+
+	// Every message came from memory: none is left to save.
+	rs.savedTo = sessionIndex
+
+	if _, _, err = a.compactSession(ctx, rs, session, sessionIndex, CompactManual, 0); err != nil {
+		return info, err
+	}
+
+	// Outside a run, a compaction that is not stored is lost.
+	if info.Compacted && rs.snapshotErr != nil {
+		info.Compacted, info.Err = false, rs.snapshotErr
+
+		return info, rs.snapshotErr
+	}
+
+	return info, nil
+}
+
 // compactIfNeeded compacts the session before the next LLM call when the
 // previous call reached the compaction threshold. next is the iteration whose
 // LLM call follows.
@@ -482,7 +541,7 @@ func (a *Agent) compact(
 	}
 
 	if store, ok := a.memory.(memory.SnapshotStore); ok {
-		a.storeSnapshot(ctx, store, rs, in, compaction)
+		rs.snapshotErr = a.storeSnapshot(ctx, store, rs, in, compaction)
 	}
 
 	summary := memory.SummaryMessages(compaction.Snapshot)
@@ -512,10 +571,10 @@ func (a *Agent) compact(
 // span, so the next run starts from it. The session's messages are all in the
 // log by now; the snapshot covers them up to the last one not kept. Failing
 // to store it does not fail the run: the snapshot then lives in the run only,
-// as with a plain memory, and the error is recorded on the span.
+// as with a plain memory, and the error is recorded on the span and returned.
 func (a *Agent) storeSnapshot(
 	ctx context.Context, store memory.SnapshotStore, rs *runState, in CompactInput, compaction *Compaction,
-) {
+) error {
 	payload := &trace.Memory{Op: trace.MemorySnapshot}
 	ctx, span := trace.Start(context.WithoutCancel(ctx), string(trace.KindMemory)+" snapshot", payload)
 
@@ -526,7 +585,7 @@ func (a *Agent) storeSnapshot(
 
 	if err != nil {
 		span.End(err)
-		return
+		return err
 	}
 
 	saved := compaction.Snapshot
@@ -537,6 +596,8 @@ func (a *Agent) storeSnapshot(
 	payload.Count = len(payload.Messages)
 
 	span.End(nil)
+
+	return nil
 }
 
 // snapshotCursor returns the cursor of the last message the compaction's
@@ -671,6 +732,9 @@ type runState struct {
 	savedTo int
 	// emit streams events to RunStream's consumer; nil for Run.
 	emit emitFunc
+	// snapshotErr is why the latest compaction's snapshot was not stored
+	// (see storeSnapshot); nil when it was, or when the memory keeps none.
+	snapshotErr error
 }
 
 // run executes the agent loop, optionally emitting streaming Events.

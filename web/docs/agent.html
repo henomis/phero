@@ -448,6 +448,12 @@ a.SetCompaction(agent.NewSummaryCompactor(cheapLLM, agent.WithKeepRecent(20)), 1
           <code>Compaction</code> (<code>*agent.CompactionInfo</code>) holds the trigger
           (<code>CompactThreshold</code> or <code>CompactContextLength</code>), the session's estimated tokens and
           message count before and, at the end, after, whether it was compacted, and the error it failed with.</li>
+        <li><code>a.Compact(ctx)</code> compacts the conversation in memory now, between runs, for a
+          <code>/compact</code> command. It loads the session, runs the compactor and stores the snapshot, so the next
+          run starts from the summary; it returns the <code>CompactionInfo</code> (trigger
+          <code>CompactManual</code>). It needs a compactor (<code>agent.ErrNoCompactor</code>) and a memory that keeps
+          snapshots (<code>memory.ErrSnapshotsUnsupported</code>): outside a run, a summary that is not stored would be
+          lost.</li>
       </ul>
     </section>
 
