@@ -144,10 +144,10 @@ if err := a.AddTool(readTool.Tool()); err != nil {
         <li><code>WithMaxFileSize(bytes)</code>: limit the file size the edit tools accept, and the read tool for a
           whole-file read (default <code>file.DefaultMaxFileSize</code>, 10 MiB; 0 = unlimited). A read with
           <code>offset</code> or <code>limit</code> pages a file of any size.</li>
-        <li><code>WithMaxOutputChars(n)</code>: cap the text one read returns (default
+        <li><code>WithMaxOutputChars(n)</code>: cap the text one read, grep or glob returns (default
           <code>file.DefaultMaxOutputChars</code>, 30,000; 0 = no cap). A cut read ends with
           <code>[output cut at … characters: read on with offset=N]</code>, and <code>limit</code> is capped at 2,000
-          lines.</li>
+          lines. Grep and glob drop the entries that do not fit and set <code>Truncated</code>.</li>
         <li><code>WithReadTracker(tracker)</code>: share a <code>file.NewReadTracker()</code> between the tools so that
           write, edit and multi_edit refuse to change an existing file the model has not read
           (<code>ErrFileNotRead</code>), or that changed on disk since it read it (<code>*ChangedError</code>).
@@ -159,7 +159,8 @@ if err := a.AddTool(readTool.Tool()); err != nil {
           whether the file existed, and its permissions. It is not called for a failed call. Use it to record changes
           for an undo</li>
         <li><code>WithMaxResults(n)</code>: how many paths <code>glob</code>, and entries <code>grep</code>, return at most
-          (default <code>file.DefaultMaxResults</code>, 1000; 0 removes the cap). A cut result sets <code>Truncated</code></li>
+          (default <code>file.DefaultMaxResults</code>, 1000; 0 removes the cap). A cut result sets <code>Truncated</code>.
+          Grep's <code>head_limit</code> can only lower it</li>
         <li><code>WithNoIgnore()</code>: search everything, including what <code>.gitignore</code> ignores and
           <code>node_modules</code></li>
       </ul>

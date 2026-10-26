@@ -23,6 +23,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/henomis/phero/v2/llm"
 )
@@ -46,14 +47,14 @@ type GrepInput struct {
 	B          int    `json:"-B,omitempty" jsonschema:"description=Lines before each match (content mode only)"`
 	C          int    `json:"-C,omitempty" jsonschema:"description=Lines before and after each match (content mode only)"`
 	Multiline  bool   `json:"multiline,omitempty" jsonschema:"description=Enable multiline matching"`
-	HeadLimit  int    `json:"head_limit,omitempty" jsonschema:"description=Limit output to first N lines or entries"`
+	HeadLimit  int    `json:"head_limit,omitempty" jsonschema:"description=Limit output to first N lines or entries. It can only lower the tool's own limit"` //nolint:lll
 }
 
 // GrepOutput is the output schema for the grep tool.
 type GrepOutput struct {
 	Output []string `json:"output"`
-	// Truncated reports that the output was cut at head_limit or at the
-	// tool's maximum number of results.
+	// Truncated reports that the output was cut at head_limit, at the tool's
+	// maximum number of results, or at its output cap.
 	Truncated bool `json:"truncated,omitempty"`
 }
 
@@ -62,6 +63,7 @@ type GrepTool struct {
 	tool       *llm.Tool
 	workingDir string
 	maxResults int
+	maxOutput  int
 	noIgnore   bool
 }
 
@@ -69,7 +71,7 @@ type GrepTool struct {
 func NewGrepTool(opts ...Option) (*GrepTool, error) {
 	o := applyOptions(opts...)
 
-	g := &GrepTool{workingDir: o.workingDir, maxResults: o.maxResults, noIgnore: o.noIgnore}
+	g := &GrepTool{workingDir: o.workingDir, maxResults: o.maxResults, maxOutput: o.maxOutput, noIgnore: o.noIgnore}
 
 	tool, err := llm.NewTool(
 		"grep",
@@ -170,10 +172,13 @@ func (g *GrepTool) grep(_ context.Context, input *GrepInput) (*GrepOutput, error
 
 	sort.Strings(files)
 
+	// head_limit only lowers the tool's limit: the model must not raise it.
 	limit := g.maxResults
-	if input.HeadLimit > 0 {
+	if input.HeadLimit > 0 && (limit <= 0 || input.HeadLimit < limit) {
 		limit = input.HeadLimit
 	}
+
+	truncated := false
 
 	out := make([]string, 0)
 
@@ -201,11 +206,14 @@ func (g *GrepTool) grep(_ context.Context, input *GrepInput) (*GrepOutput, error
 		}
 
 		if limit > 0 && len(out) > limit {
-			return &GrepOutput{Output: out[:limit], Truncated: true}, nil
+			out, truncated = out[:limit], true
+			break
 		}
 	}
 
-	return &GrepOutput{Output: out}, nil
+	out, cut := capEntries(out, g.maxOutput)
+
+	return &GrepOutput{Output: out, Truncated: truncated || cut}, nil
 }
 
 func matchType(path, t string) bool {
@@ -327,4 +335,45 @@ func clipLine(line string) string {
 	}
 
 	return string(runes[:maxLineRunes]) + " [...]"
+}
+
+// capEntries keeps the entries that fit in maxChars bytes, counting one
+// separator after each, and reports whether it dropped any. An entry that
+// does not fit is dropped whole, unless it is the first: that one is cut, so
+// a result is never empty only because its first entry is long. A maxChars
+// of 0 or less keeps every entry.
+func capEntries(entries []string, maxChars int) ([]string, bool) {
+	if maxChars <= 0 {
+		return entries, false
+	}
+
+	used := 0
+
+	for i, entry := range entries {
+		if used+len(entry)+1 <= maxChars {
+			used += len(entry) + 1
+			continue
+		}
+
+		if i == 0 {
+			return []string{cutBytes(entry, maxChars)}, true
+		}
+
+		return entries[:i], true
+	}
+
+	return entries, false
+}
+
+// cutBytes cuts s to at most n bytes without splitting a UTF-8 character.
+func cutBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+
+	return s[:n]
 }

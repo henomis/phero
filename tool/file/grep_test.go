@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -124,5 +125,78 @@ func TestGrepSchema_OutputModeEnum(t *testing.T) {
 	typ, _ := props["type"].(map[string]any)
 	if got, want := typ["description"], "File type to search (go, js, py, etc.)"; got != want {
 		t.Fatalf("type description = %q, want %q", got, want)
+	}
+}
+
+func TestGrepTool_HeadLimitOnlyLowersTheLimit(t *testing.T) {
+	tmp := t.TempDir()
+	writeTree(t, tmp, map[string]string{"a.txt": strings.Repeat("match\n", 10)})
+
+	tool, err := NewGrepTool(WithWorkingDirectory(tmp), WithMaxResults(3))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tt := range []struct{ headLimit, want int }{{0, 3}, {2, 2}, {50, 3}} {
+		out, grepErr := tool.grep(context.Background(), &GrepInput{
+			Pattern: "match", Path: tmp, OutputMode: grepModeContent, HeadLimit: tt.headLimit,
+		})
+		if grepErr != nil {
+			t.Fatal(grepErr)
+		}
+
+		if len(out.Output) != tt.want || !out.Truncated {
+			t.Fatalf("head_limit %d: %d entries, truncated %v; want %d, true",
+				tt.headLimit, len(out.Output), out.Truncated, tt.want)
+		}
+	}
+}
+
+func TestGrepTool_OutputCap(t *testing.T) {
+	tmp := t.TempDir()
+	writeTree(t, tmp, map[string]string{"a.txt": strings.Repeat("match this line\n", 500)})
+
+	tool, err := NewGrepTool(WithWorkingDirectory(tmp), WithMaxOutputChars(1000))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := tool.grep(context.Background(), &GrepInput{Pattern: "match", Path: tmp, OutputMode: grepModeContent})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	size := 0
+	for _, entry := range out.Output {
+		size += len(entry) + 1
+	}
+
+	if !out.Truncated || size > 1000 || len(out.Output) == 0 {
+		t.Fatalf("%d entries, %d bytes, truncated %v; want a cut result within 1000 bytes", len(out.Output), size, out.Truncated)
+	}
+}
+
+func TestCapEntries(t *testing.T) {
+	tests := []struct {
+		name      string
+		entries   []string
+		max       int
+		want      []string
+		truncated bool
+	}{
+		{name: "fits", entries: []string{"ab", "cd"}, max: 6, want: []string{"ab", "cd"}},
+		{name: "drops whole entries", entries: []string{"ab", "cd", "ef"}, max: 7, want: []string{"ab", "cd"}, truncated: true},
+		{name: "cuts a long first entry", entries: []string{"abcdef", "g"}, max: 4, want: []string{"abcd"}, truncated: true},
+		{name: "never splits a character", entries: []string{"aé"}, max: 2, want: []string{"a"}, truncated: true},
+		{name: "no cap", entries: []string{"abcdef"}, max: 0, want: []string{"abcdef"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, truncated := capEntries(tt.entries, tt.max)
+			if !slices.Equal(got, tt.want) || truncated != tt.truncated {
+				t.Fatalf("capEntries = %q, %v; want %q, %v", got, truncated, tt.want, tt.truncated)
+			}
+		})
 	}
 }

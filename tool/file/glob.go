@@ -34,7 +34,8 @@ type GlobInput struct {
 // GlobOutput is the output schema for the glob tool.
 type GlobOutput struct {
 	Paths []string `json:"paths"`
-	// Truncated reports that more paths matched than the tool returns.
+	// Truncated reports that more paths matched than the tool returns: the
+	// tool's maximum number of results or its output cap cut the list.
 	Truncated bool `json:"truncated,omitempty"`
 }
 
@@ -43,6 +44,7 @@ type GlobTool struct {
 	tool       *llm.Tool
 	workingDir string
 	maxResults int
+	maxOutput  int
 	noIgnore   bool
 }
 
@@ -50,7 +52,7 @@ type GlobTool struct {
 func NewGlobTool(opts ...Option) (*GlobTool, error) {
 	o := applyOptions(opts...)
 
-	g := &GlobTool{workingDir: o.workingDir, maxResults: o.maxResults, noIgnore: o.noIgnore}
+	g := &GlobTool{workingDir: o.workingDir, maxResults: o.maxResults, maxOutput: o.maxOutput, noIgnore: o.noIgnore}
 
 	tool, err := llm.NewTool(
 		"glob",
@@ -137,5 +139,7 @@ func (g *GlobTool) glob(_ context.Context, input *GlobInput) (*GlobOutput, error
 		paths = append(paths, entry.path)
 	}
 
-	return &GlobOutput{Paths: paths, Truncated: truncated}, nil
+	paths, cut := capEntries(paths, g.maxOutput)
+
+	return &GlobOutput{Paths: paths, Truncated: truncated || cut}, nil
 }

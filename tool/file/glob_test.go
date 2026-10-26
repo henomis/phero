@@ -16,6 +16,7 @@ package file
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -64,5 +65,35 @@ func TestGlobTool_MatchesAndSortsByModTime(t *testing.T) {
 
 	if out.Paths[0] != p2 {
 		t.Fatalf("expected newest file first, got %v", out.Paths)
+	}
+}
+
+func TestGlobTool_OutputCap(t *testing.T) {
+	tmp := t.TempDir()
+
+	files := map[string]string{}
+	for i := range 100 {
+		files[fmt.Sprintf("file-%03d.txt", i)] = "x"
+	}
+
+	writeTree(t, tmp, files)
+
+	tool, err := NewGlobTool(WithWorkingDirectory(tmp), WithMaxOutputChars(500))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := tool.glob(context.Background(), &GlobInput{Pattern: "*.txt", Path: tmp})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	size := 0
+	for _, path := range out.Paths {
+		size += len(path) + 1
+	}
+
+	if !out.Truncated || size > 500 || len(out.Paths) == 0 {
+		t.Fatalf("%d paths, %d bytes, truncated %v; want a cut list within 500 bytes", len(out.Paths), size, out.Truncated)
 	}
 }

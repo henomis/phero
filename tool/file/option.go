@@ -30,9 +30,9 @@ type toolOptions struct {
 // memory; a page of a larger file can still be read with offset and limit.
 const DefaultMaxFileSize = 10 << 20
 
-// DefaultMaxOutputChars is how much text the read tool returns at most when
-// WithMaxOutputChars is not given, as the bash tool's output cap: about
-// 7,500 tokens, so one read cannot fill the model's context.
+// DefaultMaxOutputChars is how much text the read, grep and glob tools return
+// at most when WithMaxOutputChars is not given, as the bash tool's output cap:
+// about 7,500 tokens, so one call cannot fill the model's context.
 const DefaultMaxOutputChars = 30_000
 
 // Option configures fs tools.
@@ -54,9 +54,10 @@ func WithMaxFileSize(bytes int64) Option {
 	}
 }
 
-// WithMaxOutputChars sets how many characters the read tool returns at most.
-// Output cut short ends with a note giving the offset to read on from. The
-// default is DefaultMaxOutputChars; a value of 0 or less removes the cap.
+// WithMaxOutputChars sets how many characters the read, grep and glob tools
+// return at most. A read cut short ends with a note giving the offset to read
+// on from; grep and glob drop the entries that do not fit and set Truncated.
+// The default is DefaultMaxOutputChars; a value of 0 or less removes the cap.
 func WithMaxOutputChars(n int) Option {
 	return func(o *toolOptions) {
 		o.maxOutput = n
@@ -71,7 +72,8 @@ func WithNoOverwrite() Option {
 }
 
 // WithMaxResults sets how many paths glob, and entries grep, return at most;
-// a result cut short says so with Truncated. The default is
+// a result cut short says so with Truncated. Grep's head_limit can only lower
+// it. The default is
 // DefaultMaxResults; a value of 0 or less removes the cap.
 func WithMaxResults(n int) Option {
 	return func(o *toolOptions) {
