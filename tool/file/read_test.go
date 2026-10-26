@@ -16,6 +16,7 @@ package file
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -42,8 +43,8 @@ func TestReadTool_ReadAndTrackSession(t *testing.T) {
 		t.Fatalf("read failed: %v", err)
 	}
 
-	if !strings.Contains(out.Content, "2\tb") {
-		t.Fatalf("unexpected read output: %q", out.Content)
+	if !strings.Contains(out, "2\tb") {
+		t.Fatalf("unexpected read output: %q", out)
 	}
 }
 
@@ -86,7 +87,7 @@ func TestReadTool_OutputCapPointsToOffset(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	body, note, found := strings.Cut(out.Content, "\n[output cut at")
+	body, note, found := strings.Cut(out, "\n[output cut at")
 	if !found || len(body) > 10_000 {
 		t.Fatalf("len %d, note found %v: want the output cut under the cap with a note", len(body), found)
 	}
@@ -112,7 +113,7 @@ func TestReadTool_LimitIsCapped(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := strings.Count(out.Content, "\n") + 1; got != defaultReadLimit {
+	if got := strings.Count(out, "\n") + 1; got != defaultReadLimit {
 		t.Fatalf("lines = %d, want limit capped at %d", got, defaultReadLimit)
 	}
 }
@@ -138,7 +139,40 @@ func TestReadTool_PagesFilesOverTheSizeCap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if want := "  4001\t000004001\n  4002\t000004002"; out.Content != want {
-		t.Fatalf("content = %q, want %q", out.Content, want)
+	if want := "  4001\t000004001\n  4002\t000004002"; out != want {
+		t.Fatalf("content = %q, want %q", out, want)
+	}
+}
+
+func TestReadTool_PlainText(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(path, []byte("func main() {\n\tprintln(\"hi\")\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tool, err := NewReadTool()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Through the tool handler, as the agent calls it: the result must be a
+	// string, so the tab and the quotes reach the model unescaped.
+	args, err := json.Marshal(ReadInput{FilePath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := tool.Tool().Handle(context.Background(), string(args))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := res.(string)
+	if !ok {
+		t.Fatalf("result type %T, want string", res)
+	}
+
+	if want := "     1\tfunc main() {\n     2\t\tprintln(\"hi\")\n     3\t}"; got != want {
+		t.Fatalf("content = %q, want %q", got, want)
 	}
 }

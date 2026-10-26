@@ -41,7 +41,10 @@ type ReadInput struct {
 	Limit    int    `json:"limit,omitempty" jsonschema:"description=The number of lines to read. Only provide if the file is too large to read at once"`            //nolint:lll
 }
 
-// ReadOutput is the output schema for the read tool.
+// ReadOutput was the output schema for the read tool.
+//
+// Deprecated: the read tool returns plain text since v2.3.0, so the model
+// gets tabs and quotes as they are in the file, not JSON-escaped.
 type ReadOutput struct {
 	Content string `json:"content"`
 }
@@ -86,50 +89,53 @@ func (r *ReadTool) Tool() *llm.Tool {
 	return r.tool
 }
 
-func (r *ReadTool) read(_ context.Context, input *ReadInput) (*ReadOutput, error) {
+// read returns the file's lines as plain cat -n text. A string result reaches
+// the model as is: a struct would be JSON-encoded, escaping every tab and
+// quote, which costs tokens and can leak into an edit's old_string.
+func (r *ReadTool) read(_ context.Context, input *ReadInput) (string, error) {
 	if input == nil {
-		return nil, fmt.Errorf("nil input")
+		return "", fmt.Errorf("nil input")
 	}
 
 	if strings.TrimSpace(input.FilePath) == "" {
-		return nil, ErrPathRequired
+		return "", ErrPathRequired
 	}
 
 	resolvedPath, err := resolveToolPath(r.workingDir, input.FilePath)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	info, err := os.Stat(resolvedPath)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	if info.IsDir() {
-		return nil, fmt.Errorf("%s is a directory", resolvedPath)
+		return "", fmt.Errorf("%s is a directory", resolvedPath)
 	}
 
 	// The size cap guards memory for a whole-file read: a page of a larger
 	// file is read line by line.
 	whole := input.Offset <= 0 && input.Limit <= 0
 	if whole && r.maxFileSize > 0 && info.Size() > r.maxFileSize {
-		return nil, &TooLargeError{Path: resolvedPath, Size: info.Size(), Limit: r.maxFileSize}
+		return "", &TooLargeError{Path: resolvedPath, Size: info.Size(), Limit: r.maxFileSize}
 	}
 
 	f, err := os.Open(resolvedPath) //nolint:gosec // path is resolved and validated above
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	defer func() { _ = f.Close() }()
 
 	content, err := r.readLines(bufio.NewReader(f), max(input.Offset, 0), readLimit(input.Limit))
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	r.tracker.record(resolvedPath)
 
-	return &ReadOutput{Content: content}, nil
+	return content, nil
 }
 
 // readLimit returns the number of lines to read for a requested limit.

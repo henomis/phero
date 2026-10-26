@@ -131,6 +131,12 @@ if err := a.AddTool(readTool.Tool()); err != nil {
     panic(err)
 }</code></pre>
 
+      <p>
+        <code>read</code> returns plain <code>cat -n</code> text (a 6-wide line number, a tab, then the line), not JSON.
+        Tabs and quotes reach the model as they are in the file, so it can copy them into an edit's
+        <code>old_string</code>. <code>file.ReadOutput</code> is deprecated since v2.3.0.
+      </p>
+
       <p>Available options:</p>
       <ul>
         <li><code>WithWorkingDirectory(dir)</code>: confine all operations to a directory; paths are validated against it to prevent traversal</li>
