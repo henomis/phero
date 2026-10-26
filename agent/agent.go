@@ -330,8 +330,11 @@ func (a *Agent) SetCompaction(c Compactor, atTokens int) {
 }
 
 // compactIfNeeded compacts the session before the next LLM call when the
-// previous call reached the compaction threshold.
-func (a *Agent) compactIfNeeded(ctx context.Context, rs *runState, session *[]llm.Message, sessionIndex *int) error {
+// previous call reached the compaction threshold. next is the iteration whose
+// LLM call follows.
+func (a *Agent) compactIfNeeded(
+	ctx context.Context, rs *runState, session *[]llm.Message, sessionIndex *int, next int,
+) error {
 	if a.compactor == nil || a.compactAtTokens <= 0 {
 		return nil
 	}
@@ -361,7 +364,7 @@ func (a *Agent) compactIfNeeded(ctx context.Context, rs *runState, session *[]ll
 
 	var err error
 
-	*session, *sessionIndex, err = a.compactSession(ctx, rs, *session, *sessionIndex)
+	*session, *sessionIndex, err = a.compactSession(ctx, rs, *session, *sessionIndex, CompactThreshold, next)
 
 	return err
 }
@@ -373,18 +376,19 @@ func (a *Agent) keepTokens() int {
 }
 
 // iterationFailed decides how the run goes on after an iteration failed with
-// iterErr. It returns true when the call should be made again, after the
-// session was compacted for a prompt too long for the context window, and
-// otherwise the error the run ends with: the cancellation when ctx is done (an
-// LLM that honours ctx fails on cancellation), else iterErr.
+// iterErr, before iteration next. It returns true when the call should be
+// made again, after the session was compacted for a prompt too long for the
+// context window, and otherwise the error the run ends with: the cancellation
+// when ctx is done (an LLM that honours ctx fails on cancellation), else
+// iterErr.
 func (a *Agent) iterationFailed(
-	ctx context.Context, rs *runState, session *[]llm.Message, sessionIndex *int, iterErr error,
+	ctx context.Context, rs *runState, session *[]llm.Message, sessionIndex *int, next int, iterErr error,
 ) (bool, error) {
 	if ctx.Err() != nil {
 		return false, cancellationError(ctx)
 	}
 
-	retry, compactErr := a.compactAfterError(ctx, rs, session, sessionIndex, iterErr)
+	retry, compactErr := a.compactAfterError(ctx, rs, session, sessionIndex, next, iterErr)
 	if retry {
 		return true, nil
 	}
@@ -401,7 +405,7 @@ func (a *Agent) iterationFailed(
 // whether the call should be made again. It returns the compaction's error
 // when compacting failed.
 func (a *Agent) compactAfterError(
-	ctx context.Context, rs *runState, session *[]llm.Message, sessionIndex *int, callErr error,
+	ctx context.Context, rs *runState, session *[]llm.Message, sessionIndex *int, next int, callErr error,
 ) (bool, error) {
 	if a.compactor == nil || rs.compactedOnError || !errors.Is(callErr, llm.ErrContextLengthExceeded) {
 		return false, nil
@@ -411,20 +415,42 @@ func (a *Agent) compactAfterError(
 
 	var err error
 
-	*session, *sessionIndex, err = a.compactSession(ctx, rs, *session, *sessionIndex)
+	*session, *sessionIndex, err = a.compactSession(ctx, rs, *session, *sessionIndex, CompactContextLength, next)
 
 	return err == nil, err
 }
 
-// compactSession compacts the session after its system prompt and its
-// current summary, inside a memory span. It returns the new session,
-// [system, summary messages, kept messages], and the index where the kept
-// messages start (where a cancelled run's partial result is read from). On
-// error, or when there is nothing to compact, the session is returned
-// unchanged.
+// compactSession compacts the session (see compact) between an
+// EventCompactionStart and an EventCompactionEnd. trigger says why, and next
+// is the iteration whose LLM call follows.
 func (a *Agent) compactSession(
-	ctx context.Context, rs *runState, session []llm.Message, sessionIndex int,
+	ctx context.Context, rs *runState, session []llm.Message, sessionIndex int, trigger CompactionTrigger, next int,
 ) ([]llm.Message, int, error) {
+	before := CompactionInfo{Trigger: trigger, TokensBefore: EstimateTokens(session), MessagesBefore: len(session)}
+	if rs.emit != nil {
+		rs.emit(Event{Type: EventCompactionStart, Compaction: &before, Iteration: next})
+	}
+
+	newSession, newIndex, compacted, err := a.compact(ctx, rs, session, sessionIndex)
+
+	if rs.emit != nil {
+		after := before
+		after.TokensAfter, after.MessagesAfter = EstimateTokens(newSession), len(newSession)
+		after.Compacted, after.Err = compacted, err
+		rs.emit(Event{Type: EventCompactionEnd, Compaction: &after, Iteration: next})
+	}
+
+	return newSession, newIndex, err
+}
+
+// compact compacts the session after its system prompt and its current
+// summary, inside a memory span. It returns the new session, [system, summary
+// messages, kept messages], the index where the kept messages start (where a
+// cancelled run's partial result is read from), and true. On error, or when
+// there is nothing to compact, the session is returned unchanged, with false.
+func (a *Agent) compact(
+	ctx context.Context, rs *runState, session []llm.Message, sessionIndex int,
+) ([]llm.Message, int, bool, error) {
 	payload := &trace.Memory{Op: trace.MemoryCompact}
 	ctx, span := trace.Start(ctx, string(trace.KindMemory)+" compact", payload)
 
@@ -442,7 +468,7 @@ func (a *Agent) compactSession(
 	if err != nil || compaction == nil {
 		span.End(err)
 
-		return session, sessionIndex, err
+		return session, sessionIndex, false, err
 	}
 
 	// Memory only appends: the messages not saved yet are saved now, as they
@@ -452,7 +478,7 @@ func (a *Agent) compactSession(
 		err = fmt.Errorf("%w: %w", ErrSessionSaveFailed, err)
 		span.End(err)
 
-		return session, sessionIndex, err
+		return session, sessionIndex, false, err
 	}
 
 	if store, ok := a.memory.(memory.SnapshotStore); ok {
@@ -479,7 +505,7 @@ func (a *Agent) compactSession(
 	rs.promptLen = 0
 	rs.savedTo = len(newSession)
 
-	return newSession, rs.tailStart(), nil
+	return newSession, rs.tailStart(), true, nil
 }
 
 // storeSnapshot stores the compaction's snapshot in store, inside a memory
@@ -643,6 +669,8 @@ type runState struct {
 	compactedOnError bool
 	// savedTo is the index of the first session message not saved to memory.
 	savedTo int
+	// emit streams events to RunStream's consumer; nil for Run.
+	emit emitFunc
 }
 
 // run executes the agent loop, optionally emitting streaming Events.
@@ -661,7 +689,7 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 		SessionID:     trace.SessionFrom(ctx),
 		Input:         parts,
 		MaxIterations: max(a.maxIterations, 0),
-	}}
+	}, emit: emit}
 	ctx, rs.span = trace.Start(ctx, string(trace.KindRun)+" "+a.name, rs.run)
 
 	// Tool calls see the run they belong to (llm.RunFromContext). It ends when
@@ -695,7 +723,7 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 			return partialResultFromSession(session[sessionIndex:]), ErrMaxIterationsReached
 		}
 
-		if err = a.compactIfNeeded(ctx, rs, &session, &sessionIndex); err != nil {
+		if err = a.compactIfNeeded(ctx, rs, &session, &sessionIndex, iteration+1); err != nil {
 			return partialResultFromSession(session[sessionIndex:]), err
 		}
 
@@ -703,7 +731,7 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 
 		iterationResult, iterErr := a.handleAgentIteration(ctx, session, iteration, rs, emit)
 		if iterErr != nil {
-			if retry, failErr := a.iterationFailed(ctx, rs, &session, &sessionIndex, iterErr); !retry {
+			if retry, failErr := a.iterationFailed(ctx, rs, &session, &sessionIndex, iteration+1, iterErr); !retry {
 				return partialResultFromSession(session[sessionIndex:]), failErr
 			}
 

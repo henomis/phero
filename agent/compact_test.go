@@ -452,6 +452,132 @@ func TestRun_CompactionErrorEndsRun(t *testing.T) {
 	}
 }
 
+// compactionEvents runs a with RunStream and returns its compaction events,
+// and the run's error.
+func compactionEvents(a *agent.Agent) ([]agent.Event, error) {
+	var events []agent.Event
+
+	for ev, err := range a.RunStream(context.Background(), llm.Text("go")) {
+		if err != nil {
+			return events, err
+		}
+
+		if ev.Type == agent.EventCompactionStart || ev.Type == agent.EventCompactionEnd {
+			events = append(events, ev)
+		}
+	}
+
+	return events, nil
+}
+
+func TestRunStream_CompactionEvents(t *testing.T) {
+	client := &scriptedLLM{fn: func(call int, _ []llm.Message) (*llm.Result, error) {
+		if call < 3 {
+			return toolCallResultWithUsage("echo", fmt.Sprintf("c%d", call), paddedArgs, &llm.Usage{InputTokens: 900, OutputTokens: 200}), nil
+		}
+
+		return textResult("done"), nil
+	}}
+
+	a := mustNew(t, client, "agent", "desc")
+	addEchoTool(t, a)
+
+	compactions := 0
+	a.SetCompaction(keepLastCompactor(&compactions), 1000)
+
+	events, err := compactionEvents(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Calls 1-2 report 1100 tokens, so iterations 2 and 3 start with a compaction.
+	if len(events) != 4 {
+		t.Fatalf("got %d compaction events, want 4", len(events))
+	}
+
+	for i := 0; i < len(events); i += 2 {
+		start, end := events[i], events[i+1]
+		if start.Type != agent.EventCompactionStart || end.Type != agent.EventCompactionEnd {
+			t.Fatalf("events %d-%d = %v, %v; want a start then an end", i, i+1, start.Type, end.Type)
+		}
+
+		if want := i/2 + 2; start.Iteration != want || end.Iteration != want {
+			t.Fatalf("iterations = %d, %d; want %d", start.Iteration, end.Iteration, want)
+		}
+
+		info := end.Compaction
+		if info.Trigger != agent.CompactThreshold || !info.Compacted || info.Err != nil {
+			t.Fatalf("end = %+v, want a successful threshold compaction", info)
+		}
+
+		if info.TokensBefore != start.Compaction.TokensBefore || info.TokensAfter >= info.TokensBefore ||
+			info.MessagesAfter >= info.MessagesBefore {
+			t.Fatalf("end = %+v, want the session smaller than at the start (%+v)", info, start.Compaction)
+		}
+	}
+}
+
+func TestRunStream_CompactionEventOnContextLengthError(t *testing.T) {
+	tooLong := &llm.ProviderError{Provider: "p", StatusCode: 400, ContextLengthExceeded: true, Err: errors.New("prompt is too long")}
+
+	client := &scriptedLLM{fn: func(call int, _ []llm.Message) (*llm.Result, error) {
+		switch call {
+		case 1:
+			return toolCallResult("echo", "c1", "{}"), nil
+		case 2:
+			return nil, tooLong
+		default:
+			return textResult("done"), nil
+		}
+	}}
+
+	a := mustNew(t, client, "agent", "desc")
+	addEchoTool(t, a)
+
+	compactions := 0
+	a.SetCompaction(keepLastCompactor(&compactions), 0)
+
+	events, err := compactionEvents(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(events) != 2 {
+		t.Fatalf("got %d compaction events, want 2", len(events))
+	}
+
+	// Iteration 2 failed; the call is made again as iteration 3.
+	if end := events[1]; end.Compaction.Trigger != agent.CompactContextLength || end.Iteration != 3 {
+		t.Fatalf("end = %+v at iteration %d, want a context-length compaction before iteration 3", end.Compaction, end.Iteration)
+	}
+}
+
+func TestRunStream_CompactionEventCarriesTheError(t *testing.T) {
+	client := &scriptedLLM{fn: func(int, []llm.Message) (*llm.Result, error) {
+		return toolCallResultWithUsage("echo", "c", paddedArgs, &llm.Usage{InputTokens: 5000}), nil
+	}}
+
+	a := mustNew(t, client, "agent", "desc")
+	addEchoTool(t, a)
+
+	cause := errors.New("summary model down")
+	a.SetCompaction(agent.NewSummaryCompactor(&summaryLLM{err: cause}, agent.WithKeepRecent(1)), 1000)
+
+	events, err := compactionEvents(a)
+	if !errors.Is(err, cause) {
+		t.Fatalf("err = %v, want the compaction's", err)
+	}
+
+	if len(events) != 2 {
+		t.Fatalf("got %d compaction events, want 2", len(events))
+	}
+
+	info := events[1].Compaction
+	if info.Compacted || !errors.Is(info.Err, cause) || info.MessagesAfter != info.MessagesBefore {
+		t.Fatalf("end = %+v, want the error and the session unchanged", info)
+	}
+}
+
 // bigHistory is a stored history of n user/assistant turns of size chars each.
 func bigHistory(n, size int) []llm.Message {
 	text := strings.Repeat("x", size)

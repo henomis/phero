@@ -128,7 +128,8 @@ func TestRunStream_TruncatedToolCallNotRun(t *testing.T) {
 			if !ev.ToolError || ev.ToolCallID != "c1" {
 				t.Fatalf("tool result event = %+v, want an error for c1", ev)
 			}
-		case agent.EventTextDelta, agent.EventReasoningDelta, agent.EventUsage, agent.EventDone:
+		case agent.EventTextDelta, agent.EventReasoningDelta, agent.EventUsage, agent.EventDone,
+			agent.EventCompactionStart, agent.EventCompactionEnd:
 		}
 	}
 

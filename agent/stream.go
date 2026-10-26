@@ -41,6 +41,14 @@ const (
 	// EventUsage carries the token usage of one LLM call (Usage), emitted when
 	// the call completes, when the provider reports it.
 	EventUsage
+	// EventCompactionStart is emitted when the agent starts compacting the
+	// session (see SetCompaction), before the compactor runs. Compaction
+	// holds why, and the session's size.
+	EventCompactionStart
+	// EventCompactionEnd follows every EventCompactionStart, when the
+	// compaction is over. Compaction holds the session's size after it, or
+	// the error it failed with.
+	EventCompactionEnd
 )
 
 // Event is a single streaming event produced by Agent.RunStream.
@@ -63,7 +71,11 @@ type Event struct {
 	ToolError bool
 	// Usage is the token usage of the iteration's LLM call (EventUsage).
 	Usage *llm.Usage
+	// Compaction describes a compaction of the session (EventCompactionStart
+	// / EventCompactionEnd).
+	Compaction *CompactionInfo
 	// Iteration is the 1-based agent loop iteration this event belongs to.
+	// For a compaction, it is the iteration whose LLM call follows it.
 	Iteration int
 	// Result holds the final agent result (EventDone), or the partial result
 	// of a failed run, with its Summary, alongside the error.

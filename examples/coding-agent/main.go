@@ -233,6 +233,12 @@ func printEvent(ev agent.Event) {
 			fmt.Printf("[%d llm calls, %d tool calls, %d/%d tokens]\n",
 				s.LLMCalls, s.ToolCalls, s.Usage.InputTokens, s.Usage.OutputTokens)
 		}
+	case agent.EventCompactionStart:
+		fmt.Printf("\n[compacting the conversation: %d tokens]\n", ev.Compaction.TokensBefore)
+	case agent.EventCompactionEnd:
+		if c := ev.Compaction; c.Compacted {
+			fmt.Printf("[compacted: %d → %d tokens]\n", c.TokensBefore, c.TokensAfter)
+		}
 	case agent.EventReasoningDelta, agent.EventUsage:
 	}
 }

@@ -292,7 +292,8 @@ if err := json.Unmarshal([]byte(result.TextContent()), &v); err != nil {
         <code>Agent.RunStream</code> runs the agent like <code>Run</code> but yields progress as a sequence of
         <code>Event</code>s over a Go 1.23 iterator: text and reasoning deltas as the model produces them, a
         <code>ToolCall</code> and <code>ToolResult</code> event around each tool invocation, an
-        <code>EventUsage</code> with the token usage of each LLM call, and a final
+        <code>EventUsage</code> with the token usage of each LLM call, an <code>EventCompactionStart</code> and
+        <code>EventCompactionEnd</code> around each compaction (see below), and a final
         <code>EventDone</code> whose <code>Result</code> mirrors <code>Run</code>. It uses the underlying LLM's
         streaming API when available and otherwise falls back to a single buffered response.
       </p>
@@ -442,6 +443,11 @@ a.SetCompaction(agent.NewSummaryCompactor(cheapLLM, agent.WithKeepRecent(20)), 1
           stored a snapshot first, or the log no longer holds the compacted messages, the summary lives in the run
           only, as with any other memory, and the run goes on. Each compaction is traced as a memory span with op
           <code>compact</code>; a failure returns an <code>*agent.CompactionError</code>.</li>
+        <li><code>RunStream</code> emits <code>EventCompactionStart</code> and <code>EventCompactionEnd</code> around
+          each compaction, so a UI can say "compacting…" while the summary is written. Their
+          <code>Compaction</code> (<code>*agent.CompactionInfo</code>) holds the trigger
+          (<code>CompactThreshold</code> or <code>CompactContextLength</code>), the session's estimated tokens and
+          message count before and, at the end, after, whether it was compacted, and the error it failed with.</li>
       </ul>
     </section>
 

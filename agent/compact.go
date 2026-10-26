@@ -66,6 +66,54 @@ type Compaction struct {
 	Kept []llm.Message
 }
 
+// CompactionTrigger says why the agent compacts its session.
+type CompactionTrigger int
+
+const (
+	// CompactThreshold means the session reached the SetCompaction
+	// threshold before an LLM call.
+	CompactThreshold CompactionTrigger = iota
+	// CompactContextLength means an LLM call failed with
+	// llm.ErrContextLengthExceeded; the call is made again after it.
+	CompactContextLength
+)
+
+// String returns "threshold" or "context length".
+func (t CompactionTrigger) String() string {
+	switch t {
+	case CompactThreshold:
+		return "threshold"
+	case CompactContextLength:
+		return "context length"
+	default:
+		return fmt.Sprintf("CompactionTrigger(%d)", int(t))
+	}
+}
+
+// CompactionInfo describes a compaction of a running agent's session, in an
+// EventCompactionStart or EventCompactionEnd. Token counts are estimated with
+// EstimateTokens, so the sizes before and after compare. The session counts
+// every message, the system prompt and the summary included.
+type CompactionInfo struct {
+	// Trigger says why the session is compacted.
+	Trigger CompactionTrigger
+	// TokensBefore and MessagesBefore are the session's size before the
+	// compaction.
+	TokensBefore   int
+	MessagesBefore int
+	// TokensAfter and MessagesAfter are its size after it (EventCompactionEnd).
+	// They equal the sizes before when the session was not compacted.
+	TokensAfter   int
+	MessagesAfter int
+	// Compacted reports whether the session was replaced
+	// (EventCompactionEnd): false when the compactor found nothing to
+	// compact, or failed.
+	Compacted bool
+	// Err is the error the compaction failed with (EventCompactionEnd); the
+	// run then ends with it.
+	Err error
+}
+
 // Compactor shortens the conversation of a running agent so it fits the
 // model's context window. It returns a nil Compaction and no error when there
 // is nothing to compact, and the session is then left as it is.
