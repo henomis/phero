@@ -377,6 +377,24 @@ a.SetMaxIterations(10)</code></pre>
     </section>
 
     <section>
+      <h2>Changing the prompt or the model</h2>
+      <p>
+        An agent's system prompt, LLM and tools are set when it is built. To change them between turns, for example
+        to switch models or update the instructions, build a new agent and give it the same memory: the next run
+        loads the session from memory, so the conversation goes on.
+      </p>
+      <pre><code class="language-go">next, err := agent.New(otherLLM, "coder", newPrompt)
+if err != nil {
+    return err
+}
+for _, t := range tools {
+    _ = next.AddTool(t)
+}
+next.SetMemory(mem) // the same memory as the old agent
+a = next</code></pre>
+    </section>
+
+    <section>
       <h2>Compaction: long runs</h2>
       <p>
         Every tool call and result stays in the session, so a run with many iterations, such as a coding agent

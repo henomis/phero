@@ -336,6 +336,35 @@ bashTool, err := bash.New(bash.WithRunner(runner), bash.WithWorkingDirectory(rep
       </p>
     </section>
 
+    <section id="coding-agent-safety">
+      <h2>Running a coding agent safely</h2>
+      <p>
+        A coding agent runs commands and changes files that a model chose. Each guard below covers a different
+        risk. <a href="https://github.com/henomis/phero/tree/main/examples/coding-agent">examples/coding-agent</a>
+        puts them together.
+      </p>
+      <ul>
+        <li><strong>Bash permission rules are advisory.</strong> They match the command text, so a deny rule misses
+          the same program written another way (<code>/bin/rm</code>, <code>sh -c</code>, a Makefile). Commands that
+          hide what they run (escaped names, substitutions, assignments before a command) are asked, not allowed.
+          Use rules to stop mistakes, not as a boundary.</li>
+        <li><strong>The sandbox is the boundary.</strong> <code>LocalRunner</code>, the default, has no isolation.
+          <code>NewBubblewrapRunner</code> is Linux-only. <code>WithNetwork(true)</code> shares the host network,
+          localhost services included.</li>
+        <li><strong>Keep secrets out of commands.</strong> Set <code>bash.WithEnvAllowlist(bash.DefaultEnvAllowlist...)</code>.
+          Without an allowlist, <code>WithEnv</code> adds its entries to the agent's whole environment, API keys
+          included, even inside the sandbox.</li>
+        <li><strong>The file tools run outside the sandbox.</strong> Confine them with
+          <code>file.WithWorkingDirectory</code>; without it they reach any path the process can.</li>
+        <li><strong>Bound every turn.</strong> A coding agent needs more than the default 25 iterations: use
+          <code>SetMaxIterations(0)</code> and a <code>context.WithTimeout</code> per turn.</li>
+      </ul>
+      <p>
+        Recommended setup: bubblewrap, an env allowlist, the file tools confined to the workspace, a permission
+        policy with an <code>Asker</code> for everything not allowed, and a deadline per turn.
+      </p>
+    </section>
+
     <section>
       <h2>Human tool (<code>tool/human</code>)</h2>
       <p>
