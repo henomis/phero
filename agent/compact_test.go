@@ -116,6 +116,69 @@ func TestSummaryCompactor_KeepsRecentAndTask(t *testing.T) {
 	}
 }
 
+// limitLLM records each call's output limit and prompt, and answers "cut"
+// with FinishLength while cut is set and the call has a limit.
+type limitLLM struct {
+	limits  []int
+	prompts []string
+	cut     bool
+}
+
+func (l *limitLLM) Execute(_ context.Context, msgs []llm.Message, opts ...llm.CallOption) (*llm.Result, error) {
+	limit := llm.NewCallConfig(opts...).MaxOutputTokens
+	l.limits = append(l.limits, limit)
+	l.prompts = append(l.prompts, msgs[len(msgs)-1].TextContent())
+
+	if l.cut && limit > 0 {
+		res := textResult("cut")
+		res.FinishReason = llm.FinishLength
+
+		return res, nil
+	}
+
+	return textResult("summary"), nil
+}
+
+func TestSummaryCompactor_MaxSummaryTokens(t *testing.T) {
+	l := &limitLLM{}
+	c := agent.NewSummaryCompactor(l, agent.WithKeepRecent(2), agent.WithMaxSummaryTokens(400))
+
+	out, err := c.Compact(context.Background(), agent.CompactInput{Messages: toolSession(4)})
+	if err != nil || out == nil || out.Snapshot.Summary != "summary" {
+		t.Fatalf("Compact = %+v, %v", out, err)
+	}
+
+	if !slices.Equal(l.limits, []int{600}) || !strings.Contains(l.prompts[0], "under 400 tokens") {
+		t.Fatalf("limits = %v, prompt = %q; want one call limited to 600 that asks for 400", l.limits, l.prompts[0])
+	}
+
+	// Without the option, the call has no limit and the prompt no budget.
+	l = &limitLLM{}
+	if _, err = agent.NewSummaryCompactor(l, agent.WithKeepRecent(2)).Compact(
+		context.Background(), agent.CompactInput{Messages: toolSession(4)}); err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Equal(l.limits, []int{0}) || strings.Contains(l.prompts[0], "# LENGTH") {
+		t.Fatalf("limits = %v, prompt = %q; want no limit and no budget", l.limits, l.prompts[0])
+	}
+}
+
+func TestSummaryCompactor_CutSummaryIsAskedAgain(t *testing.T) {
+	l := &limitLLM{cut: true}
+	c := agent.NewSummaryCompactor(l, agent.WithKeepRecent(2), agent.WithMaxSummaryTokens(400))
+
+	out, err := c.Compact(context.Background(), agent.CompactInput{Messages: toolSession(4)})
+	if err != nil || out == nil {
+		t.Fatalf("Compact = %+v, %v", out, err)
+	}
+
+	if out.Snapshot.Summary != "summary" || !slices.Equal(l.limits, []int{600, 0}) {
+		t.Fatalf("summary = %q, limits = %v; want the cut one dropped and a second call without a limit",
+			out.Snapshot.Summary, l.limits)
+	}
+}
+
 func TestSummaryCompactor_UpdatesThePreviousSnapshot(t *testing.T) {
 	sum := &summaryLLM{}
 	c := agent.NewSummaryCompactor(sum, agent.WithKeepRecent(2))

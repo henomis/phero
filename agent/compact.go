@@ -165,9 +165,10 @@ func sameToolCalls(a, b llm.Message) bool {
 // conversation with a summary written by an LLM, and keeps the most recent
 // messages whole.
 type SummaryCompactor struct {
-	llm        llm.LLM
-	keepRecent int
-	keepTokens int
+	llm           llm.LLM
+	keepRecent    int
+	keepTokens    int
+	summaryTokens int
 }
 
 // SummaryCompactorOption configures a SummaryCompactor.
@@ -184,6 +185,16 @@ func WithKeepRecent(n int) SummaryCompactorOption {
 // DefaultKeepTokens.
 func WithKeepTokens(n int) SummaryCompactorOption {
 	return func(c *SummaryCompactor) { c.keepTokens = max(n, 0) }
+}
+
+// WithMaxSummaryTokens bounds the summary: the prompt asks for at most n
+// tokens, and the call's output limit (llm.WithMaxOutputTokens) is half as
+// much again, so a summary a little over the budget is not cut. A summary cut
+// at that limit anyway is dropped, and the summary is asked for once more
+// without the limit: a long summary is better than one that stops halfway.
+// The default, 0, sets no bound.
+func WithMaxSummaryTokens(n int) SummaryCompactorOption {
+	return func(c *SummaryCompactor) { c.summaryTokens = max(n, 0) }
 }
 
 // NewSummaryCompactor returns a SummaryCompactor that writes its summaries
@@ -224,16 +235,12 @@ func (c *SummaryCompactor) Compact(ctx context.Context, in CompactInput) (*Compa
 		previous = in.Previous.Summary
 	}
 
-	res, err := c.llm.Execute(ctx, []llm.Message{memory.FormatSnapshotPrompt(previous, older)})
+	summary, err := c.summarize(ctx, previous, older)
 	if err != nil {
-		return nil, &CompactionError{Err: err}
+		return nil, err
 	}
 
-	if res == nil || res.Message == nil {
-		return nil, &CompactionError{Err: ErrIncompleteStream}
-	}
-
-	snapshot := memory.Snapshot{Summary: res.Message.TextContent()}
+	snapshot := memory.Snapshot{Summary: summary}
 
 	if !slices.ContainsFunc(recent, isUserMessage) {
 		if task, ok := lastUserMessage(older); ok {
@@ -245,6 +252,42 @@ func (c *SummaryCompactor) Compact(ctx context.Context, in CompactInput) (*Compa
 
 	return &Compaction{Snapshot: snapshot, Kept: clipToolResults(recent)}, nil
 }
+
+// summarize asks the LLM for the summary that updates previous with older,
+// within the summary budget when there is one (see WithMaxSummaryTokens).
+func (c *SummaryCompactor) summarize(ctx context.Context, previous string, older []llm.Message) (string, error) {
+	prompt := memory.FormatSnapshotPrompt(previous, older)
+
+	var opts []llm.CallOption
+
+	if c.summaryTokens > 0 {
+		words := c.summaryTokens * 3 / 4 //nolint:mnd // about three words in four tokens
+		prompt.Parts[0].Text += fmt.Sprintf(summaryBudgetPrompt, c.summaryTokens, words)
+		opts = append(opts, llm.WithMaxOutputTokens(c.summaryTokens+c.summaryTokens/2)) //nolint:mnd // headroom
+	}
+
+	res, err := c.llm.Execute(ctx, []llm.Message{prompt}, opts...)
+	if err == nil && len(opts) > 0 && res != nil && res.FinishReason == llm.FinishLength {
+		// Cut at the limit: ask again without it.
+		res, err = c.llm.Execute(ctx, []llm.Message{prompt})
+	}
+
+	if err != nil {
+		return "", &CompactionError{Err: err}
+	}
+
+	if res == nil || res.Message == nil {
+		return "", &CompactionError{Err: ErrIncompleteStream}
+	}
+
+	return res.Message.TextContent(), nil
+}
+
+// summaryBudgetPrompt asks for a summary within a budget, in tokens and words.
+const summaryBudgetPrompt = `
+
+# LENGTH
+Keep the summary under %d tokens (about %d words). Prefer short bullet points; drop detail before dropping sections.`
 
 // keepFrom returns the index of the first message to keep: keepRecent from
 // the end, moved later while the kept messages pass the token budget.

@@ -435,7 +435,10 @@ a.SetCompaction(agent.NewSummaryCompactor(cheapLLM, agent.WithKeepRecent(20)), 1
           <code>WithKeepRecent</code> messages, fewer when they pass a token budget (a quarter of the threshold, or
           <code>WithKeepTokens</code>), and cuts kept tool results longer than
           <code>agent.DefaultKeptToolResultChars</code>. It never separates a tool call from its results, and it
-          pins the latest user request word for word, so the task is not lost.</li>
+          pins the latest user request word for word, so the task is not lost.
+          <code>WithMaxSummaryTokens(n)</code> bounds the summary, for small context windows: the prompt asks for at
+          most <code>n</code> tokens and the call's output limit is <code>1.5 × n</code>. A summary cut at that limit is
+          dropped and asked for again without it.</li>
         <li>Any <code>agent.Compactor</code> (or <code>agent.CompactorFunc</code>) can replace it. It gets an
           <code>agent.CompactInput</code> (the previous snapshot, the messages after it, the token budget) and
           returns an <code>agent.Compaction</code>: a <code>memory.Snapshot</code> and the last input messages it
