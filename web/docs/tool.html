@@ -226,6 +226,7 @@ bashTool, err := bash.New(
 if err != nil {
     panic(err)
 }
+defer bashTool.Close() // kill the background shells when the app ends
 
 // Register all three tools so the agent can manage background processes:
 if err := a.AddTool(bashTool.Tool());       err != nil { panic(err) }
@@ -303,7 +304,25 @@ bashTool, err := bash.New(bash.WithRunner(runner), bash.WithWorkingDirectory(rep
       <p>Background execution fields in <code>Input</code>:</p>
       <ul>
         <li><code>RunInBackground bool</code>: start the command in the background; the tool returns a <code>bash_id</code> immediately</li>
-        <li><code>Timeout int</code>: optional per-request timeout in milliseconds, capped by <code>WithMaxTimeout</code></li>
+        <li><code>Timeout int</code>: optional per-request timeout in milliseconds. For a foreground command it is
+          capped by <code>WithMaxTimeout</code>; for a background command, by <code>WithBackgroundTimeout</code> when set</li>
+      </ul>
+      <h3>Background shells</h3>
+      <p>
+        A background command has its own lifetime, so a dev server or a watcher keeps running. The foreground limits
+        (<code>WithTimeout</code>, <code>WithDefaultTimeout</code>, <code>WithMaxTimeout</code>, and the safe-mode
+        timeout) do not apply to it.
+      </p>
+      <ul>
+        <li><code>WithBackgroundTimeout(d)</code>: kill a background command after <code>d</code>, and cap the timeout
+          the model asks for. 0 (the default) means no limit</li>
+        <li><code>WithMaxBackgroundOutput(n)</code>: how many bytes of output each shell keeps (default
+          <code>bash.DefaultMaxBackgroundOutput</code>, 1 MiB; 0 = no cap). Older output is dropped; when unread output
+          was dropped, <code>bash_output</code> starts with <code>[... N bytes dropped ...]</code> and sets
+          <code>Dropped</code></li>
+        <li><code>Close()</code>: kill every background shell and wait briefly for them to exit. Call it with
+          <code>defer</code>. Foreground commands still run afterwards; a new background command returns
+          <code>bash.ErrClosed</code></li>
       </ul>
       <p>
         A command killed at its timeout is not an error: the result holds what it printed until then, followed by

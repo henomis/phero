@@ -54,3 +54,6 @@ var ErrBubblewrapNotFound = errors.New("bash: bubblewrap (bwrap) not found")
 // extra path is the root or the home directory, or contains it: mounting it
 // would expose what the sandbox hides, Unix sockets included.
 var ErrPathTooBroad = errors.New("bash: sandbox path is / or contains the home directory")
+
+// ErrClosed is returned when a background command is started after Close.
+var ErrClosed = errors.New("bash: tool is closed")
