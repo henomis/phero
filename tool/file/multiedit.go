@@ -46,13 +46,14 @@ type MultiEditTool struct {
 	workingDir  string
 	maxFileSize int64
 	tracker     *ReadTracker
+	onWrite     WriteHook
 }
 
 // NewMultiEditTool creates a new multi_edit tool.
 func NewMultiEditTool(opts ...Option) (*MultiEditTool, error) {
 	o := applyOptions(opts...)
 
-	m := &MultiEditTool{workingDir: o.workingDir, maxFileSize: o.maxFileSize, tracker: o.tracker}
+	m := &MultiEditTool{workingDir: o.workingDir, maxFileSize: o.maxFileSize, tracker: o.tracker, onWrite: o.onWrite}
 
 	tool, err := llm.NewTool(
 		"multi_edit",
@@ -75,23 +76,41 @@ func (m *MultiEditTool) Tool() *llm.Tool {
 	return m.tool
 }
 
-func (m *MultiEditTool) multiEdit(_ context.Context, input *MultiEditInput) (*MultiEditOutput, error) {
-	if input == nil {
-		return nil, fmt.Errorf("nil input")
-	}
+// Preview returns the change a call with input would make, without making
+// it. It runs the call's code and checks, so it fails as the call would.
+func (m *MultiEditTool) Preview(input *MultiEditInput) (*Change, error) {
+	change, _, err := m.plan(input)
 
-	if strings.TrimSpace(input.FilePath) == "" {
-		return nil, ErrPathRequired
-	}
+	return change, err
+}
 
-	if len(input.Edits) == 0 {
-		return nil, ErrEditsRequired
-	}
-
-	replacements, err := editFile(m.workingDir, m.maxFileSize, m.tracker, input.FilePath, input.Edits)
+func (m *MultiEditTool) multiEdit(ctx context.Context, input *MultiEditInput) (*MultiEditOutput, error) {
+	change, replacements, err := m.plan(input)
 	if err != nil {
 		return nil, err
 	}
 
+	if err = applyChange(ctx, change, m.tracker, m.onWrite); err != nil {
+		return nil, err
+	}
+
 	return &MultiEditOutput{Replacements: replacements}, nil
+}
+
+// plan returns the change a call with input makes, and the number of
+// replacements.
+func (m *MultiEditTool) plan(input *MultiEditInput) (*Change, int, error) {
+	if input == nil {
+		return nil, 0, fmt.Errorf("nil input")
+	}
+
+	if strings.TrimSpace(input.FilePath) == "" {
+		return nil, 0, ErrPathRequired
+	}
+
+	if len(input.Edits) == 0 {
+		return nil, 0, ErrEditsRequired
+	}
+
+	return planEdits(m.workingDir, m.maxFileSize, m.tracker, input.FilePath, input.Edits)
 }

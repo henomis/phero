@@ -22,6 +22,7 @@ type toolOptions struct {
 	maxResults  int
 	noIgnore    bool
 	tracker     *ReadTracker
+	onWrite     WriteHook
 }
 
 // DefaultMaxFileSize is the read tool's size limit for a whole-file read
@@ -94,6 +95,15 @@ func WithNoIgnore() Option {
 func WithReadTracker(tracker *ReadTracker) Option {
 	return func(o *toolOptions) {
 		o.tracker = tracker
+	}
+}
+
+// WithOnWrite makes the write, edit and multi_edit tools call hook after each
+// change they write, with the content they read and wrote, for example to
+// record it for an undo. See WriteHook.
+func WithOnWrite(hook WriteHook) Option {
+	return func(o *toolOptions) {
+		o.onWrite = hook
 	}
 }
 

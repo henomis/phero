@@ -154,6 +154,10 @@ if err := a.AddTool(readTool.Tool()); err != nil {
           New files need no read, and the tools' own changes count as seen. <code>tracker.Reset()</code> forgets every
           read, for a new session that reuses the same tools</li>
         <li><code>WithNoOverwrite()</code>: configure write to return <code>ErrFileExists</code> when the target already exists</li>
+        <li><code>WithOnWrite(hook)</code>: write, edit and multi_edit call <code>hook(ctx, change)</code> after each
+          change they write, with a <code>file.Change</code> holding the resolved path, the content before and after,
+          whether the file existed, and its permissions. It is not called for a failed call. Use it to record changes
+          for an undo</li>
         <li><code>WithMaxResults(n)</code>: how many paths <code>glob</code>, and entries <code>grep</code>, return at most
           (default <code>file.DefaultMaxResults</code>, 1000; 0 removes the cap). A cut result sets <code>Truncated</code></li>
         <li><code>WithNoIgnore()</code>: search everything, including what <code>.gitignore</code> ignores and
@@ -166,6 +170,38 @@ if err := a.AddTool(readTool.Tool()); err != nil {
         never leaves the file half changed. <code>edit</code>, <code>multi_edit</code> and <code>write</code> are
         exclusive tools: when the model calls several at once, they run one at a time, in call order.
       </p>
+
+      <p>
+        Each of the three tools has a <code>Preview(input)</code> method that returns the <code>*file.Change</code> a
+        call would make, without writing it. It runs the call's own code and checks (uniqueness,
+        <code>replace_all</code>, the size limit, the read tracker, the working directory), so it fails exactly as the
+        call would. A permission dialog can show the diff before the call runs. The tools decode their arguments
+        with <code>encoding/json</code>, so the dialog can decode <code>Request.Arguments</code> into
+        <code>file.EditInput</code> the same way. <code>file.WriteFileAtomic</code> writes a file as the tools do
+        (a temporary file, then a rename), for example to restore a change's <code>Before</code>.
+      </p>
+      <pre><code class="language-go">journal := []file.Change{}
+opts := []file.Option{
+    file.WithWorkingDirectory("/workspace"),
+    file.WithOnWrite(func(_ context.Context, c file.Change) { journal = append(journal, c) }),
+}
+editTool, _ := file.NewEditTool(opts...)
+
+// In the permission Asker, before the call runs:
+var in file.EditInput
+if err := json.Unmarshal([]byte(req.Arguments), &amp;in); err == nil {
+    if change, err := editTool.Preview(&amp;in); err == nil {
+        showDiff(change.Path, change.Before, change.After)
+    }
+}
+
+// Undo the last change:
+last := journal[len(journal)-1]
+if last.Existed {
+    err = file.WriteFileAtomic(last.Path, last.Before, last.Perm)
+} else {
+    err = os.Remove(last.Path)
+}</code></pre>
 
       <p>
         <code>glob</code> and <code>grep</code> are built for real repositories. They skip <code>.git</code>,
