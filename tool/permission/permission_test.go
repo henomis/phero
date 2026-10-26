@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -200,6 +201,40 @@ func TestMiddleware_RequestShowsTheCommandAndWhatAlwaysAllows(t *testing.T) {
 
 	if second := reqs[1]; second.Raw != "echo $(whoami)" || second.Subjects != nil {
 		t.Fatalf("unsplittable command: Raw = %q, Subjects = %q; want the command and nil", second.Raw, second.Subjects)
+	}
+}
+
+func TestMiddleware_RequestReason(t *testing.T) {
+	reasons := map[string]permission.Reason{}
+
+	p := mustPolicy(t,
+		permission.WithAllow("bash(make *)"),
+		permission.WithAsk("bash(git push *)"),
+		permission.WithAsker(func(_ context.Context, req permission.Request) (permission.Answer, error) {
+			reasons[req.Raw] = req.Reason
+			return permission.AllowOnce, nil
+		}),
+	)
+
+	var runs atomic.Int32
+
+	tool := newBashTool(t, &runs)
+	p.Apply(tool)
+
+	want := map[string]permission.Reason{
+		"make test && git push origin": permission.ReasonAskRule,
+		"ls -la":                       permission.ReasonNoRule,
+		"echo $(whoami)":               permission.ReasonOpaque,
+	}
+
+	for command := range want {
+		if _, err := tool.Handle(context.Background(), bashArgs(command)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if !maps.Equal(reasons, want) {
+		t.Fatalf("reasons = %v, want %v", reasons, want)
 	}
 }
 

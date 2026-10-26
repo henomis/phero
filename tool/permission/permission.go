@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -76,6 +77,34 @@ const (
 	AllowAlways
 )
 
+// Reason says why a call is asked.
+type Reason int
+
+const (
+	// ReasonNoRule means no rule matched the call, and the Policy's default
+	// is to ask (WithDefault).
+	ReasonNoRule Reason = iota
+	// ReasonAskRule means an ask rule matched one of the call's subjects.
+	ReasonAskRule
+	// ReasonOpaque means the call is a command line that cannot be split
+	// safely, such as one with command substitution; it is always asked.
+	ReasonOpaque
+)
+
+// String returns "no rule", "ask rule" or "opaque command".
+func (r Reason) String() string {
+	switch r {
+	case ReasonNoRule:
+		return "no rule"
+	case ReasonAskRule:
+		return "ask rule"
+	case ReasonOpaque:
+		return "opaque command"
+	default:
+		return fmt.Sprintf("Reason(%d)", int(r))
+	}
+}
+
 // Request is the question an Asker answers.
 type Request struct {
 	// Tool is the tool's name.
@@ -98,6 +127,8 @@ type Request struct {
 	// It is nil when a command line cannot be split safely; AllowAlways then
 	// allows this call only.
 	Subjects []string
+	// Reason says why the call is asked.
+	Reason Reason
 }
 
 // Asker asks a human whether a tool call may run. An error denies the call
@@ -436,7 +467,10 @@ func (p *Policy) check(ctx context.Context, tool, arguments string) error {
 		return &DeniedError{Tool: tool, Subject: subject, Reason: "needs approval and no one can be asked"}
 	}
 
-	req := Request{Tool: tool, Arguments: arguments, Subject: subject, Raw: raw, Subjects: slices.Clone(subjects)}
+	req := Request{
+		Tool: tool, Arguments: arguments, Subject: subject, Raw: raw,
+		Subjects: slices.Clone(subjects), Reason: p.askReason(tool, subjects, written),
+	}
 	if call, ok := llm.ToolCallFromContext(ctx); ok {
 		req.CallID = call.ID
 	}
@@ -509,13 +543,7 @@ func (p *Policy) decide(tool string, subjects, written []string, runRules []rule
 // or a tool name pattern), still matches. Allow rules apply to the resolved
 // subject only, which is what the tool opens.
 func (p *Policy) decideOne(tool, subject, written string, runRules []rule) Decision {
-	matched := map[Decision]bool{}
-
-	for _, r := range slices.Concat(p.rules, runRules) {
-		if r.matches(tool, subject) || (written != "" && r.decision != Allow && r.matches(tool, written)) {
-			matched[r.decision] = true
-		}
-	}
+	matched := p.matched(tool, subject, written, runRules)
 
 	switch {
 	case matched[Deny]:
@@ -527,6 +555,42 @@ func (p *Policy) decideOne(tool, subject, written string, runRules []rule) Decis
 	default:
 		return p.fallback
 	}
+}
+
+// matched returns the decisions of the rules that match one subject (see
+// decideOne). The caller holds p.mu.
+func (p *Policy) matched(tool, subject, written string, runRules []rule) map[Decision]bool {
+	matched := map[Decision]bool{}
+
+	for _, r := range slices.Concat(p.rules, runRules) {
+		if r.matches(tool, subject) || (written != "" && r.decision != Allow && r.matches(tool, written)) {
+			matched[r.decision] = true
+		}
+	}
+
+	return matched
+}
+
+// askReason says why a call that decide asks is asked. The caller holds
+// p.mu.
+func (p *Policy) askReason(tool string, subjects, written []string) Reason {
+	if subjects == nil {
+		return ReasonOpaque
+	}
+
+	for i, subject := range subjects {
+		var asWritten string
+		if i < len(written) {
+			asWritten = written[i]
+		}
+
+		// Ask rules are never run rules.
+		if p.matched(tool, subject, asWritten, nil)[Ask] {
+			return ReasonAskRule
+		}
+	}
+
+	return ReasonNoRule
 }
 
 // subjects returns what a call touches: the commands of a bash command line
