@@ -142,7 +142,7 @@ func run() error {
 		return err
 	}
 
-	fmt.Printf("coding agent in %s (%s)\nstate in %s\ntype a request, or /exit. Ctrl-C stops a turn.\n",
+	fmt.Printf("coding agent in %s (%s)\nstate in %s\ntype a request, /compact or /exit. Ctrl-C stops a turn.\n",
 		dir, info, cfg.stateDir)
 
 	// Ctrl-C cancels the turn in progress, or quits at the prompt.
@@ -173,9 +173,26 @@ func run() error {
 			continue
 		case "/exit":
 			return nil
+		case "/compact":
+			compact(a)
+			continue
 		}
 
 		turn(context.Background(), cfg, a, line, sigs)
+	}
+}
+
+// compact summarizes the conversation now, as a long turn does on its own.
+func compact(a *agent.Agent) {
+	info, err := a.Compact(context.Background())
+
+	switch {
+	case err != nil:
+		fmt.Println("[compaction failed]", err)
+	case !info.Compacted:
+		fmt.Println("[nothing to compact]")
+	default:
+		fmt.Printf("[compacted: %d → %d tokens]\n", info.TokensBefore, info.TokensAfter)
 	}
 }
 

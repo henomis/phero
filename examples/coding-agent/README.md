@@ -58,17 +58,19 @@ Flags:
 | `-unsafe-local` | `false` | without bubblewrap, run commands on the host, **unsandboxed** |
 
 Type a request at the `>` prompt. Ctrl-C stops the current turn; at the prompt it quits, as `/exit` does.
+`/compact` summarizes the conversation now, as a long turn does on its own.
 Delete the state directory to start a fresh session.
 
 ## What it is not
 
-There is no diff view, undo, git integration, slash commands, model switching or steering while a turn
-runs. Those are the app's job. Where phero has a hook for them:
+There is no diff view, undo, git integration, slash commands beyond `/compact` and `/exit`, model
+switching or steering while a turn runs. Those are the app's job. Where phero has a hook for them:
 
-- **diff / undo**: a tool middleware (`tool.Use`) on write, edit and multi_edit can record each file
-  before the change.
-- **model switching or a new system prompt**: build a new agent with `agent.New` and give it the same
-  memory (`SetMemory`). The next run continues the session.
+- **diff / undo**: `Preview(input)` on write, edit and multi_edit returns the change a call would make,
+  for a diff in the permission question. `file.WithOnWrite` records each change after it is written,
+  and `file.WriteFileAtomic` restores one.
+- **model switching**: `Agent.SetLLM` between turns. For a new system prompt, build a new agent with
+  `agent.New` and give it the same memory (`SetMemory`). The next run continues the session.
 - **steering**: stop the turn with Ctrl-C and send the correction as the next request. The session keeps
   what was done.
 - **a cut-off answer**: the agent prints a note when the model hit its output limit
