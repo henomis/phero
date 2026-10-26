@@ -303,6 +303,31 @@ func TestPolicy_AlwaysSkipsAskRuleSubjects(t *testing.T) {
 	}
 }
 
+func TestMiddleware_RequestSubjectsAreWhatAlwaysAdds(t *testing.T) {
+	var requests []permission.Request
+
+	p := mustPolicy(t, permission.WithAsker(func(_ context.Context, req permission.Request) (permission.Answer, error) {
+		requests = append(requests, req)
+		return permission.AllowAlways, nil
+	}))
+
+	var runs atomic.Int32
+
+	tool := newBashTool(t, &runs)
+	p.Apply(tool)
+
+	for _, command := range []string{"ls; ls", "ls && make test"} {
+		if _, err := tool.Handle(context.Background(), bashArgs(command)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Each subject once, and none already allowed by an earlier answer.
+	if !slices.Equal(requests[0].Subjects, []string{"ls"}) || !slices.Equal(requests[1].Subjects, []string{"make test"}) {
+		t.Fatalf("Subjects = %v, %v; want [ls] and [make test]", requests[0].Subjects, requests[1].Subjects)
+	}
+}
+
 func TestPolicy_AlwaysAndForget(t *testing.T) {
 	var asked atomic.Int32
 

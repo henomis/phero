@@ -124,9 +124,10 @@ type Request struct {
 	Raw string
 	// Subjects are what an AllowAlways answer allows from then on: each
 	// command of a bash command line, or the resolved path of a file tool,
-	// except those an ask rule matches, which are asked every time. It is nil
-	// when a command line cannot be split safely, and empty when an ask rule
-	// matches every subject; AllowAlways then allows this call only.
+	// once each, except those an ask rule matches, which are asked every
+	// time, and those an earlier AllowAlways answer already allows. It is nil
+	// when a command line cannot be split safely, and empty when no subject is
+	// left; AllowAlways then allows this call only.
 	Subjects []string
 	// Reason says why the call is asked.
 	Reason Reason
@@ -592,9 +593,9 @@ func (p *Policy) matched(tool, subject, written string, runRules []rule) map[Dec
 	return matched
 }
 
-// rememberable returns the subjects an AllowAlways answer stores: those no
-// ask rule matches, since an ask rule wins over a stored answer. It is nil
-// when subjects is. The caller holds p.mu.
+// rememberable returns the subjects an AllowAlways answer stores, once each:
+// those no ask rule matches, since an ask rule wins over a stored answer, and
+// not stored already. It is nil when subjects is. The caller holds p.mu.
 func (p *Policy) rememberable(tool string, subjects, written []string) []string {
 	if subjects == nil {
 		return nil
@@ -606,6 +607,10 @@ func (p *Policy) rememberable(tool string, subjects, written []string) []string 
 		var asWritten string
 		if i < len(written) {
 			asWritten = written[i]
+		}
+
+		if slices.Contains(out, subject) || slices.Contains(p.always[tool], subject) {
+			continue
 		}
 
 		// Ask rules are never run rules.
