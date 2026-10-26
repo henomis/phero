@@ -384,9 +384,14 @@ a.SetMaxIterations(10)</code></pre>
         settings, and the next run continues the same conversation with the new model. Call it between runs, not
         during one.
       </p>
+      <p>
+        <code>SetLLM</code> changes only the agent's own client. A <code>SummaryCompactor</code> keeps the client it
+        was built with, so set the compaction again to write summaries with the new model too.
+      </p>
       <pre><code class="language-go">if err := a.SetLLM(otherLLM); err != nil {
     return err
-}</code></pre>
+}
+a.SetCompaction(agent.NewSummaryCompactor(otherLLM), threshold) // as you set it before</code></pre>
       <p>
         The system prompt is set when the agent is built. To change it, build a new agent and give it the same
         memory: the next run loads the session from memory, so the conversation goes on.

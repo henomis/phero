@@ -230,6 +230,11 @@ func (a *Agent) AddHandoff(handoffAgent *Agent) error {
 // memory and every other setting, so the next run continues the same
 // conversation with another model. Call it between runs, not during one. It
 // returns ErrUndefinedLLM for a nil client.
+//
+// Only the agent's own client changes. A compactor holds the client it was
+// built with: a SummaryCompactor made with the old client keeps writing
+// summaries with the old model, so call SetCompaction again with one made
+// from the new client.
 func (a *Agent) SetLLM(client llm.LLM) error {
 	if client == nil {
 		return ErrUndefinedLLM
