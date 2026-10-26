@@ -254,7 +254,21 @@ if err := a.AddTool(bashTool.KillTool());   err != nil { panic(err) }</code></pr
           Each command still runs in its own process; one that exits, times out or runs in the background changes
           nothing. Without it, every command starts fresh in the working directory, and the tool's description says
           so to the model.</li>
+        <li><code>WithOutputHandler(fn)</code>: get a foreground command's output as it is written (below)</li>
       </ul>
+      <h3>Streaming output</h3>
+      <p>
+        By default nothing is visible until a command exits, so a long <code>go test</code> looks like a hang.
+        <code>WithOutputHandler</code> calls a function with each piece of output as the command writes it (stdout and
+        stderr interleaved, as in the result). The model still gets the whole output when the command ends. The
+        function gets the tool call's context, so <code>llm.ToolCallFromContext</code> tells which call a chunk
+        belongs to. Background commands are not streamed: the model reads them with <code>bash_output</code>.
+      </p>
+      <pre><code class="language-go">bashTool, err := bash.New(
+    bash.WithOutputHandler(func(ctx context.Context, chunk []byte) {
+        os.Stderr.Write(chunk) // show progress while the command runs
+    }),
+)</code></pre>
       <h3>Sandbox (Linux)</h3>
       <p>
         The blocklist and allowlist match substrings of the command and are easy to get around: they are not a

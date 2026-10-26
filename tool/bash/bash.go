@@ -134,6 +134,7 @@ type Tool struct {
 	extraEnv       []string
 	persistent     bool
 	state          shellState
+	onOutput       func(context.Context, []byte)
 
 	mu    sync.RWMutex
 	shell map[string]*backgroundShell
@@ -275,6 +276,20 @@ func WithEnv(entries ...string) Option {
 	}
 }
 
+// WithOutputHandler calls fn with each piece of output a foreground command
+// writes, as it writes it, so a UI can show a long command's progress (for
+// example go test) before the call returns. Stdout and stderr arrive
+// interleaved, as in the result. fn gets the tool call's context: the agent
+// sets the call in it, so llm.ToolCallFromContext(ctx) tells which call the
+// chunk belongs to. fn runs on the command's output path, so it should be
+// quick, and calls for one command never overlap. Background commands are not
+// streamed: read them with the bash_output tool.
+func WithOutputHandler(fn func(ctx context.Context, chunk []byte)) Option {
+	return func(t *Tool) {
+		t.onOutput = fn
+	}
+}
+
 // WithTimeout sets a maximum execution duration for each command.
 // When the context deadline is shorter than the configured timeout, the
 // context deadline takes precedence. A value of 0 (the default) means no
@@ -408,7 +423,14 @@ func (t *Tool) runForeground(ctx context.Context, command string, cmdTimeout tim
 		}
 	}
 
-	combined, err := cmd.CombinedOutput()
+	var buf bytes.Buffer
+
+	w := &streamWriter{ctx: ctx, buf: &buf, fn: t.onOutput}
+	cmd.Stdout, cmd.Stderr = w, w
+
+	err = cmd.Run()
+	combined := buf.Bytes()
+
 	if report != nil {
 		t.recordState(cmd, report, runCtx.Err() == nil)
 	}
@@ -696,6 +718,30 @@ func randomID() (string, error) {
 	}
 
 	return hex.EncodeToString(b), nil
+}
+
+// streamWriter collects a foreground command's output and passes each piece
+// to fn as it arrives. The lock keeps writes ordered when stdout and stderr
+// are copied by separate goroutines.
+type streamWriter struct {
+	ctx context.Context //nolint:containedctx // handed to fn with each chunk
+	fn  func(context.Context, []byte)
+
+	mu  sync.Mutex
+	buf *bytes.Buffer
+}
+
+func (w *streamWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	n, err := w.buf.Write(p)
+	if w.fn != nil && n > 0 {
+		// The caller may reuse p once Write returns.
+		w.fn(w.ctx, bytes.Clone(p[:n]))
+	}
+
+	return n, err
 }
 
 type lockedWriter struct {
