@@ -222,6 +222,11 @@ func (c *Client) buildParams(messages []llm.Message, opts []llm.CallOption) (ant
 	}
 
 	maxTokens := c.maxTokens
+	if cfg.MaxOutputTokens > 0 {
+		maxTokens = int64(cfg.MaxOutputTokens)
+	}
+
+	answerTokens := maxTokens
 	params := anthropicapi.MessageNewParams{
 		Model:    anthropicapi.Model(strings.TrimSpace(c.model)),
 		Messages: anthropicMessages,
@@ -247,7 +252,7 @@ func (c *Client) buildParams(messages []llm.Message, opts []llm.CallOption) (ant
 		// Extended thinking requires max_tokens > budget and disallows a custom
 		// temperature, so we omit temperature and ensure headroom above the budget.
 		if maxTokens <= c.thinkingbudget {
-			maxTokens = c.thinkingbudget + c.maxTokens
+			maxTokens = c.thinkingbudget + answerTokens
 		}
 
 		params.Thinking = anthropicapi.ThinkingConfigParamOfEnabled(c.thinkingbudget)

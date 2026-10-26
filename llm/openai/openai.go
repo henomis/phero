@@ -167,11 +167,16 @@ func (c *Client) buildRequest(messages []llm.Message, opts []llm.CallOption) (op
 		ReasoningEffort: c.reasoningEffort,
 	}
 
-	if c.maxTokens > 0 {
+	maxTokens := int(c.maxTokens)
+	if cfg.MaxOutputTokens > 0 {
+		maxTokens = cfg.MaxOutputTokens
+	}
+
+	if maxTokens > 0 {
 		if c.legacyMaxTokens {
-			request.MaxTokens = int(c.maxTokens)
+			request.MaxTokens = maxTokens
 		} else {
-			request.MaxCompletionTokens = int(c.maxTokens)
+			request.MaxCompletionTokens = maxTokens
 		}
 	}
 

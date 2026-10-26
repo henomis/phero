@@ -567,3 +567,16 @@ func TestExecute_CompactedSessionKeepsTurnOrder(t *testing.T) {
 		t.Fatalf("first turn parts = %v, want the summary and the task", parts)
 	}
 }
+
+func TestExecute_MaxOutputTokensPerCall(t *testing.T) {
+	f := newFake(t)
+	client := newClient(f, google.WithMaxTokens(256))
+
+	if _, err := client.Execute(ctx, []llm.Message{llm.UserMessage(llm.Text("q"))}, llm.WithMaxOutputTokens(64)); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := get(t, f.request(t, 0), "generationConfig", "maxOutputTokens"); got != 64.0 {
+		t.Fatalf("maxOutputTokens = %v, want the call's 64", got)
+	}
+}

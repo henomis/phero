@@ -1062,3 +1062,28 @@ func TestExecute_WithPromptCacheTTL_MarksSummaryAndConversationEnd(t *testing.T)
 		}
 	}
 }
+
+func TestExecute_MaxOutputTokensPerCall(t *testing.T) {
+	var body []byte
+
+	srv := capturingServer(t, &body)
+	defer srv.Close()
+
+	c := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
+	msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
+
+	if _, err := c.Execute(context.Background(), msgs, llm.WithMaxOutputTokens(64)); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var req struct {
+		MaxTokens int64 `json:"max_tokens"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+
+	if req.MaxTokens != 64 {
+		t.Fatalf("max_tokens = %d, want the call's 64", req.MaxTokens)
+	}
+}

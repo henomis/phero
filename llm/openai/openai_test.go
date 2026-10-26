@@ -541,3 +541,29 @@ func TestExecute_ToolChoiceWithoutTools_IsOmitted(t *testing.T) {
 		})
 	}
 }
+
+func TestExecute_MaxOutputTokensPerCall(t *testing.T) {
+	var payload map[string]any
+
+	srv := payloadCapturingServer(t, &payload)
+	defer srv.Close()
+
+	client := openai.New("test-key", openai.WithBaseURL(srv.URL), openai.WithMaxTokens(1000))
+	msgs := []llm.Message{llm.UserMessage(llm.Text("hi"))}
+
+	if _, err := client.Execute(context.Background(), msgs, llm.WithMaxOutputTokens(64)); err != nil {
+		t.Fatal(err)
+	}
+
+	if payload["max_completion_tokens"] != 64.0 {
+		t.Fatalf("max_completion_tokens = %v, want the call's 64", payload["max_completion_tokens"])
+	}
+
+	if _, err := client.Execute(context.Background(), msgs); err != nil {
+		t.Fatal(err)
+	}
+
+	if payload["max_completion_tokens"] != 1000.0 {
+		t.Fatalf("max_completion_tokens = %v, want the client's 1000", payload["max_completion_tokens"])
+	}
+}

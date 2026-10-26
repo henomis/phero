@@ -16,6 +16,7 @@ package google
 
 import (
 	"context"
+	"math"
 	"strings"
 
 	"google.golang.org/genai"
@@ -193,6 +194,10 @@ func (c *Client) buildRequest(
 
 	if c.maxTokens > 0 {
 		config.MaxOutputTokens = c.maxTokens
+	}
+
+	if cfg.MaxOutputTokens > 0 {
+		config.MaxOutputTokens = int32(min(cfg.MaxOutputTokens, math.MaxInt32)) //nolint:gosec // bounded above
 	}
 
 	if c.thinkingLevel != "" || c.thinkingBudget != nil || c.includeThoughts {

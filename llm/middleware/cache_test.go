@@ -301,6 +301,39 @@ func TestSemanticCache_ResponseFormatIsPartOfTheContract(t *testing.T) {
 	}
 }
 
+// TestSemanticCache_MaxOutputTokensIsPartOfTheContract verifies that an answer
+// cut at one call's output limit is not served to a call with another limit.
+func TestSemanticCache_MaxOutputTokensIsPartOfTheContract(t *testing.T) {
+	emb := mapEmbedder{fn: func(string) embedding.Vector { return embedding.Vector{1, 0, 0} }}
+	inner := &countingLLM{text: "answer"}
+
+	mw, err := middleware.NewSemanticCache(emb, &memStore{})
+	if err != nil {
+		t.Fatalf("NewSemanticCache: %v", err)
+	}
+
+	client := llm.Use(inner, mw)
+	msgs := []llm.Message{llm.UserMessage(llm.Text("hello"))}
+
+	for i, c := range []struct {
+		opts      []llm.CallOption
+		wantCalls int
+	}{
+		{opts: []llm.CallOption{llm.WithMaxOutputTokens(64)}, wantCalls: 1},
+		{opts: []llm.CallOption{llm.WithMaxOutputTokens(64)}, wantCalls: 1},
+		{opts: nil, wantCalls: 2},
+		{opts: []llm.CallOption{llm.WithMaxOutputTokens(128)}, wantCalls: 3},
+	} {
+		if _, execErr := client.Execute(context.Background(), msgs, c.opts...); execErr != nil {
+			t.Fatalf("call %d: Execute: %v", i, execErr)
+		}
+
+		if inner.calls != c.wantCalls {
+			t.Fatalf("call %d: inner calls = %d, want %d", i, inner.calls, c.wantCalls)
+		}
+	}
+}
+
 func TestSemanticCache_ToolChoiceContractIsStable(t *testing.T) {
 	emb := mapEmbedder{fn: func(string) embedding.Vector { return embedding.Vector{1, 0, 0} }}
 	store := &memStore{}

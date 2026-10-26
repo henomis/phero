@@ -74,6 +74,8 @@
           <code>llm.ToolChoiceNone</code> or <code>llm.ToolChoiceRequired</code>.</li>
         <li><code>llm.WithForcedTool(name)</code>: force a call to one specific tool, which must also be offered.</li>
         <li><code>llm.WithResponseFormat(format)</code>: constrain the answer to a JSON schema (structured output).</li>
+        <li><code>llm.WithMaxOutputTokens(n)</code>: cap the tokens the model may generate on this call, overriding the
+          client's own limit. An answer cut at the limit ends with <code>llm.FinishLength</code>.</li>
       </ul>
 
       <pre><code class="language-go">res, err := client.Execute(ctx, msgs,

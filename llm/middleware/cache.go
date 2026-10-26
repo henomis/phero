@@ -307,7 +307,7 @@ func (s *semanticCacheLLM) persist(
 // unconstrained call. Entries stored before contracts existed carry none, so
 // they no longer match anything and the cache re-warms.
 func callContract(cfg *llm.CallConfig) string {
-	if cfg.ResponseFormat == nil && cfg.ToolChoice == nil {
+	if cfg.ResponseFormat == nil && cfg.ToolChoice == nil && cfg.MaxOutputTokens == 0 {
 		return ""
 	}
 
@@ -322,9 +322,12 @@ func callContract(cfg *llm.CallConfig) string {
 		Format     string         `json:"format,omitempty"`
 		Schema     map[string]any `json:"schema,omitempty"`
 		ToolChoice *toolChoice    `json:"tool_choice,omitempty"`
+		// MaxOutputTokens keeps an answer cut at a limit from being served to
+		// a call with another limit.
+		MaxOutputTokens int `json:"max_output_tokens,omitempty"`
 	}
 
-	var c contract
+	c := contract{MaxOutputTokens: cfg.MaxOutputTokens}
 	if tc := cfg.ToolChoice; tc != nil {
 		c.ToolChoice = &toolChoice{Mode: tc.Mode, Name: tc.Name}
 	}
