@@ -139,7 +139,8 @@ if err := a.AddTool(readTool.Tool()); err != nil {
 
       <p>Available options:</p>
       <ul>
-        <li><code>WithWorkingDirectory(dir)</code>: confine all operations to a directory; paths are validated against it to prevent traversal</li>
+        <li><code>WithWorkingDirectory(dir)</code>: confine all operations to a directory; paths are validated against it to prevent traversal, after their symlinks are resolved.
+          <code>file.ResolvePath(dir, path)</code> runs the same resolution and check outside a call</li>
         <li><code>WithMaxFileSize(bytes)</code>: limit the file size the edit tools accept, and the read tool for a
           whole-file read (default <code>file.DefaultMaxFileSize</code>, 10 MiB; 0 = unlimited). A read with
           <code>offset</code> or <code>limit</code> pages a file of any size.</li>

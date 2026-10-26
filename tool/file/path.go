@@ -22,6 +22,16 @@ import (
 	"strings"
 )
 
+// ResolvePath resolves path as the file tools do before they open it: it
+// must be absolute (ErrPathMustBeAbsolute), it is cleaned and its symlinks
+// are resolved, including those of the existing parents of a file that does
+// not exist yet. With a non-empty workingDir, the resolved path must lie
+// inside it (ErrPathOutsideWorkingDirectory). Use it to see the file a call
+// will touch, for example to record it before the call runs.
+func ResolvePath(workingDir, path string) (string, error) {
+	return resolveToolPath(workingDir, path)
+}
+
 func resolveToolPath(workingDir, inputPath string) (string, error) {
 	path := filepath.Clean(inputPath)
 	if !filepath.IsAbs(path) {
