@@ -621,7 +621,8 @@ policy.Apply(readTool.Tool(), bashTool.Tool(), editTool.Tool())</code></pre>
         <li>The <code>Request</code> an <code>Asker</code> gets carries the model's tool call ID (<code>CallID</code>),
           the subject argument as written (<code>Raw</code>: for bash, the whole command line with its pipes and
           <code>&amp;&amp;</code>), and the subjects an <code>AllowAlways</code> answer allows from then on
-          (<code>Subjects</code>), so a question can show both exactly. <code>Reason</code> says why it is asked:
+          (<code>Subjects</code>), so a question can show both exactly. Subjects an ask rule matches are left out of
+          <code>Subjects</code> and never stored: the ask rule would ask again anyway. <code>Reason</code> says why it is asked:
           <code>ReasonNoRule</code>, <code>ReasonAskRule</code> or <code>ReasonOpaque</code> (a command line it cannot
           split).</li>
         <li><strong>Bash rules are advisory, not a security boundary.</strong> They match the command text, so a deny

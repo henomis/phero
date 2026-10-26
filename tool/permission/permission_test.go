@@ -266,6 +266,43 @@ func TestPolicy_AskRuleWinsOverAlways(t *testing.T) {
 	}
 }
 
+func TestPolicy_AlwaysSkipsAskRuleSubjects(t *testing.T) {
+	var requests []permission.Request
+
+	p := mustPolicy(t,
+		permission.WithAsk("bash(git push *)"),
+		permission.WithAsker(func(_ context.Context, req permission.Request) (permission.Answer, error) {
+			requests = append(requests, req)
+			return permission.AllowAlways, nil
+		}),
+	)
+
+	var runs atomic.Int32
+
+	tool := newBashTool(t, &runs)
+	p.Apply(tool)
+
+	for _, command := range []string{"git push origin", "make test && git push origin"} {
+		if _, err := tool.Handle(context.Background(), bashArgs(command)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The request shows what AllowAlways stores: nothing an ask rule matches.
+	if got := requests[0].Subjects; got == nil || len(got) != 0 {
+		t.Fatalf("Subjects = %#v, want empty: the ask rule matches the only command", got)
+	}
+
+	if got := requests[1].Subjects; !slices.Equal(got, []string{"make test"}) {
+		t.Fatalf("Subjects = %v, want [make test]", got)
+	}
+
+	want := []permission.Remembered{{Tool: "bash", Subject: "make test"}}
+	if got := p.Always(); !slices.Equal(got, want) {
+		t.Fatalf("Always = %v, want %v: an answer an ask rule would override is not stored", got, want)
+	}
+}
+
 func TestPolicy_AlwaysAndForget(t *testing.T) {
 	var asked atomic.Int32
 

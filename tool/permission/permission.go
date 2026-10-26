@@ -123,9 +123,10 @@ type Request struct {
 	// argument.
 	Raw string
 	// Subjects are what an AllowAlways answer allows from then on: each
-	// command of a bash command line, or the resolved path of a file tool.
-	// It is nil when a command line cannot be split safely; AllowAlways then
-	// allows this call only.
+	// command of a bash command line, or the resolved path of a file tool,
+	// except those an ask rule matches, which are asked every time. It is nil
+	// when a command line cannot be split safely, and empty when an ask rule
+	// matches every subject; AllowAlways then allows this call only.
 	Subjects []string
 	// Reason says why the call is asked.
 	Reason Reason
@@ -469,6 +470,7 @@ func (p *Policy) check(ctx context.Context, tool, arguments string) error {
 	p.mu.Lock()
 	decision = p.decide(tool, subjects, written, p.runRulesFor(ctx))
 	reason := p.askReason(tool, subjects, written)
+	remember := p.rememberable(tool, subjects, written)
 	p.mu.Unlock()
 
 	switch decision {
@@ -485,7 +487,7 @@ func (p *Policy) check(ctx context.Context, tool, arguments string) error {
 
 	req := Request{
 		Tool: tool, Arguments: arguments, Subject: subject, Raw: raw,
-		Subjects: slices.Clone(subjects), Reason: reason,
+		Subjects: slices.Clone(remember), Reason: reason,
 	}
 	if call, ok := llm.ToolCallFromContext(ctx); ok {
 		req.CallID = call.ID
@@ -501,7 +503,7 @@ func (p *Policy) check(ctx context.Context, tool, arguments string) error {
 		p.mu.Lock()
 		defer p.mu.Unlock()
 
-		for _, s := range subjects {
+		for _, s := range remember {
 			if !slices.Contains(p.always[tool], s) {
 				p.always[tool] = append(p.always[tool], s)
 			}
@@ -588,6 +590,31 @@ func (p *Policy) matched(tool, subject, written string, runRules []rule) map[Dec
 	}
 
 	return matched
+}
+
+// rememberable returns the subjects an AllowAlways answer stores: those no
+// ask rule matches, since an ask rule wins over a stored answer. It is nil
+// when subjects is. The caller holds p.mu.
+func (p *Policy) rememberable(tool string, subjects, written []string) []string {
+	if subjects == nil {
+		return nil
+	}
+
+	out := make([]string, 0, len(subjects))
+
+	for i, subject := range subjects {
+		var asWritten string
+		if i < len(written) {
+			asWritten = written[i]
+		}
+
+		// Ask rules are never run rules.
+		if !p.matched(tool, subject, asWritten, nil)[Ask] {
+			out = append(out, subject)
+		}
+	}
+
+	return out
 }
 
 // askReason says why a call that decide asks is asked. The caller holds
