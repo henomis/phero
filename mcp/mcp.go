@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -35,8 +36,9 @@ type ToolFilter func(toolName string) bool
 // Server wraps an MCP client session and can expose remote MCP tools as
 // `llm.FunctionTool` values.
 type Server struct {
-	session    *mcp.ClientSession
-	toolPrefix string
+	session        *mcp.ClientSession
+	toolPrefix     string
+	maxResultChars int
 }
 
 // Option configures a Server.
@@ -47,6 +49,14 @@ type Option func(*Server)
 // The MCP server is still called with the tool's own name.
 func WithToolPrefix(prefix string) Option {
 	return func(s *Server) { s.toolPrefix = prefix }
+}
+
+// WithMaxResultChars caps the text of each tool result at n bytes, cut on a
+// character boundary and ended with a note, so one call cannot fill the
+// model's context. Images are kept. A value of 0 or less, the default, keeps
+// the whole text.
+func WithMaxResultChars(n int) Option {
+	return func(s *Server) { s.maxResultChars = n }
 }
 
 // New creates a new Server bound to the provided MCP client session.
@@ -108,10 +118,12 @@ func (s *Server) AsTools(ctx context.Context, filter ToolFilter) ([]*llm.Tool, e
 				}
 
 				if callResult != nil && callResult.IsError {
-					return nil, &ToolResultError{Name: toolName, Message: callToolResultText(callResult)}
+					return nil, &ToolResultError{
+						Name: toolName, Message: cutText(callToolResultText(callResult), s.maxResultChars),
+					}
 				}
 
-				return callToolResultParts(callResult), nil
+				return callToolResultParts(callResult, s.maxResultChars), nil
 			},
 		)
 		if newToolErr != nil {
@@ -150,9 +162,10 @@ func normalizeMCPInputSchema(raw any) (map[string]any, error) {
 
 // callToolResultParts converts an MCP tool call result into content parts: its
 // text as one text part, followed by its images. A result with no image keeps
-// the plain text form of callToolResultText.
-func callToolResultParts(res *mcp.CallToolResult) any {
-	text := callToolResultText(res)
+// the plain text form of callToolResultText. The text is cut at maxChars
+// (see cutText).
+func callToolResultParts(res *mcp.CallToolResult, maxChars int) any {
+	text := cutText(callToolResultText(res), maxChars)
 
 	var images []llm.ContentPart
 
@@ -198,4 +211,20 @@ func callToolResultText(res *mcp.CallToolResult) string {
 	}
 
 	return strings.Join(parts, "\n")
+}
+
+// cutText cuts text to at most maxChars bytes, without splitting a UTF-8
+// character, and ends it with a note giving the cap. A maxChars of 0 or less
+// keeps the whole text.
+func cutText(text string, maxChars int) string {
+	if maxChars <= 0 || len(text) <= maxChars {
+		return text
+	}
+
+	n := maxChars
+	for n > 0 && !utf8.RuneStart(text[n]) {
+		n--
+	}
+
+	return text[:n] + fmt.Sprintf("\n[output cut at %d characters]", maxChars)
 }

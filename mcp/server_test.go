@@ -17,6 +17,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -24,8 +25,8 @@ import (
 	"github.com/henomis/phero/v2/llm"
 )
 
-// connectTestServer starts an in-memory MCP server with a failing tool and an
-// image tool, and returns a Server wrapping a client session to it.
+// connectTestServer starts an in-memory MCP server with a failing tool, an
+// image tool and a tool with a long text result, and returns a Server wrapping a client session to it.
 func connectTestServer(t *testing.T, opts ...Option) *Server {
 	t.Helper()
 
@@ -43,6 +44,11 @@ func connectTestServer(t *testing.T, opts ...Option) *Server {
 				&mcp.TextContent{Text: "screenshot"},
 				&mcp.ImageContent{MIMEType: "image/png", Data: []byte("png")},
 			}}, nil
+		})
+
+	srv.AddTool(&mcp.Tool{Name: "long", InputSchema: schema},
+		func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: strings.Repeat("é", 100)}}}, nil
 		})
 
 	serverT, clientT := mcp.NewInMemoryTransports()
@@ -117,5 +123,24 @@ func TestAsTools_ToolPrefix(t *testing.T) {
 	// The MCP server is still called with the tool's own name.
 	if _, err := shot.Handle(context.Background(), "{}"); err != nil {
 		t.Fatalf("Handle: %v", err)
+	}
+}
+
+func TestAsTools_MaxResultChars(t *testing.T) {
+	long := toolsByName(t, connectTestServer(t, WithMaxResultChars(11)))["long"]
+
+	out, err := long.Handle(context.Background(), "{}")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 11 bytes hold five two-byte characters; the sixth is not split.
+	if want := strings.Repeat("é", 5) + "\n[output cut at 11 characters]"; out != want {
+		t.Fatalf("result = %q, want %q", out, want)
+	}
+
+	whole, err := toolsByName(t, connectTestServer(t))["long"].Handle(context.Background(), "{}")
+	if err != nil || whole != strings.Repeat("é", 100) {
+		t.Fatalf("without a cap: result = %q, %v; want the whole text", whole, err)
 	}
 }
