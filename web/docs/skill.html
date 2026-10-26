@@ -124,7 +124,19 @@ Use this skill when the user asks for a random quote (inspirational, motivationa
             log.Printf("skill %s: not granted: %v", s.Name, refused)
         }
     }),
-)</code></pre>
+)
+if err != nil {
+    return err
+}
+for _, skipped := range skillTool.Skipped() {
+    log.Printf("skill left out: %v", skipped)
+}</code></pre>
+      <p>
+        A skill that cannot be used (a <code>SKILL.md</code> that does not parse, no name or description, or a name
+        an earlier skill already has) is left out of the catalog, and <code>Skipped()</code> says why; the other
+        skills still load. When two roots hold skills of the same name, in directories of different names, the
+        earlier root's skill wins too, so a cloned project cannot turn off or take over the user's skills.
+      </p>
       <p>
         <code>skill.NewMulti(roots...)</code> is the parser behind <code>WithRoots</code>: a user's own skills and a
         project's, with the earlier root winning when both have a skill directory of the same name. Pass the user's

@@ -484,11 +484,13 @@ if err := a.AddTool(dispatcher.Tool()); err != nil {
       <p>
         The dispatcher scans <code>skillsRootPath</code> for subdirectories containing <code>SKILL.md</code> files,
         builds a catalog, and embeds it in the tool description so the model can select the right skill by name at runtime.
+        A skill that cannot be used (it does not parse, has no name or description, or its name is taken) is left out,
+        and <code>dispatcher.Skipped()</code> says why; the others still load.
       </p>
       <p>Available options:</p>
       <ul>
         <li><code>WithRoots(roots...)</code>: read skills from several roots (user and project); earlier roots win,
-          so pass the user's first</li>
+          on a directory name or a skill name, so pass the user's first</li>
         <li><code>WithOnLoad(fn)</code>: called each time the model loads a skill, for example to pre-approve its
           <code>allowed-tools</code> for the run (<code>policy.AllowForRun</code>, filtered by
           <code>permission.SkillGrants</code>)</li>

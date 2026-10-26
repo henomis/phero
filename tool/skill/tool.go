@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -71,6 +72,7 @@ type Tool struct {
 	parser   Parser
 	catalog  []catalogEntry
 	commands map[string]catalogEntry
+	skipped  []error
 	onLoad   func(ctx context.Context, skill *skillpkg.Skill)
 }
 
@@ -114,6 +116,10 @@ func WithParser(parser Parser) Option {
 // New creates a new skill dispatcher tool.
 //
 // skillsRootPath is the directory containing skill subfolders with SKILL.md files.
+// A skill that cannot be used, because its SKILL.md does not parse, it has no
+// name or description, or its name is taken, is left out of the catalog and
+// reported by Skipped; the others still load. New fails only when the skills
+// cannot be listed.
 func New(skillsRootPath string, opts ...Option) (*Tool, error) {
 	skillsRootPath = strings.TrimSpace(skillsRootPath)
 
@@ -127,13 +133,9 @@ func New(skillsRootPath string, opts ...Option) (*Tool, error) {
 		}
 	}
 
-	entries, commands, err := t.buildCatalog(skillsRootPath)
-	if err != nil {
+	if err := t.buildCatalog(skillsRootPath); err != nil {
 		return nil, err
 	}
-
-	t.catalog = entries
-	t.commands = commands
 
 	description := t.buildDescription()
 
@@ -152,10 +154,24 @@ func (t *Tool) Tool() *llm.Tool {
 	return t.tool
 }
 
-func (t *Tool) buildCatalog(skillsRootPath string) ([]catalogEntry, map[string]catalogEntry, error) {
+// Skipped returns why each skill left out of the catalog was skipped: a
+// SKILL.md that does not parse, ErrSkillNameRequired or
+// ErrSkillDescriptionRequired (each wrapped with the skill's directory), or a
+// *DuplicateSkillNameError when an earlier skill, such as one from an earlier
+// root (WithRoots), has the same name. It is nil when every skill loaded.
+func (t *Tool) Skipped() []error {
+	return slices.Clone(t.skipped)
+}
+
+// buildCatalog lists and parses the skills, skipping those that cannot be
+// used (see Skipped). The first skill of a name wins: the parser lists an
+// earlier root's skills first.
+//
+//nolint:funlen
+func (t *Tool) buildCatalog(skillsRootPath string) error {
 	dirs, err := t.parser.List()
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
 
 	entries := make([]catalogEntry, 0, len(dirs))
@@ -164,17 +180,20 @@ func (t *Tool) buildCatalog(skillsRootPath string) ([]catalogEntry, map[string]c
 	for _, dir := range dirs {
 		skillItem, parseErr := t.parser.Parse(dir)
 		if parseErr != nil {
-			return nil, nil, parseErr
+			t.skipped = append(t.skipped, fmt.Errorf("skill tool: skill %q: %w", dir, parseErr))
+			continue
 		}
 
 		name := strings.TrimSpace(skillItem.Name)
 		if name == "" {
-			return nil, nil, ErrSkillNameRequired
+			t.skipped = append(t.skipped, fmt.Errorf("%w: %q", ErrSkillNameRequired, dir))
+			continue
 		}
 
 		description := strings.TrimSpace(skillItem.Description)
 		if description == "" {
-			return nil, nil, ErrSkillDescriptionRequired
+			t.skipped = append(t.skipped, fmt.Errorf("%w: %q", ErrSkillDescriptionRequired, dir))
+			continue
 		}
 
 		skillPath := filepath.Clean(filepath.Join(skillsRootPath, dir))
@@ -193,8 +212,11 @@ func (t *Tool) buildCatalog(skillsRootPath string) ([]catalogEntry, map[string]c
 		}
 
 		normalizedName := strings.ToLower(name)
+		// An earlier skill's name or directory name wins, so a later root
+		// cannot take the command a skill the user trusts answers to.
 		if existing, ok := commands[normalizedName]; ok {
-			return nil, nil, &DuplicateSkillNameError{Name: name, ExistingDir: existing.dir, DuplicateDir: dir}
+			t.skipped = append(t.skipped, &DuplicateSkillNameError{Name: name, ExistingDir: existing.dir, DuplicateDir: dir})
+			continue
 		}
 
 		commands[normalizedName] = entry
@@ -213,7 +235,10 @@ func (t *Tool) buildCatalog(skillsRootPath string) ([]catalogEntry, map[string]c
 		return strings.ToLower(entries[i].skill.Name) < strings.ToLower(entries[j].skill.Name)
 	})
 
-	return entries, commands, nil
+	t.catalog = entries
+	t.commands = commands
+
+	return nil
 }
 
 func (t *Tool) buildDescription() string {

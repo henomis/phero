@@ -50,6 +50,10 @@ func main() {
 		panic(err)
 	}
 
+	for _, skipped := range dispatcher.Skipped() {
+		fmt.Println("skill left out:", skipped)
+	}
+
 	a, err := agent.New(llmClient, "Agent", "An agent that helps create web pages and fetch random quotes")
 	if err != nil {
 		panic(err)
