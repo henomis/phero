@@ -52,10 +52,10 @@ func WithToolPrefix(prefix string) Option {
 	return func(s *Server) { s.toolPrefix = prefix }
 }
 
-// WithMaxResultChars caps the text of each tool result at n bytes, cut on a
-// character boundary and ended with a note, so one call cannot fill the
-// model's context. Images are kept. A value of 0 or less, the default, keeps
-// the whole text.
+// WithMaxResultChars caps the text of each tool result at n bytes, note
+// included: a longer text is cut on a character boundary and ended with a
+// note saying so, so one call cannot fill the model's context. Images are
+// kept. A value of 0 or less, the default, keeps the whole text.
 func WithMaxResultChars(n int) Option {
 	return func(s *Server) { s.maxResultChars = n }
 }
@@ -238,17 +238,23 @@ func callToolResultText(res *mcp.CallToolResult) string {
 }
 
 // cutText cuts text to at most maxChars bytes, without splitting a UTF-8
-// character, and ends it with a note giving the cap. A maxChars of 0 or less
-// keeps the whole text.
+// character, and ends it with a note giving the cap; the note counts toward
+// maxChars, and is left out when maxChars cannot hold it. A maxChars of 0 or
+// less keeps the whole text.
 func cutText(text string, maxChars int) string {
 	if maxChars <= 0 || len(text) <= maxChars {
 		return text
 	}
 
-	n := maxChars
+	note := fmt.Sprintf("\n[output cut at %d characters]", maxChars)
+	if len(note) >= maxChars {
+		note = ""
+	}
+
+	n := maxChars - len(note)
 	for n > 0 && !utf8.RuneStart(text[n]) {
 		n--
 	}
 
-	return text[:n] + fmt.Sprintf("\n[output cut at %d characters]", maxChars)
+	return text[:n] + note
 }

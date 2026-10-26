@@ -137,16 +137,26 @@ func TestAsTools_ToolPrefix(t *testing.T) {
 }
 
 func TestAsTools_MaxResultChars(t *testing.T) {
-	long := toolsByName(t, connectTestServer(t, WithMaxResultChars(11)))["long"]
+	for _, tt := range []struct {
+		max  int
+		want string
+	}{
+		// The 30-byte note fits in 51: 21 bytes are left for the text, ten
+		// two-byte characters, as the eleventh is not split.
+		{max: 51, want: strings.Repeat("é", 10) + "\n[output cut at 51 characters]"},
+		// 11 bytes cannot hold the note: the text alone, still not split.
+		{max: 11, want: strings.Repeat("é", 5)},
+	} {
+		long := toolsByName(t, connectTestServer(t, WithMaxResultChars(tt.max)))["long"]
 
-	out, err := long.Handle(context.Background(), "{}")
-	if err != nil {
-		t.Fatal(err)
-	}
+		out, err := long.Handle(context.Background(), "{}")
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	// 11 bytes hold five two-byte characters; the sixth is not split.
-	if want := strings.Repeat("é", 5) + "\n[output cut at 11 characters]"; out != want {
-		t.Fatalf("result = %q, want %q", out, want)
+		if s, _ := out.(string); s != tt.want || len(s) > tt.max {
+			t.Fatalf("max %d: result = %q (%d bytes), want %q", tt.max, s, len(s), tt.want)
+		}
 	}
 
 	whole, err := toolsByName(t, connectTestServer(t))["long"].Handle(context.Background(), "{}")
