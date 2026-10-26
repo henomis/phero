@@ -30,19 +30,11 @@ import (
 
 var _ memory.SnapshotStore = (*Memory)(nil)
 
-// fileVersion is the file format with a snapshot: an object holding the
-// messages, the absolute position of the first one, and the snapshot. A file
-// without a snapshot stays a plain JSON array of messages (version 1), which
-// older versions read.
+// fileVersion is the file format with a snapshot or metadata: an object
+// holding the messages, the absolute position of the first one, the snapshot
+// and the metadata. A file without them stays a plain JSON array of messages
+// (version 1), which older versions read.
 const fileVersion = 2
-
-// fileV2 is the version 2 file.
-type fileV2 struct {
-	Version  int              `json:"version"`
-	Offset   int              `json:"offset"`
-	Messages []llm.Message    `json:"messages"`
-	Snapshot *memory.Snapshot `json:"snapshot,omitempty"`
-}
 
 // Option configures a Memory instance.
 type Option func(*Memory)
@@ -63,6 +55,7 @@ type Memory struct {
 	offset   int
 	snapshot *memory.Snapshot
 	prune    bool
+	meta     map[string]string
 }
 
 // WithPruneCompacted drops the messages a snapshot stands for when it is
@@ -128,40 +121,56 @@ func (m *Memory) load() error {
 		return err
 	}
 
-	if bytes.HasPrefix(bytes.TrimSpace(data), []byte("{")) {
-		var f fileV2
-		if unmarshalErr := json.Unmarshal(data, &f); unmarshalErr != nil {
-			return unmarshalErr
-		}
-
-		if f.Version != fileVersion {
-			return fmt.Errorf("%w: %d", ErrUnknownFileVersion, f.Version)
-		}
-
-		m.messages, m.offset, m.snapshot = f.Messages, f.Offset, f.Snapshot
-
-		return nil
+	f, err := decodeFile[llm.Message](data)
+	if err != nil {
+		return err
 	}
 
-	var msgs []llm.Message
-	if unmarshalErr := json.Unmarshal(data, &msgs); unmarshalErr != nil {
-		return unmarshalErr
-	}
-
-	m.messages = msgs
+	m.messages, m.offset, m.snapshot, m.meta = f.Messages, f.Offset, f.Snapshot, f.Meta
 
 	return nil
+}
+
+// storedFile is the content of a memory file of either version, with its
+// messages decoded as M.
+type storedFile[M any] struct {
+	Version  int               `json:"version"`
+	Offset   int               `json:"offset"`
+	Messages []M               `json:"messages"`
+	Snapshot *memory.Snapshot  `json:"snapshot,omitempty"`
+	Meta     map[string]string `json:"meta,omitempty"`
+}
+
+// decodeFile decodes a memory file of either version.
+func decodeFile[M any](data []byte) (storedFile[M], error) {
+	var f storedFile[M]
+
+	if !bytes.HasPrefix(bytes.TrimSpace(data), []byte("{")) {
+		err := json.Unmarshal(data, &f.Messages)
+
+		return f, err
+	}
+
+	if err := json.Unmarshal(data, &f); err != nil {
+		return f, err
+	}
+
+	if f.Version != fileVersion {
+		return f, fmt.Errorf("%w: %d", ErrUnknownFileVersion, f.Version)
+	}
+
+	return f, nil
 }
 
 // encode returns the file contents: a plain array without a snapshot, the
 // version 2 object with one.
 func (m *Memory) encode() ([]byte, error) {
-	if m.snapshot == nil && m.offset == 0 {
+	if m.snapshot == nil && m.offset == 0 && len(m.meta) == 0 {
 		return json.MarshalIndent(m.messages, "", "  ")
 	}
 
-	return json.MarshalIndent(fileV2{
-		Version: fileVersion, Offset: m.offset, Messages: m.messages, Snapshot: m.snapshot,
+	return json.MarshalIndent(storedFile[llm.Message]{
+		Version: fileVersion, Offset: m.offset, Messages: m.messages, Snapshot: m.snapshot, Meta: m.meta,
 	}, "", "  ")
 }
 
@@ -332,7 +341,8 @@ func (m *Memory) SaveSnapshot(_ context.Context, s memory.Snapshot, upTo memory.
 	return nil
 }
 
-// Clear removes all messages from memory and truncates the file.
+// Clear removes all messages, the snapshot and the metadata from memory and
+// truncates the file.
 func (m *Memory) Clear(_ context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -340,6 +350,7 @@ func (m *Memory) Clear(_ context.Context) error {
 	m.messages = nil
 	m.offset = 0
 	m.snapshot = nil
+	m.meta = nil
 
 	return m.persist()
 }

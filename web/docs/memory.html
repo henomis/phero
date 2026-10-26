@@ -126,6 +126,27 @@ a.SetMemory(conversationMemory)</code></pre>
         then holds the messages and the snapshot (older versions of the file are still read), and
         <code>jsonfile.WithPruneCompacted(true)</code> rewrites it without the messages a snapshot covers.
       </p>
+
+      <p>
+        For an app that keeps one file per session, <code>SetMeta(key, value)</code> stores metadata in the file, such
+        as the session's title (an empty value removes the key; <code>Meta()</code> reads it back, and
+        <code>Clear</code> removes it). <code>jsonfile.Inspect(path)</code> reads a file without opening it as a memory,
+        to list sessions: the number of messages ever saved, when the file was last written, the first user message's
+        text, whether it holds a snapshot, and its metadata. With pruning, the first user message can be gone: keep
+        what must last in the metadata.
+      </p>
+
+      <pre><code class="language-go">_ = mem.SetMeta("title", "fix the failing test")
+
+files, _ := filepath.Glob(filepath.Join(sessionsDir, "*.json"))
+for _, f := range files {
+    info, err := memory.Inspect(f)
+    if err != nil {
+        continue // not a memory file
+    }
+    fmt.Printf("%s  %d messages  %s  %s\n", filepath.Base(f), info.Messages,
+        info.UpdatedAt.Format(time.DateTime), info.Meta["title"])
+}</code></pre>
     </section>
 
     <section>
