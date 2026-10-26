@@ -205,12 +205,13 @@ for _, h := range result.Handoffs {
     <section>
       <h2>Run result</h2>
       <p>
-        <code>Agent.Run</code> returns a <code>*Result</code> with three fields:
+        <code>Agent.Run</code> returns a <code>*Result</code> with four fields:
       </p>
       <ul>
         <li><code>Parts []llm.ContentPart</code>: the model's final response; call <code>result.TextContent()</code> to get the plain text</li>
         <li><code>Handoffs []Handoff</code>: the handoffs the model made, each with its target <code>Agent</code> and the <code>Context</code> passed to it; empty when there was no handoff, and more than one means fan-out</li>
         <li><code>Summary *trace.RunSummary</code>: aggregated observability data for the run (token usage, latency, tool call counts, etc.)</li>
+        <li><code>FinishReason llm.FinishReason</code>: why the last LLM call stopped; empty when the provider reports no reason</li>
       </ul>
 
       <pre><code class="language-go">result, err := a.Run(ctx, llm.Text(input))
@@ -224,6 +225,33 @@ if result.Summary != nil {
         result.Summary.Usage.InputTokens,
         result.Summary.Usage.OutputTokens)
     fmt.Printf("llm latency: %s\n", result.Summary.Latency.LLM)
+}</code></pre>
+    </section>
+
+    <section>
+      <h2>Truncated answers</h2>
+      <p>
+        A model that hits its output limit stops mid-answer, and the provider reports <code>llm.FinishLength</code>.
+      </p>
+      <ul>
+        <li><strong>With tool calls</strong>: the agent does not run them, because their arguments are probably cut
+          too (a large <code>write</code>, for example). Each call gets an error result,
+          <code>agent.TruncatedToolCallResult</code>, that asks the model to retry with smaller arguments, and the
+          loop goes on. Streaming still emits <code>EventToolCall</code> and <code>EventToolResult</code> for them.</li>
+        <li><strong>Without tool calls</strong>: the cut answer is returned as final, with
+          <code>Result.FinishReason == llm.FinishLength</code>. The app decides what to do, for example run again
+          with "continue".</li>
+      </ul>
+
+      <pre><code class="language-go">result, err := a.Run(ctx, llm.Text(input))
+if err != nil {
+    return err
+}
+
+if result.FinishReason == llm.FinishLength {
+    // The answer was cut off: ask the model to go on. This needs memory
+    // (SetMemory), so the next run sees the cut answer.
+    result, err = a.Run(ctx, llm.Text("Continue exactly where you stopped."))
 }</code></pre>
     </section>
 

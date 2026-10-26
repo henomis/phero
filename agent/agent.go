@@ -36,6 +36,12 @@ const maxToolNameLength = 64
 // with SetMaxIterations.
 const DefaultMaxIterations = 25
 
+// TruncatedToolCallResult is the error result given to each tool call of a
+// response cut off at the output limit. The calls are not run, because their
+// arguments are probably cut too.
+const TruncatedToolCallResult = "The call's arguments were cut off at the output limit and it was not run. " +
+	"Retry with smaller arguments, for example write the file in several edits."
+
 // Agent runs a chat loop using an llm.LLM, optionally with tools and memory.
 type Agent struct {
 	llm         llm.LLM
@@ -68,6 +74,10 @@ type Result struct {
 	// means fan-out. It is empty when the run did not end in a handoff.
 	Handoffs []Handoff
 	Summary  *trace.RunSummary
+	// FinishReason is why the last LLM call stopped. llm.FinishLength means
+	// the answer in Parts was cut off at the output limit; the app may ask the
+	// model to continue. It is empty when the provider reports no reason.
+	FinishReason llm.FinishReason
 }
 
 // Handoff is one handoff made by the model at the end of a run.
@@ -910,7 +920,7 @@ func (a *Agent) handleAgentIteration(
 
 	session = append(session, *msg.Message)
 
-	return a.processToolCalls(ctx, session, msg.Message, iteration, emit)
+	return a.processToolCalls(ctx, session, msg.Message, msg.FinishReason, iteration, emit)
 }
 
 // processToolCalls executes the tool calls in message (if any) concurrently,
@@ -918,13 +928,17 @@ func (a *Agent) handleAgentIteration(
 // non-nil it pushes the ToolCall events, in call order, before execution, and
 // each ToolResult event as soon as its call finishes, all on the single
 // calling goroutine.
+//
+// When the response was cut off at the output limit (finish is
+// llm.FinishLength), its tool calls are not run: their arguments are probably
+// cut too. Each gets an error result asking the model to retry.
 func (a *Agent) processToolCalls(
 	ctx context.Context, session []llm.Message, message *llm.Message,
-	iteration int, emit emitFunc,
+	finish llm.FinishReason, iteration int, emit emitFunc,
 ) (agentIteration, error) {
 	toolCalls := message.ToolCalls
 	if len(toolCalls) == 0 {
-		return agentIteration{session: session, result: &Result{Parts: message.Parts}}, nil
+		return agentIteration{session: session, result: &Result{Parts: message.Parts, FinishReason: finish}}, nil
 	}
 
 	if emit != nil {
@@ -937,6 +951,10 @@ func (a *Agent) processToolCalls(
 				Iteration:  iteration,
 			})
 		}
+	}
+
+	if finish == llm.FinishLength {
+		return agentIteration{session: append(session, truncatedToolResults(toolCalls, iteration, emit)...)}, nil
 	}
 
 	results, stops := a.runToolCalls(ctx, toolCalls, iteration, emit)
@@ -956,7 +974,7 @@ func (a *Agent) processToolCalls(
 	if stop := errors.Join(stops...); stop != nil {
 		return agentIteration{
 			session: session,
-			result:  &Result{Parts: nonBlankParts(textOnly(message.Parts))},
+			result:  &Result{Parts: nonBlankParts(textOnly(message.Parts)), FinishReason: finish},
 			stop:    stop,
 		}, nil
 	}
@@ -966,11 +984,42 @@ func (a *Agent) processToolCalls(
 		// model wrote alongside the handoff calls, not the handoff tools' replies.
 		return agentIteration{
 			session: session,
-			result:  &Result{Parts: nonBlankParts(textOnly(message.Parts)), Handoffs: handoffs},
+			result: &Result{
+				Parts: nonBlankParts(textOnly(message.Parts)), Handoffs: handoffs, FinishReason: finish,
+			},
 		}, nil
 	}
 
 	return agentIteration{session: session}, nil
+}
+
+// truncatedToolResults returns an error result for each tool call of a
+// response cut off at the output limit, without running the calls, and emits
+// their ToolResult events when emit is non-nil.
+func truncatedToolResults(toolCalls []llm.ToolCall, iteration int, emit emitFunc) []llm.Message {
+	results := make([]llm.Message, 0, len(toolCalls))
+
+	for _, tc := range toolCalls {
+		results = append(results, llm.Message{
+			Role:       llm.RoleTool,
+			Parts:      []llm.ContentPart{llm.Text(TruncatedToolCallResult)},
+			ToolCallID: tc.ID,
+			ToolError:  true,
+		})
+
+		if emit != nil {
+			emit(Event{
+				Type:       EventToolResult,
+				ToolCallID: tc.ID,
+				ToolName:   tc.Function.Name,
+				ToolResult: TruncatedToolCallResult,
+				ToolError:  true,
+				Iteration:  iteration,
+			})
+		}
+	}
+
+	return results
 }
 
 // handoffContext returns the context argument of a handoff tool call.
