@@ -238,6 +238,34 @@ func TestMiddleware_RequestReason(t *testing.T) {
 	}
 }
 
+func TestPolicy_AskRuleWinsOverAlways(t *testing.T) {
+	var reasons []permission.Reason
+
+	p := mustPolicy(t,
+		permission.WithAsk("bash(git push *)"),
+		permission.WithAsker(func(_ context.Context, req permission.Request) (permission.Answer, error) {
+			reasons = append(reasons, req.Reason)
+			return permission.AllowAlways, nil
+		}),
+	)
+
+	var runs atomic.Int32
+
+	tool := newBashTool(t, &runs)
+	p.Apply(tool)
+
+	for range 2 {
+		if _, err := tool.Handle(context.Background(), bashArgs("git push origin")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	want := []permission.Reason{permission.ReasonAskRule, permission.ReasonAskRule}
+	if !slices.Equal(reasons, want) {
+		t.Fatalf("reasons = %v, want %v (an ask rule asks every time, despite AllowAlways)", reasons, want)
+	}
+}
+
 func TestPolicy_AlwaysAndForget(t *testing.T) {
 	var asked atomic.Int32
 
