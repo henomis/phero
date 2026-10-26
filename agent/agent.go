@@ -226,6 +226,20 @@ func (a *Agent) AddHandoff(handoffAgent *Agent) error {
 	return nil
 }
 
+// SetLLM replaces the model the agent calls, keeping its tools, handoffs,
+// memory and every other setting, so the next run continues the same
+// conversation with another model. Call it between runs, not during one. It
+// returns ErrUndefinedLLM for a nil client.
+func (a *Agent) SetLLM(client llm.LLM) error {
+	if client == nil {
+		return ErrUndefinedLLM
+	}
+
+	a.llm = client
+
+	return nil
+}
+
 // SetMemory sets the memory used to seed the agent with previous messages.
 func (a *Agent) SetMemory(mem memory.Memory) {
 	a.memory = mem

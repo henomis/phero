@@ -379,9 +379,16 @@ a.SetMaxIterations(10)</code></pre>
     <section>
       <h2>Changing the prompt or the model</h2>
       <p>
-        An agent's system prompt, LLM and tools are set when it is built. To change them between turns, for example
-        to switch models or update the instructions, build a new agent and give it the same memory: the next run
-        loads the session from memory, so the conversation goes on.
+        To switch models between turns, call <code>SetLLM</code>: the agent keeps its tools, handoffs, memory and
+        settings, and the next run continues the same conversation with the new model. Call it between runs, not
+        during one.
+      </p>
+      <pre><code class="language-go">if err := a.SetLLM(otherLLM); err != nil {
+    return err
+}</code></pre>
+      <p>
+        The system prompt is set when the agent is built. To change it, build a new agent and give it the same
+        memory: the next run loads the session from memory, so the conversation goes on.
       </p>
       <pre><code class="language-go">next, err := agent.New(otherLLM, "coder", newPrompt)
 if err != nil {

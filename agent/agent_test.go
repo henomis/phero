@@ -289,6 +289,31 @@ func TestRun_Simple(t *testing.T) {
 	}
 }
 
+func TestSetLLM_NextRunUsesTheNewModel(t *testing.T) {
+	a := mustNew(t, makeStub(textResult("first"), nil), "agent", "desc")
+
+	if _, err := a.Run(context.Background(), llm.Text("hi")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.SetLLM(nil); !errors.Is(err, agent.ErrUndefinedLLM) {
+		t.Fatalf("SetLLM(nil) = %v, want ErrUndefinedLLM", err)
+	}
+
+	if err := a.SetLLM(makeStub(textResult("second"), nil)); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := a.Run(context.Background(), llm.Text("again"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.TextContent() != "second" {
+		t.Fatalf("reply = %q, want the new model's", result.TextContent())
+	}
+}
+
 func TestRun_LLMError(t *testing.T) {
 	stub := makeStub(nil, errors.New("model unavailable"))
 	a := mustNew(t, stub, "agent", "a helpful agent")
