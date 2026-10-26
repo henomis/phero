@@ -17,6 +17,8 @@ package mcp
 import (
 	"context"
 	"errors"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -50,6 +52,14 @@ func connectTestServer(t *testing.T, opts ...Option) *Server {
 		func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: strings.Repeat("é", 100)}}}, nil
 		})
+
+	// Names providers refuse: a dot, a clash once sanitized, too long.
+	for _, name := range []string{"files.read", "files_read", strings.Repeat("x", 70)} {
+		srv.AddTool(&mcp.Tool{Name: name, InputSchema: schema},
+			func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: req.Params.Name}}}, nil
+			})
+	}
 
 	serverT, clientT := mcp.NewInMemoryTransports()
 
@@ -142,5 +152,36 @@ func TestAsTools_MaxResultChars(t *testing.T) {
 	whole, err := toolsByName(t, connectTestServer(t))["long"].Handle(context.Background(), "{}")
 	if err != nil || whole != strings.Repeat("é", 100) {
 		t.Fatalf("without a cap: result = %q, %v; want the whole text", whole, err)
+	}
+}
+
+func TestAsTools_NamesProvidersAccept(t *testing.T) {
+	tools := toolsByName(t, connectTestServer(t))
+
+	long := strings.Repeat("x", 64)
+	for name, mcpName := range map[string]string{
+		"files_read": "files.read", "files_read_2": "files_read", long: strings.Repeat("x", 70),
+	} {
+		tool, ok := tools[name]
+		if !ok {
+			t.Fatalf("no tool %q in %v", name, slices.Collect(maps.Keys(tools)))
+		}
+
+		// The MCP server is still called with the tool's own name.
+		out, err := tool.Handle(context.Background(), "{}")
+		if err != nil || out != mcpName {
+			t.Fatalf("%s: result = %v, %v; want a call to %q", name, out, err, mcpName)
+		}
+	}
+}
+
+func TestUniqueToolName(t *testing.T) {
+	taken := map[string]bool{}
+	long := strings.Repeat("y", 64)
+
+	for _, want := range []string{long, long[:62] + "_2", long[:62] + "_3"} {
+		if got := uniqueToolName(long, taken); got != want {
+			t.Fatalf("uniqueToolName = %q, want %q", got, want)
+		}
 	}
 }
