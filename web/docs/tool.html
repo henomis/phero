@@ -150,7 +150,8 @@ if err := a.AddTool(readTool.Tool()); err != nil {
         <li><code>WithReadTracker(tracker)</code>: share a <code>file.NewReadTracker()</code> between the tools so that
           write, edit and multi_edit refuse to change an existing file the model has not read
           (<code>ErrFileNotRead</code>), or that changed on disk since it read it (<code>*ChangedError</code>).
-          New files need no read, and the tools' own changes count as seen</li>
+          New files need no read, and the tools' own changes count as seen. <code>tracker.Reset()</code> forgets every
+          read, for a new session that reuses the same tools</li>
         <li><code>WithNoOverwrite()</code>: configure write to return <code>ErrFileExists</code> when the target already exists</li>
         <li><code>WithMaxResults(n)</code>: how many paths <code>glob</code>, and entries <code>grep</code>, return at most
           (default <code>file.DefaultMaxResults</code>, 1000; 0 removes the cap). A cut result sets <code>Truncated</code></li>

@@ -42,6 +42,19 @@ func NewReadTracker() *ReadTracker {
 	return &ReadTracker{files: map[string]fileStamp{}}
 }
 
+// Reset forgets every file read so far, as for a new session whose model
+// has seen none of them. A nil tracker does nothing.
+func (t *ReadTracker) Reset() {
+	if t == nil {
+		return
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	clear(t.files)
+}
+
 // record notes the current version of path as seen. A nil tracker does
 // nothing.
 func (t *ReadTracker) record(path string) {

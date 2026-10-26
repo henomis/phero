@@ -120,6 +120,32 @@ func TestReadTracker_RequiresReadBeforeChange(t *testing.T) {
 	}
 }
 
+func TestReadTracker_Reset(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.go")
+	writeTree(t, root, map[string]string{"main.go": "a := 1\n"})
+
+	tracker := NewReadTracker()
+	opts := []Option{WithWorkingDirectory(root), WithReadTracker(tracker)}
+
+	read, _ := NewReadTool(opts...)
+	edit, _ := NewEditTool(opts...)
+	ctx := context.Background()
+
+	if _, err := read.read(ctx, &ReadInput{FilePath: path}); err != nil {
+		t.Fatal(err)
+	}
+
+	tracker.Reset()
+
+	if _, err := edit.edit(ctx, &EditInput{FilePath: path, OldString: "1", NewString: "2"}); !errors.Is(err, ErrFileNotRead) {
+		t.Fatalf("edit after Reset: err = %v, want ErrFileNotRead", err)
+	}
+
+	var nilTracker *ReadTracker
+	nilTracker.Reset()
+}
+
 func TestRead_DefaultMaxFileSize(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "big.bin")
