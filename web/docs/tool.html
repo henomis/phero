@@ -469,7 +469,22 @@ todoTool, err := list.Tool()
 if err != nil { panic(err) }
 
 if err := a.AddTool(todoTool); err != nil { panic(err) }</code></pre>
-      <p><code>list.Items()</code> returns the current items, for example to show them after the run.</p>
+      <p>
+        <code>list.Items()</code> returns the current items, for example to show them after the run. To resume a
+        session, save the items (they marshal to JSON) and start the next list with <code>todo.WithItems</code>:
+      </p>
+      <pre><code class="language-go">var saved []todo.Item
+if data, err := os.ReadFile(".phero/todo.json"); err == nil {
+    _ = json.Unmarshal(data, &saved)
+}
+
+list := todo.New(
+    todo.WithItems(saved), // must be valid items, as Items() returns
+    todo.WithOnChange(func(items []todo.Item) {
+        data, _ := json.Marshal(items)
+        _ = os.WriteFile(".phero/todo.json", data, 0o600)
+    }),
+)</code></pre>
     </section>
 
     <section>

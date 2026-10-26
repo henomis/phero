@@ -63,7 +63,15 @@ func WithOnChange(fn func([]Item)) Option {
 	return func(l *List) { l.onChange = fn }
 }
 
-// New returns an empty List.
+// WithItems starts the list with items, for example the Items saved at the
+// end of a previous session, so the agent picks up where it left off. The
+// items are not checked: they must be valid, as Items always returns. The
+// slice is copied.
+func WithItems(items []Item) Option {
+	return func(l *List) { l.items = slices.Clone(items) }
+}
+
+// New returns a List, empty unless WithItems is given.
 func New(opts ...Option) *List {
 	l := &List{}
 	for _, opt := range opts {

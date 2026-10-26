@@ -82,3 +82,23 @@ func TestTool_SchemaHasStatusEnum(t *testing.T) {
 		t.Fatalf("Handle: %v", err)
 	}
 }
+
+func TestWithItems_Restores(t *testing.T) {
+	saved := []Item{
+		{Content: "Read the failing test", Status: Completed},
+		{Content: "Fix the parser", Status: InProgress},
+	}
+
+	l := New(WithItems(saved))
+
+	if got, want := Render(l.Items()), Render(saved); got != want {
+		t.Fatalf("restored list = %q, want %q", got, want)
+	}
+
+	// The list keeps its own copy.
+	saved[0].Content = "changed"
+
+	if l.Items()[0].Content != "Read the failing test" {
+		t.Fatal("WithItems kept the caller's slice")
+	}
+}
