@@ -177,9 +177,11 @@ func parseGitignore(path string) []ignoreRule {
 // walkSearch walks the regular files under root for glob and grep. It skips
 // version control and dependency directories and, unless noIgnore, what the
 // .gitignore files ignore. With a working directory, a symlinked file whose
-// target is outside it is skipped.
-func walkSearch(root, workingDir string, noIgnore bool, fn func(path string, d fs.DirEntry) error) error {
-	w := &searchWalk{root: root, workingDir: workingDir, noIgnore: noIgnore}
+// target is outside it, and outside readRoots, is skipped.
+func walkSearch(
+	root, workingDir string, readRoots []string, noIgnore bool, fn func(path string, d fs.DirEntry) error,
+) error {
+	w := &searchWalk{root: root, workingDir: workingDir, readRoots: readRoots, noIgnore: noIgnore}
 	if !noIgnore {
 		w.ig = newIgnorer(root)
 	}
@@ -201,6 +203,7 @@ func walkSearch(root, workingDir string, noIgnore bool, fn func(path string, d f
 // searchWalk is the state of one walkSearch.
 type searchWalk struct {
 	root, workingDir string
+	readRoots        []string
 	noIgnore         bool
 	ig               *ignorer
 }
@@ -227,7 +230,7 @@ func (w *searchWalk) skipFile(path string, d fs.DirEntry) bool {
 	}
 
 	if d.Type()&fs.ModeSymlink != 0 && w.workingDir != "" {
-		if _, err := resolveToolPath(w.workingDir, path); err != nil {
+		if _, err := resolveReadPath(w.workingDir, w.readRoots, path); err != nil {
 			return true
 		}
 	}

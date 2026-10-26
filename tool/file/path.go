@@ -32,6 +32,24 @@ func ResolvePath(workingDir, path string) (string, error) {
 	return resolveToolPath(workingDir, path)
 }
 
+// resolveReadPath is resolveToolPath for the tools that only read: a path
+// outside the working directory is accepted when it lies inside one of
+// readRoots (see WithReadOnlyRoots).
+func resolveReadPath(workingDir string, readRoots []string, inputPath string) (string, error) {
+	resolved, err := resolveToolPath(workingDir, inputPath)
+	if !errors.Is(err, ErrPathOutsideWorkingDirectory) {
+		return resolved, err
+	}
+
+	for _, root := range readRoots {
+		if inRoot, rootErr := resolveToolPath(root, inputPath); rootErr == nil {
+			return inRoot, nil
+		}
+	}
+
+	return "", err
+}
+
 func resolveToolPath(workingDir, inputPath string) (string, error) {
 	path := filepath.Clean(inputPath)
 	if !filepath.IsAbs(path) {

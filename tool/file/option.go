@@ -14,6 +14,8 @@
 
 package file
 
+import "strings"
+
 type toolOptions struct {
 	workingDir  string
 	maxFileSize int64
@@ -23,6 +25,7 @@ type toolOptions struct {
 	noIgnore    bool
 	tracker     *ReadTracker
 	onWrite     WriteHook
+	readRoots   []string
 }
 
 // DefaultMaxFileSize is the read tool's size limit for a whole-file read
@@ -42,6 +45,23 @@ type Option func(*toolOptions)
 func WithWorkingDirectory(dir string) Option {
 	return func(o *toolOptions) {
 		o.workingDir = dir
+	}
+}
+
+// WithReadOnlyRoots lets the read, grep and glob tools also reach the files
+// under dirs, outside the working directory, such as the directories of the
+// user's skills, whose SKILL.md points to scripts and references. Paths are
+// checked after their symlinks are resolved, as for the working directory.
+// The write, edit and multi_edit tools ignore it: they stay confined to the
+// working directory. Without a working directory, every path is reachable and
+// it has no effect. Each call adds to the roots given before.
+func WithReadOnlyRoots(dirs ...string) Option {
+	return func(o *toolOptions) {
+		for _, dir := range dirs {
+			if strings.TrimSpace(dir) != "" {
+				o.readRoots = append(o.readRoots, dir)
+			}
+		}
 	}
 }
 

@@ -65,13 +65,17 @@ type GrepTool struct {
 	maxResults int
 	maxOutput  int
 	noIgnore   bool
+	readRoots  []string
 }
 
 // NewGrepTool creates a new grep tool.
 func NewGrepTool(opts ...Option) (*GrepTool, error) {
 	o := applyOptions(opts...)
 
-	g := &GrepTool{workingDir: o.workingDir, maxResults: o.maxResults, maxOutput: o.maxOutput, noIgnore: o.noIgnore}
+	g := &GrepTool{
+		workingDir: o.workingDir, maxResults: o.maxResults, maxOutput: o.maxOutput, noIgnore: o.noIgnore,
+		readRoots: o.readRoots,
+	}
 
 	tool, err := llm.NewTool(
 		"grep",
@@ -131,7 +135,7 @@ func (g *GrepTool) grep(_ context.Context, input *GrepInput) (*GrepOutput, error
 		return nil, err
 	}
 
-	root, err := resolveSearchRoot(g.workingDir, input.Path)
+	root, err := resolveSearchRootIn(g.workingDir, g.readRoots, input.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +150,7 @@ func (g *GrepTool) grep(_ context.Context, input *GrepInput) (*GrepOutput, error
 
 	files := make([]string, 0)
 
-	err = walkSearch(root, g.workingDir, g.noIgnore, func(path string, _ fs.DirEntry) error {
+	err = walkSearch(root, g.workingDir, g.readRoots, g.noIgnore, func(path string, _ fs.DirEntry) error {
 		if !matchType(path, input.Type) {
 			return nil
 		}

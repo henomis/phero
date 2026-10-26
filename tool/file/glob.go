@@ -46,13 +46,17 @@ type GlobTool struct {
 	maxResults int
 	maxOutput  int
 	noIgnore   bool
+	readRoots  []string
 }
 
 // NewGlobTool creates a new glob tool.
 func NewGlobTool(opts ...Option) (*GlobTool, error) {
 	o := applyOptions(opts...)
 
-	g := &GlobTool{workingDir: o.workingDir, maxResults: o.maxResults, maxOutput: o.maxOutput, noIgnore: o.noIgnore}
+	g := &GlobTool{
+		workingDir: o.workingDir, maxResults: o.maxResults, maxOutput: o.maxOutput, noIgnore: o.noIgnore,
+		readRoots: o.readRoots,
+	}
 
 	tool, err := llm.NewTool(
 		"glob",
@@ -88,7 +92,7 @@ func (g *GlobTool) glob(_ context.Context, input *GlobInput) (*GlobOutput, error
 		return nil, ErrPatternRequired
 	}
 
-	root, err := resolveSearchRoot(g.workingDir, input.Path)
+	root, err := resolveSearchRootIn(g.workingDir, g.readRoots, input.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +104,7 @@ func (g *GlobTool) glob(_ context.Context, input *GlobInput) (*GlobOutput, error
 
 	entries := make([]globEntry, 0)
 
-	err = walkSearch(root, g.workingDir, g.noIgnore, func(path string, d fs.DirEntry) error {
+	err = walkSearch(root, g.workingDir, g.readRoots, g.noIgnore, func(path string, d fs.DirEntry) error {
 		rel, relErr := normalizeRelativePath(root, path)
 		if relErr != nil {
 			return nil
