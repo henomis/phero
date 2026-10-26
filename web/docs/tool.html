@@ -572,7 +572,9 @@ policy.Apply(readTool.Tool(), bashTool.Tool(), editTool.Tool())</code></pre>
           the tool's handler decodes keys case-insensitively and keeps the last one, so the rules could otherwise see a
           different value from the one that runs.</li>
         <li>Questions come one at a time, even when the agent runs tool calls in parallel. <code>AllowAlways</code>
-          allows the same subject from then on. Without an <code>Asker</code>, calls that need asking are denied.</li>
+          allows the same subject from then on; <code>policy.Always()</code> lists those answers and
+          <code>policy.Forget(tool, subject)</code> drops one. Without an <code>Asker</code>, calls that need asking are
+          denied.</li>
         <li>A denied call returns a <code>*permission.DeniedError</code> (matches <code>permission.ErrDenied</code>),
           which the model sees as a failed tool call.</li>
         <li>The <code>Request</code> an <code>Asker</code> gets carries the model's tool call ID (<code>CallID</code>),

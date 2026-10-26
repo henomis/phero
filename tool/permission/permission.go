@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -297,6 +298,50 @@ func (p *Policy) AllowForRun(ctx context.Context, specs ...string) error {
 	return nil
 }
 
+// Remembered is a subject that an AllowAlways answer allows for a tool.
+type Remembered struct {
+	Tool    string
+	Subject string
+}
+
+// Always returns the subjects the AllowAlways answers allow, sorted by tool
+// and, for each tool, in the order they were allowed.
+func (p *Policy) Always() []Remembered {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	tools := slices.Sorted(maps.Keys(p.always))
+	out := make([]Remembered, 0, len(tools))
+
+	for _, tool := range tools {
+		for _, subject := range p.always[tool] {
+			out = append(out, Remembered{Tool: tool, Subject: subject})
+		}
+	}
+
+	return out
+}
+
+// Forget drops what an AllowAlways answer allowed for tool and subject, as
+// Always lists them, so the next such call is decided by the rules again. It
+// reports whether there was such an answer.
+func (p *Policy) Forget(tool, subject string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	i := slices.Index(p.always[tool], subject)
+	if i < 0 {
+		return false
+	}
+
+	p.always[tool] = slices.Delete(p.always[tool], i, i+1)
+	if len(p.always[tool]) == 0 {
+		delete(p.always, tool)
+	}
+
+	return true
+}
+
 // runRulesFor returns the allow rules of the run ctx belongs to. The caller
 // holds p.mu.
 func (p *Policy) runRulesFor(ctx context.Context) []rule {
@@ -403,7 +448,12 @@ func (p *Policy) check(ctx context.Context, tool, arguments string) error {
 
 	switch answer {
 	case AllowAlways:
-		p.always[tool] = append(p.always[tool], subjects...)
+		for _, s := range subjects {
+			if !slices.Contains(p.always[tool], s) {
+				p.always[tool] = append(p.always[tool], s)
+			}
+		}
+
 		return nil
 	case AllowOnce:
 		return nil

@@ -203,6 +203,47 @@ func TestMiddleware_RequestShowsTheCommandAndWhatAlwaysAllows(t *testing.T) {
 	}
 }
 
+func TestPolicy_AlwaysAndForget(t *testing.T) {
+	var asked atomic.Int32
+
+	p := mustPolicy(t, permission.WithAsker(func(context.Context, permission.Request) (permission.Answer, error) {
+		asked.Add(1)
+		return permission.AllowAlways, nil
+	}))
+
+	var runs atomic.Int32
+
+	tool := newBashTool(t, &runs)
+	p.Apply(tool)
+
+	for _, command := range []string{"make test && make lint", "make lint ; go vet ./..."} {
+		if _, err := tool.Handle(context.Background(), bashArgs(command)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	want := []permission.Remembered{
+		{Tool: "bash", Subject: "make test"},
+		{Tool: "bash", Subject: "make lint"},
+		{Tool: "bash", Subject: "go vet ./..."},
+	}
+	if got := p.Always(); !slices.Equal(got, want) {
+		t.Fatalf("Always = %v, want %v (each subject once)", got, want)
+	}
+
+	if !p.Forget("bash", "make lint") || p.Forget("bash", "make lint") {
+		t.Fatal("Forget should report true once, then false")
+	}
+
+	if _, err := tool.Handle(context.Background(), bashArgs("make lint")); err != nil {
+		t.Fatal(err)
+	}
+
+	if asked.Load() != 3 {
+		t.Fatalf("asked %d times, want 3 (make lint asked again after Forget)", asked.Load())
+	}
+}
+
 func TestMiddleware_NoAskerDenies(t *testing.T) {
 	var runs atomic.Int32
 
