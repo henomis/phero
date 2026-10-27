@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/henomis/phero/v2/internal/textcut"
 	"github.com/henomis/phero/v2/llm"
 )
 
@@ -37,8 +38,8 @@ const (
 	DefaultTimeout = 30 * time.Second
 	// DefaultMaxBytes is the most of a response body that is read.
 	DefaultMaxBytes = 5 << 20
-	// DefaultMaxChars is the most text the tool returns.
-	DefaultMaxChars = 50000
+	// DefaultMaxOutputChars is the most text the tool returns, in bytes.
+	DefaultMaxOutputChars = 50000
 
 	maxRedirects = 5
 
@@ -85,8 +86,10 @@ func WithMaxBytes(n int64) Option {
 	return func(f *Fetcher) { f.maxBytes = n }
 }
 
-// WithMaxChars caps the text returned; the default is DefaultMaxChars.
-func WithMaxChars(n int) Option {
+// WithMaxOutputChars caps the text returned at n bytes, cut on a character
+// boundary; the default is DefaultMaxOutputChars. A value of 0 or less
+// removes the cap.
+func WithMaxOutputChars(n int) Option {
 	return func(f *Fetcher) { f.maxChars = n }
 }
 
@@ -114,7 +117,7 @@ func WithPrivateNetworks(allowed bool) Option {
 
 // New returns a Fetcher.
 func New(opts ...Option) *Fetcher {
-	f := &Fetcher{timeout: DefaultTimeout, maxBytes: DefaultMaxBytes, maxChars: DefaultMaxChars}
+	f := &Fetcher{timeout: DefaultTimeout, maxBytes: DefaultMaxBytes, maxChars: DefaultMaxOutputChars}
 	for _, opt := range opts {
 		opt(f)
 	}
@@ -349,8 +352,8 @@ func (f *Fetcher) readResponse(resp *http.Response) (*Output, error) {
 		content = htmlToText(content, resp.Request.URL)
 	}
 
-	if runes := []rune(content); f.maxChars > 0 && len(runes) > f.maxChars {
-		content, truncated = string(runes[:f.maxChars]), true
+	if f.maxChars > 0 && len(content) > f.maxChars {
+		content, truncated = textcut.Head(content, f.maxChars), true
 	}
 
 	return &Output{

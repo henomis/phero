@@ -182,11 +182,11 @@ browser := mcp.New(playwrightSession, mcp.WithToolPrefix("browser_"))</code></pr
         <li>Image content, such as a Playwright screenshot, is passed to the model as an image part.</li>
         <li>A result with <code>IsError</code> set returns an <code>*mcp.ToolResultError</code> holding the result's
           text, so the agent reports a failed tool call to the model.</li>
-        <li><code>mcp.WithMaxResultChars(n)</code> caps the text of each result, error text included, at
+        <li><code>mcp.WithMaxOutputChars(n)</code> caps the text of each result, error text included, at
           <code>n</code> bytes, the closing <code>[output cut at n characters]</code> note included, so one call cannot fill a small
           context window. Images are kept. There is no cap by default.</li>
       </ul>
-      <pre><code class="language-go">server := mcp.New(session, mcp.WithMaxResultChars(30_000))</code></pre>
+      <pre><code class="language-go">server := mcp.New(session, mcp.WithMaxOutputChars(30_000))</code></pre>
     </section>
 
     <section>

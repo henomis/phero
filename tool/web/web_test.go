@@ -70,7 +70,7 @@ func TestFetch_TextTypesAndLimits(t *testing.T) {
 		}
 	})
 
-	f := New(WithPrivateNetworks(true), WithMaxChars(10))
+	f := New(WithPrivateNetworks(true), WithMaxOutputChars(10))
 	ctx := context.Background()
 
 	if out, err := f.fetch(ctx, &Input{URL: srv.URL + "/json"}); err != nil || out.Content != `{"ok":true}`[:10] || !out.Truncated {

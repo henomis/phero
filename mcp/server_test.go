@@ -136,7 +136,7 @@ func TestAsTools_ToolPrefix(t *testing.T) {
 	}
 }
 
-func TestAsTools_MaxResultChars(t *testing.T) {
+func TestAsTools_MaxOutputChars(t *testing.T) {
 	for _, tt := range []struct {
 		max  int
 		want string
@@ -147,7 +147,7 @@ func TestAsTools_MaxResultChars(t *testing.T) {
 		// 11 bytes cannot hold the note: the text alone, still not split.
 		{max: 11, want: strings.Repeat("é", 5)},
 	} {
-		long := toolsByName(t, connectTestServer(t, WithMaxResultChars(tt.max)))["long"]
+		long := toolsByName(t, connectTestServer(t, WithMaxOutputChars(tt.max)))["long"]
 
 		out, err := long.Handle(context.Background(), "{}")
 		if err != nil {

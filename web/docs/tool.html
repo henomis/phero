@@ -283,7 +283,7 @@ if err := a.AddTool(bashTool.KillTool());   err != nil { panic(err) }</code></pr
         <li><code>WithTimeout(d)</code>: fixed maximum execution time per command</li>
         <li><code>WithDefaultTimeout(d)</code>: timeout used when the LLM does not supply one in the request (default: 120 s)</li>
         <li><code>WithMaxTimeout(d)</code>: cap on the LLM-supplied per-request timeout value (default: 600 s)</li>
-        <li><code>WithMaxOutputChars(n)</code>: output truncation threshold (default: 30 000 bytes). Longer output
+        <li><code>WithMaxOutputChars(n)</code>: output truncation threshold (default <code>bash.DefaultMaxOutputChars</code>, 30,000 bytes). Longer output
           keeps its start and its end, where errors usually are, around a <code>[... N bytes truncated ...]</code>
           marker, without splitting a UTF-8 character</li>
         <li><code>WithBlocklist(patterns...)</code>: any command containing a pattern (case-insensitive) returns <code>ErrCommandBlocked</code></li>
@@ -513,7 +513,7 @@ if err := a.AddTool(dispatcher.Tool()); err != nil {
       <p>
         The <code>web_fetch</code> tool fetches a page and returns it as text: HTML becomes readable text with headings,
         lists and links (as <code>text [url]</code>), without script or style; other text and JSON come back as they
-        are; binary content is refused. Responses are capped (<code>WithMaxBytes</code>, <code>WithMaxChars</code>,
+        are; binary content is refused. Responses are capped (<code>WithMaxBytes</code>, <code>WithMaxOutputChars</code>,
         <code>WithTimeout</code>) and the result says when it was truncated.
       </p>
       <pre><code class="language-go">fetcher := web.New(web.WithAllowedHosts("go.dev", "*.go.dev", "github.com"))

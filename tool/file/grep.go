@@ -23,8 +23,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"unicode/utf8"
 
+	"github.com/henomis/phero/v2/internal/textcut"
 	"github.com/henomis/phero/v2/llm"
 )
 
@@ -360,24 +360,11 @@ func capEntries(entries []string, maxChars int) ([]string, bool) {
 		}
 
 		if i == 0 {
-			return []string{cutBytes(entry, maxChars)}, true
+			return []string{textcut.Head(entry, maxChars)}, true
 		}
 
 		return entries[:i], true
 	}
 
 	return entries, false
-}
-
-// cutBytes cuts s to at most n bytes without splitting a UTF-8 character.
-func cutBytes(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-
-	return s[:n]
 }

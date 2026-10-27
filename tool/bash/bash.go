@@ -97,10 +97,15 @@ const MaxTimeout = 600 * time.Second
 // keeps: older output is dropped. See WithMaxBackgroundOutput.
 const DefaultMaxBackgroundOutput = 1 << 20
 
-// MaxOutputChars is the maximum number of output bytes returned from a single
-// tool call before truncation. Truncated output keeps its start and its end,
-// where errors usually are, and marks the cut.
-const MaxOutputChars = 30000
+// DefaultMaxOutputChars is the most output, in bytes, a single tool call
+// returns unless WithMaxOutputChars sets another cap. Truncated output keeps
+// its start and its end, where errors usually are, and marks the cut.
+const DefaultMaxOutputChars = 30000
+
+// MaxOutputChars is DefaultMaxOutputChars.
+//
+// Deprecated: use DefaultMaxOutputChars.
+const MaxOutputChars = DefaultMaxOutputChars
 
 // waitDelay is how long a command killed at its timeout may keep its output
 // open (a child process still writing) before the pipes are closed, so the
@@ -185,7 +190,7 @@ func New(options ...Option) (*Tool, error) {
 	bashTool := &Tool{
 		defaultTimeout:      DefaultTimeout,
 		maxTimeout:          MaxTimeout,
-		maxOutputChars:      MaxOutputChars,
+		maxOutputChars:      DefaultMaxOutputChars,
 		maxBackgroundOutput: DefaultMaxBackgroundOutput,
 		runner:              LocalRunner{},
 		shell:               map[string]*backgroundShell{},
@@ -361,7 +366,8 @@ func WithMaxTimeout(d time.Duration) Option {
 	}
 }
 
-// WithMaxOutputChars sets the output truncation threshold.
+// WithMaxOutputChars sets how much output, in bytes, a call returns at most;
+// the default is DefaultMaxOutputChars.
 func WithMaxOutputChars(chars int) Option {
 	return func(t *Tool) {
 		t.maxOutputChars = chars

@@ -21,10 +21,10 @@ import (
 	"fmt"
 	"maps"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/henomis/phero/v2/internal/textcut"
 	"github.com/henomis/phero/v2/llm"
 )
 
@@ -51,11 +51,11 @@ func WithToolPrefix(prefix string) Option {
 	return func(s *Server) { s.toolPrefix = prefix }
 }
 
-// WithMaxResultChars caps the text of each tool result at n bytes, note
+// WithMaxOutputChars caps the text of each tool result at n bytes, note
 // included: a longer text is cut on a character boundary and ended with a
 // note saying so, so one call cannot fill the model's context. Images are
 // kept. A value of 0 or less, the default, keeps the whole text.
-func WithMaxResultChars(n int) Option {
+func WithMaxOutputChars(n int) Option {
 	return func(s *Server) { s.maxResultChars = n }
 }
 
@@ -247,10 +247,5 @@ func cutText(text string, maxChars int) string {
 		note = ""
 	}
 
-	n := maxChars - len(note)
-	for n > 0 && !utf8.RuneStart(text[n]) {
-		n--
-	}
-
-	return text[:n] + note
+	return textcut.Head(text, maxChars-len(note)) + note
 }
