@@ -40,7 +40,7 @@ func TestBashTool_EnvAllowlistAndExtraEnv(t *testing.T) {
 	requireBash(t)
 	t.Setenv("PHERO_TEST_SECRET", "s3cret")
 
-	tool, err := New(WithEnvAllowlist(DefaultEnvAllowlist...), WithEnv("PHERO_TEST_EXTRA=extra"))
+	tool, err := New(WithEnvAllowlist(DefaultEnvAllowlist()...), WithEnv("PHERO_TEST_EXTRA=extra"))
 	if err != nil {
 		t.Fatal(err)
 	}

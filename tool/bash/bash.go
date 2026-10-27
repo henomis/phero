@@ -274,7 +274,7 @@ func WithRunner(r Runner) Option {
 
 // WithEnvAllowlist limits the environment commands get to the variables
 // named, instead of the agent process's whole environment, which may hold
-// secrets such as API keys. DefaultEnvAllowlist is a sane choice.
+// secrets such as API keys. DefaultEnvAllowlist() is a sane choice.
 func WithEnvAllowlist(names ...string) Option {
 	return func(t *Tool) {
 		t.envAllowlist = append([]string{}, names...)

@@ -38,7 +38,7 @@ type RunOptions struct {
 	Dir string
 	// Env is the command's environment as KEY=VALUE entries; nil means the
 	// runner's default: the agent process's environment for LocalRunner,
-	// DefaultEnvAllowlist for BubblewrapRunner.
+	// DefaultEnvAllowlist() for BubblewrapRunner.
 	Env []string
 	// ExtraEnv holds KEY=VALUE entries (WithEnv) to add after Env, or after
 	// the runner's default when Env is nil. A Runner must apply them.
@@ -67,10 +67,14 @@ func (LocalRunner) Command(ctx context.Context, command string, opts RunOptions)
 	return cmd, nil
 }
 
-// DefaultEnvAllowlist is the environment a sandboxed command gets, and a sane
-// choice for WithEnvAllowlist: what common tools need, and no secrets.
-var DefaultEnvAllowlist = []string{
-	"PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TMPDIR", "TZ",
+// DefaultEnvAllowlist returns the environment a sandboxed command gets, and a
+// sane choice for WithEnvAllowlist: what common tools need, and no secrets.
+// Each call returns a new slice, so a caller cannot widen the default for
+// others.
+func DefaultEnvAllowlist() []string {
+	return []string{
+		"PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TMPDIR", "TZ",
+	}
 }
 
 // filterEnv returns the entries of environ whose name is in names.

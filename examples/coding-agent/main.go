@@ -281,7 +281,7 @@ func newBashTool(cfg config) (*bash.Tool, error) {
 		bash.WithPersistentShell(),
 		bash.WithMaxOutputChars(cfg.maxOutputChars()),
 		// Keep secrets such as OPENAI_API_KEY out of the commands' environment.
-		bash.WithEnvAllowlist(bash.DefaultEnvAllowlist...),
+		bash.WithEnvAllowlist(bash.DefaultEnvAllowlist()...),
 		bash.WithOutputHandler(func(_ context.Context, chunk []byte) {
 			// Show a long command's progress, dimmed, while it runs.
 			fmt.Fprintf(os.Stderr, "\x1b[2m%s\x1b[0m", chunk)

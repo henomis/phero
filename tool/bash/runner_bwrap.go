@@ -33,7 +33,7 @@ import (
 //     are the sandbox's own;
 //   - every namespace is unshared (no network unless WithNetwork(true), own
 //     PID namespace, so killing the command kills everything it started);
-//   - the environment is limited to DefaultEnvAllowlist unless the tool sets
+//   - the environment is limited to DefaultEnvAllowlist() unless the tool sets
 //     its own (WithEnvAllowlist); WithEnv entries are added to it.
 //
 // The rest of the host is not mounted, so host Unix sockets (docker.sock, the
@@ -206,7 +206,7 @@ func (r *BubblewrapRunner) Command(ctx context.Context, command string, opts Run
 
 	env := opts.Env
 	if env == nil {
-		env = filterEnv(os.Environ(), DefaultEnvAllowlist)
+		env = filterEnv(os.Environ(), DefaultEnvAllowlist())
 	}
 
 	env = append(slices.Clip(env), opts.ExtraEnv...)

@@ -292,10 +292,10 @@ if err := a.AddTool(bashTool.KillTool());   err != nil { panic(err) }</code></pr
         <li><code>WithRunner(r)</code>: how commands are launched; <code>bash.LocalRunner</code> (the default) runs
           them on the host, <code>bash.NewBubblewrapRunner</code> in a sandbox (below)</li>
         <li><code>WithEnvAllowlist(names...)</code>: pass only these environment variables to commands instead of the
-          whole process environment; <code>bash.DefaultEnvAllowlist</code> keeps what common tools need and no secrets</li>
+          whole process environment; <code>bash.DefaultEnvAllowlist()</code> keeps what common tools need and no secrets</li>
         <li><code>WithEnv(entries...)</code>: add <code>KEY=VALUE</code> entries to every command's environment. They
           are added to the allowlisted variables or, without an allowlist, to the runner's default: the whole
-          process environment for <code>LocalRunner</code>, <code>DefaultEnvAllowlist</code> in the sandbox. A custom
+          process environment for <code>LocalRunner</code>, <code>DefaultEnvAllowlist()</code> in the sandbox. A custom
           <code>Runner</code> gets them in <code>RunOptions.ExtraEnv</code> and must apply them</li>
         <li><code>WithPersistentShell()</code>: carry the working directory and exported variables from one command to
           the next, as in an interactive shell (after <code>cd sub</code>, the next command runs in <code>sub</code>).
@@ -331,7 +331,7 @@ if err := a.AddTool(bashTool.KillTool());   err != nil { panic(err) }</code></pr
         from the caller's terminal. There is no network by default; <code>WithNetwork(true)</code> shares the host's
         network namespace, so commands also reach every service on localhost (a Docker TCP socket, databases, a local
         LLM server) and abstract Unix sockets such as X11's. The environment is limited to
-        <code>DefaultEnvAllowlist</code>, and the sandbox has its own PID namespace, so a timeout kills everything a
+        <code>DefaultEnvAllowlist()</code>, and the sandbox has its own PID namespace, so a timeout kills everything a
         command started.
       </p>
       <pre><code class="language-go">runner, err := bash.NewBubblewrapRunner(repoDir,
@@ -398,8 +398,8 @@ bashTool, err := bash.New(bash.WithRunner(runner), bash.WithWorkingDirectory(rep
         <li><strong>The sandbox is the boundary.</strong> <code>LocalRunner</code>, the default, has no isolation.
           <code>NewBubblewrapRunner</code> is Linux-only. <code>WithNetwork(true)</code> shares the host network,
           localhost services included.</li>
-        <li><strong>Keep secrets out of commands.</strong> The sandbox passes only <code>DefaultEnvAllowlist</code>
-          by default. With <code>LocalRunner</code>, set <code>bash.WithEnvAllowlist(bash.DefaultEnvAllowlist...)</code>:
+        <li><strong>Keep secrets out of commands.</strong> The sandbox passes only <code>DefaultEnvAllowlist()</code>
+          by default. With <code>LocalRunner</code>, set <code>bash.WithEnvAllowlist(bash.DefaultEnvAllowlist()...)</code>:
           without it, commands get the agent's whole environment, API keys included.</li>
         <li><strong>The file tools run outside the sandbox.</strong> Confine them with
           <code>file.WithWorkingDirectory</code>; without it they reach any path the process can.</li>

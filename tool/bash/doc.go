@@ -31,7 +31,7 @@
 //     cuts the network (WithNetwork(true) shares the host's, localhost
 //     services included) and limits the environment. For stronger isolation, write a
 //     Runner that runs commands in a container or a VM.
-//   - Limit the environment with WithEnvAllowlist(DefaultEnvAllowlist...)
+//   - Limit the environment with WithEnvAllowlist(DefaultEnvAllowlist()...)
 //     so API keys and tokens do not reach the commands.
 //   - Run the agent process under a dedicated low-privilege OS user.
 //   - Restrict the working directory via WithWorkingDirectory.

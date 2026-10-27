@@ -42,7 +42,7 @@ func TestBash_StreamsInRunStream(t *testing.T) {
 
 	bashTool, err := bash.New(
 		bash.WithWorkingDirectory(t.TempDir()),
-		bash.WithEnvAllowlist(bash.DefaultEnvAllowlist...),
+		bash.WithEnvAllowlist(bash.DefaultEnvAllowlist()...),
 		bash.WithOutputHandler(func(ctx context.Context, _ []byte) {
 			if _, ok := llm.ToolCallFromContext(ctx); !ok {
 				t.Error("output handler: no tool call in context")
