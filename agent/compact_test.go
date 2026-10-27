@@ -250,7 +250,7 @@ func TestSummaryCompactor_KeepsByTokens(t *testing.T) {
 		t.Fatalf("Compact = %+v, %v", out, err)
 	}
 
-	if got := agent.EstimateTokens(out.Kept); got > 5_000 || len(out.Kept) == 0 {
+	if got := llm.EstimateTokens(out.Kept); got > 5_000 || len(out.Kept) == 0 {
 		t.Fatalf("kept %d messages of about %d tokens, want some within the 5000 budget", len(out.Kept), got)
 	}
 
@@ -804,19 +804,6 @@ func TestRun_CompactsBeforeTheFirstCallOnEstimate(t *testing.T) {
 		if tc.compactions > 0 && !isSummary(client.prompts[0][1], "compacted") {
 			t.Errorf("%s: first prompt = %+v, want the compacted session", tc.name, client.prompts[0])
 		}
-	}
-}
-
-func TestEstimateTokens(t *testing.T) {
-	msgs := []llm.Message{
-		llm.UserMessage(llm.Text(strings.Repeat("a", 400))),
-		llm.AssistantMessage(nil, llm.ToolCall{ID: "c", Function: llm.FunctionCall{Name: "echo", Arguments: strings.Repeat("b", 40)}}),
-		llm.ToolResultMessage("c", llm.Text(strings.Repeat("c", 80))),
-	}
-
-	// 400/4 + 40/4 + 80/4 = 130, plus an overhead per message.
-	if got := agent.EstimateTokens(msgs); got < 130 || got > 160 {
-		t.Fatalf("EstimateTokens = %d, want about 130 plus overhead", got)
 	}
 }
 

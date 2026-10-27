@@ -25,7 +25,6 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/henomis/phero/v2/agent"
 	"github.com/henomis/phero/v2/llm"
 )
 
@@ -78,7 +77,7 @@ func New(session *mcp.ClientSession, opts ...Option) *Server {
 //
 // The optional filter can be used to include/exclude tools by name; it gets
 // the MCP tool's own name. Each tool's name, with the prefix, is made one
-// providers accept (agent.SanitizeToolName: [a-zA-Z0-9_-], at most 64
+// providers accept (llm.SanitizeToolName: [a-zA-Z0-9_-], at most 64
 // characters); when two names become the same, the later gets a numbered
 // suffix. The MCP server is still called with the tool's own name.
 func (s *Server) AsTools(ctx context.Context, filter ToolFilter) ([]*llm.Tool, error) {
@@ -103,7 +102,7 @@ func (s *Server) AsTools(ctx context.Context, filter ToolFilter) ([]*llm.Tool, e
 		toolName := tool.Name
 
 		newTool, newToolErr := llm.NewRawTool(
-			uniqueToolName(agent.SanitizeToolName(s.toolPrefix+toolName), taken),
+			uniqueToolName(llm.SanitizeToolName(s.toolPrefix+toolName), taken),
 			tool.Description,
 			schema,
 			func(ctx context.Context, arguments string) (any, error) {
@@ -149,16 +148,13 @@ func uniqueToolName(name string, taken map[string]bool) string {
 	unique := name
 	for n := 2; taken[unique]; n++ {
 		suffix := fmt.Sprintf("_%d", n)
-		unique = name[:min(len(name), maxToolNameLength-len(suffix))] + suffix
+		unique = name[:min(len(name), llm.MaxToolNameLength-len(suffix))] + suffix
 	}
 
 	taken[unique] = true
 
 	return unique
 }
-
-// maxToolNameLength is the longest tool name providers accept.
-const maxToolNameLength = 64
 
 // normalizeMCPInputSchema validates and clones the raw InputSchema value from an MCP
 // tool into a normalized map[string]any ready for the LLM layer.

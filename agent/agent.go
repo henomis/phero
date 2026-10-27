@@ -29,18 +29,16 @@ import (
 	"github.com/henomis/phero/v2/trace"
 )
 
-const maxToolNameLength = 64
-
 // DefaultMaxIterations is the iteration limit of an agent created by New.
 // It suits short tool-using tasks; a long-running agent, such as a coding
 // agent that reads, edits and tests over many turns, needs a higher limit set
 // with SetMaxIterations.
 const DefaultMaxIterations = 25
 
-// TruncatedToolCallResult is the error result given to each tool call of a
+// truncatedToolCallResult is the error result given to each tool call of a
 // response cut off at the output limit. The calls are not run, because their
 // arguments are probably cut too.
-const TruncatedToolCallResult = "The call's arguments were cut off at the output limit and it was not run. " +
+const truncatedToolCallResult = "The call's arguments were cut off at the output limit and it was not run. " +
 	"Retry with smaller arguments, for example write the file in several edits."
 
 // Agent runs a chat loop using an llm.LLM, optionally with tools and memory.
@@ -312,7 +310,7 @@ func (a *Agent) SetResponseFormat(format *llm.ResponseFormat) {
 //     as the provider reported them, reached atTokens; 0 disables this check.
 //     Before any size is reported (the first call of a run, after a
 //     compaction, or with a provider that reports no usage), the session is
-//     estimated with EstimateTokens, so a long stored history is compacted
+//     estimated with llm.EstimateTokens, so a long stored history is compacted
 //     before it is sent;
 //   - when a call fails with llm.ErrContextLengthExceeded: the session is
 //     compacted and the call made again, once. A second such error in a row
@@ -410,7 +408,7 @@ func (a *Agent) compactIfNeeded(
 	// with a recognizable context-length error.
 	tokens := rs.contextTokens
 	if tokens == 0 {
-		tokens = EstimateTokens(*session)
+		tokens = llm.EstimateTokens(*session)
 	}
 
 	if tokens < a.compactAtTokens {
@@ -423,7 +421,7 @@ func (a *Agent) compactIfNeeded(
 	// compacting again would cost a summary call on every iteration for
 	// nothing. A prompt that then overflows is still compacted once on the
 	// context-length error.
-	if EstimateTokens((*session)[rs.tailStart():]) < a.keepTokens() {
+	if llm.EstimateTokens((*session)[rs.tailStart():]) < a.keepTokens() {
 		return nil
 	}
 
@@ -491,7 +489,7 @@ func (a *Agent) compactAfterError(
 func (a *Agent) compactSession(
 	ctx context.Context, rs *runState, session []llm.Message, sessionIndex int, trigger CompactionTrigger, next int,
 ) ([]llm.Message, int, error) {
-	before := CompactionInfo{Trigger: trigger, TokensBefore: EstimateTokens(session), MessagesBefore: len(session)}
+	before := CompactionInfo{Trigger: trigger, TokensBefore: llm.EstimateTokens(session), MessagesBefore: len(session)}
 	if rs.emit != nil {
 		rs.emit(Event{Type: EventCompactionStart, Compaction: &before, Iteration: next})
 	}
@@ -500,7 +498,7 @@ func (a *Agent) compactSession(
 
 	if rs.emit != nil {
 		after := before
-		after.TokensAfter, after.MessagesAfter = EstimateTokens(newSession), len(newSession)
+		after.TokensAfter, after.MessagesAfter = llm.EstimateTokens(newSession), len(newSession)
 		after.Compacted, after.Err = compacted, err
 		rs.emit(Event{Type: EventCompactionEnd, Compaction: &after, Iteration: next})
 	}
@@ -729,7 +727,7 @@ type runState struct {
 	stored *memory.Snapshot
 	// contextTokens estimates the tokens of the next prompt: the previous
 	// call's prompt and output tokens, as the provider reported them. It is 0
-	// when unknown, as after a compaction, and EstimateTokens is used then.
+	// when unknown, as after a compaction, and llm.EstimateTokens is used then.
 	contextTokens int
 	// compactedOnError is set when the session was compacted after a
 	// context-length error, so a second such error in a row ends the run.
@@ -1114,7 +1112,7 @@ func truncatedToolResults(toolCalls []llm.ToolCall, iteration int, emit emitFunc
 	for _, tc := range toolCalls {
 		results = append(results, llm.Message{
 			Role:       llm.RoleTool,
-			Parts:      []llm.ContentPart{llm.Text(TruncatedToolCallResult)},
+			Parts:      []llm.ContentPart{llm.Text(truncatedToolCallResult)},
 			ToolCallID: tc.ID,
 			ToolError:  true,
 		})
@@ -1124,7 +1122,7 @@ func truncatedToolResults(toolCalls []llm.ToolCall, iteration int, emit emitFunc
 				Type:       EventToolResult,
 				ToolCallID: tc.ID,
 				ToolName:   tc.Function.Name,
-				ToolResult: TruncatedToolCallResult,
+				ToolResult: truncatedToolCallResult,
 				ToolError:  true,
 				Iteration:  iteration,
 			})
@@ -1519,25 +1517,12 @@ func (a *Agent) AsTool(toolName, toolDescription string) (*llm.Tool, error) {
 	)
 }
 
-// SanitizeToolName maps any string to one accepted by LLM providers.
-// Only [a-zA-Z0-9_-] are kept (all others become '_'); capped at 64 chars;
-// empty result falls back to "agent".
+// SanitizeToolName maps any string to one accepted by LLM providers, as
+// llm.SanitizeToolName does; an empty name becomes "agent".
 func SanitizeToolName(name string) string {
-	s := strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-			(r >= '0' && r <= '9') || r == '_' || r == '-' {
-			return r
-		}
-
-		return '_'
-	}, name)
-	if len(s) > maxToolNameLength {
-		s = s[:maxToolNameLength]
+	if s := llm.SanitizeToolName(name); s != "" {
+		return s
 	}
 
-	if s == "" {
-		s = "agent"
-	}
-
-	return s
+	return "agent"
 }

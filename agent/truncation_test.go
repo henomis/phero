@@ -16,6 +16,7 @@ package agent_test
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -79,8 +80,8 @@ func checkTruncatedRetry(t *testing.T, seen [][]llm.Message, ran int32) {
 		t.Fatalf("last message = %+v, want an error result for c1", last)
 	}
 
-	if got := llm.TextContent(last.Parts...); got != agent.TruncatedToolCallResult {
-		t.Fatalf("result = %q, want %q", got, agent.TruncatedToolCallResult)
+	if got := llm.TextContent(last.Parts...); !strings.Contains(got, "cut off at the output limit") {
+		t.Fatalf("result = %q, want the truncation error", got)
 	}
 }
 

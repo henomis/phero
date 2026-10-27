@@ -30,7 +30,7 @@ import (
 const DefaultKeepRecent = 20
 
 // DefaultKeepTokens bounds the messages a SummaryCompactor keeps, in
-// estimated tokens (EstimateTokens), when neither WithSummaryKeepTokens nor the
+// estimated tokens (llm.EstimateTokens), when neither WithSummaryKeepTokens nor the
 // CompactInput gives a budget.
 const DefaultKeepTokens = 20_000
 
@@ -98,7 +98,7 @@ func (t CompactionTrigger) String() string {
 
 // CompactionInfo describes a compaction of a running agent's session, in an
 // EventCompactionStart or EventCompactionEnd. Token counts are estimated with
-// EstimateTokens, so the sizes before and after compare. The session counts
+// llm.EstimateTokens, so the sizes before and after compare. The session counts
 // every message, the system prompt and the summary included.
 type CompactionInfo struct {
 	// Trigger says why the session is compacted.
@@ -363,7 +363,7 @@ func (c *SummaryCompactor) keepFrom(in CompactInput) int {
 	}
 
 	start := max(len(in.Messages)-c.keepRecent, 0)
-	for start < len(in.Messages) && EstimateTokens(clipToolResults(in.Messages[start:])) > budget {
+	for start < len(in.Messages) && llm.EstimateTokens(clipToolResults(in.Messages[start:])) > budget {
 		start++
 	}
 
@@ -421,38 +421,4 @@ func lastUserMessage(messages []llm.Message) (llm.Message, bool) {
 	}
 
 	return llm.Message{}, false
-}
-
-// Constants of EstimateTokens.
-const (
-	charsPerToken         = 4
-	messageOverheadTokens = 4
-	imageTokens           = 1000
-)
-
-// EstimateTokens returns a rough count of the tokens messages take in a
-// prompt: about four characters per token of text, reasoning and tool call
-// arguments, a few tokens per message, and a flat count per image. The agent
-// uses it to decide on compaction before the provider has reported a prompt
-// size: at the start of a run, after a compaction, or when the provider
-// reports no usage.
-func EstimateTokens(messages []llm.Message) int {
-	chars, images := 0, 0
-
-	for _, m := range messages {
-		for _, p := range m.Parts {
-			if p.Type == llm.ContentTypeImageURL || p.Type == llm.ContentTypeImageBase64 {
-				images++
-				continue
-			}
-
-			chars += len(p.Text)
-		}
-
-		for _, tc := range m.ToolCalls {
-			chars += len(tc.Function.Name) + len(tc.Function.Arguments)
-		}
-	}
-
-	return chars/charsPerToken + len(messages)*messageOverheadTokens + images*imageTokens
 }

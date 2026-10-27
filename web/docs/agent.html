@@ -235,8 +235,7 @@ if result.Summary != nil {
       </p>
       <ul>
         <li><strong>With tool calls</strong>: the agent does not run them, because their arguments are probably cut
-          too (a large <code>write</code>, for example). Each call gets an error result,
-          <code>agent.TruncatedToolCallResult</code>, that asks the model to retry with smaller arguments, and the
+          too (a large <code>write</code>, for example). Each call gets an error result that asks the model to retry with smaller arguments, and the
           loop goes on. Streaming still emits <code>EventToolCall</code> and <code>EventToolResult</code> for them.</li>
         <li><strong>Without tool calls</strong>: the cut answer is returned as final, with
           <code>Result.FinishReason == llm.FinishLength</code>. The app decides what to do, for example run again
@@ -422,7 +421,7 @@ a.SetCompaction(agent.NewSummaryCompactor(cheapLLM, agent.WithSummaryKeepRecent(
         <li>Before an LLM call, once the previous call's prompt and output tokens reached the threshold (here
           150k), the session is handed to the compactor. Pass 0 to skip this check. Before the provider has reported
           a size (the first call of a run, after a compaction, or with no usage at all), the session is estimated with
-          <code>agent.EstimateTokens</code> (about four characters per token), so a long history loaded from memory
+          <code>llm.EstimateTokens</code> (about four characters per token), so a long history loaded from memory
           is compacted before it is sent.</li>
         <li>When a call fails with <code>llm.ErrContextLengthExceeded</code>, the session is compacted and the call
           made again, once. A second such error in a row ends the run.</li>
