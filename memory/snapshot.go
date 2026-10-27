@@ -74,13 +74,3 @@ func SummaryMessages(s Snapshot) []llm.Message {
 
 	return append(out, s.Pinned...)
 }
-
-// SameSnapshot reports whether a and b are the same stored snapshot, as
-// SaveSnapshot compares prev: both nil, or both saved up to the same cursor.
-func SameSnapshot(a, b *Snapshot) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-
-	return a.UpTo == b.UpTo
-}

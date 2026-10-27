@@ -94,9 +94,8 @@ err = store.SaveSnapshot(ctx, memory.Snapshot{Summary: text}, tail[len(tail)-5].
           the latest snapshot is no longer <code>prev</code>, and with <code>memory.ErrInvalidCursor</code> for a
           cursor that does not move past it.</li>
         <li>The summary is sent as a user message (<code>memory.SummaryMessages</code>), not a system message, so it
-          keeps its place in the conversation. <code>memory.FormatSnapshotPrompt</code> updates the previous summary
-          with the new messages, in fixed sections: task, decisions and facts, files and commands, user preferences,
-          open items.</li>
+          keeps its place in the conversation. The agent's <code>SummaryCompactor</code> updates the previous summary
+          with the new messages (see the agent docs).</li>
         <li>The messages a snapshot covers are kept by default; <code>WithPruneCompacted(true)</code> (simple, jsonfile,
           psql) drops them; <code>memory/nats</code> drops them by default, as a session must fit in one NATS
           message. Snapshots can't be combined with a backend's own <code>WithSummarization</code>, which rewrites the log
@@ -160,7 +159,7 @@ for _, f := range files {
       <pre><code class="language-go">conversationMemory := memory.New(200)
 
 a.SetMemory(conversationMemory)
-a.SetCompaction(agent.NewSummaryCompactor(llmClient, agent.WithKeepRecent(20)), 150_000)</code></pre>
+a.SetCompaction(agent.NewSummaryCompactor(llmClient, agent.WithSummaryKeepRecent(20)), 150_000)</code></pre>
 
       <p>
         <strong>Deprecated:</strong> the backends' own <code>WithSummarization(llm, threshold, size)</code> still works

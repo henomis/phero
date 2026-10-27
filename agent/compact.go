@@ -18,24 +18,26 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
+	"github.com/henomis/phero/v2/internal/summary"
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/memory"
 )
 
 // DefaultKeepRecent is the number of most recent messages a SummaryCompactor
-// keeps whole when no WithKeepRecent option is given.
+// keeps whole when no WithSummaryKeepRecent option is given.
 const DefaultKeepRecent = 20
 
 // DefaultKeepTokens bounds the messages a SummaryCompactor keeps, in
-// estimated tokens (EstimateTokens), when neither WithKeepTokens nor the
+// estimated tokens (EstimateTokens), when neither WithSummaryKeepTokens nor the
 // CompactInput gives a budget.
 const DefaultKeepTokens = 20_000
 
-// DefaultKeptToolResultChars is how long a tool result kept after a summary
-// can be: a longer one is cut to its start and end, so a few large results
-// cannot keep the session over the limit by themselves.
-const DefaultKeptToolResultChars = 8_000
+// keptToolResultChars is how long a tool result kept after a summary can be:
+// a longer one is cut to its start and end, so a few large results cannot
+// keep the session over the limit by themselves.
+const keptToolResultChars = 8_000
 
 // CompactInput is what a Compactor compacts.
 type CompactInput struct {
@@ -169,32 +171,44 @@ type SummaryCompactor struct {
 	keepRecent    int
 	keepTokens    int
 	summaryTokens int
+	instructions  string
 }
 
 // SummaryCompactorOption configures a SummaryCompactor.
 type SummaryCompactorOption func(*SummaryCompactor)
 
-// WithKeepRecent sets how many of the most recent messages are kept whole,
-// at most. The default is DefaultKeepRecent.
-func WithKeepRecent(n int) SummaryCompactorOption {
+// WithSummaryKeepRecent sets how many of the most recent messages are kept
+// whole, at most. The default is DefaultKeepRecent.
+func WithSummaryKeepRecent(n int) SummaryCompactorOption {
 	return func(c *SummaryCompactor) { c.keepRecent = max(n, 0) }
 }
 
-// WithKeepTokens bounds the kept messages in estimated tokens, overriding the
-// agent's budget (CompactInput.KeepTokens). Without either, the bound is
-// DefaultKeepTokens.
-func WithKeepTokens(n int) SummaryCompactorOption {
+// WithSummaryKeepTokens bounds the kept messages in estimated tokens,
+// overriding the agent's budget (CompactInput.KeepTokens). Without either,
+// the bound is DefaultKeepTokens.
+func WithSummaryKeepTokens(n int) SummaryCompactorOption {
 	return func(c *SummaryCompactor) { c.keepTokens = max(n, 0) }
 }
 
-// WithMaxSummaryTokens bounds the summary: the prompt asks for at most n
+// WithSummaryMaxTokens bounds the summary: the prompt asks for at most n
 // tokens, and the call's output limit (llm.WithMaxOutputTokens) is half as
 // much again, so a summary a little over the budget is not cut. A summary cut
 // at that limit anyway is dropped, and the summary is asked for once more
 // without the limit: a long summary is better than one that stops halfway.
 // The default, 0, sets no bound.
-func WithMaxSummaryTokens(n int) SummaryCompactorOption {
+func WithSummaryMaxTokens(n int) SummaryCompactorOption {
 	return func(c *SummaryCompactor) { c.summaryTokens = max(n, 0) }
+}
+
+// WithSummaryPrompt replaces the instructions the summary is asked with: what
+// the summary is for, its sections and its style, for example sections that
+// fit a coding agent or a support chat. The compactor adds the previous
+// summary and the conversation after them, with each tool call and result.
+// The default asks for a domain-neutral summary of an agent's work, in fixed
+// sections: task, decisions and facts, work done, user preferences, open
+// items. An empty instructions keeps the default.
+func WithSummaryPrompt(instructions string) SummaryCompactorOption {
+	return func(c *SummaryCompactor) { c.instructions = instructions }
 }
 
 // NewSummaryCompactor returns a SummaryCompactor that writes its summaries
@@ -210,12 +224,12 @@ func NewSummaryCompactor(summaryLLM llm.LLM, opts ...SummaryCompactorOption) *Su
 
 // Compact summarizes all but the most recent messages: at most keepRecent of
 // them, fewer when they pass the token budget, with long tool results cut to
-// DefaultKeptToolResultChars. The split never separates a tool call from its
+// keptToolResultChars. The split never separates a tool call from its
 // results (see memory.SplitPoint).
 //
-// The summary updates the previous snapshot's (memory.FormatSnapshotPrompt),
-// and lists tool calls and results, so it records the files touched, the
-// commands run and what is left to do. The task stays verbatim: when the kept
+// The summary updates the previous snapshot's, from a prompt that lists tool
+// calls and results (see WithSummaryPrompt), so it records what the agent did
+// and what is left to do. The task stays verbatim: when the kept
 // messages hold no user message, the latest summarized one, or else the
 // previous snapshot's pinned messages, are pinned to the snapshot.
 //
@@ -254,9 +268,9 @@ func (c *SummaryCompactor) Compact(ctx context.Context, in CompactInput) (*Compa
 }
 
 // summarize asks the LLM for the summary that updates previous with older,
-// within the summary budget when there is one (see WithMaxSummaryTokens).
+// within the summary budget when there is one (see WithSummaryMaxTokens).
 func (c *SummaryCompactor) summarize(ctx context.Context, previous string, older []llm.Message) (string, error) {
-	prompt := memory.FormatSnapshotPrompt(previous, older)
+	prompt := c.prompt(previous, older)
 
 	var opts []llm.CallOption
 
@@ -282,6 +296,53 @@ func (c *SummaryCompactor) summarize(ctx context.Context, previous string, older
 
 	return res.Message.TextContent(), nil
 }
+
+// prompt builds the request that updates previous, the summary of an earlier
+// snapshot (empty for none), with conversation.
+func (c *SummaryCompactor) prompt(previous string, conversation []llm.Message) llm.Message {
+	instructions := c.instructions
+	if strings.TrimSpace(instructions) == "" {
+		instructions = defaultSummaryInstructions
+	}
+
+	if strings.TrimSpace(previous) == "" {
+		previous = "(none)"
+	}
+
+	return llm.UserMessage(llm.Text(fmt.Sprintf("%s\n\n# PREVIOUS SUMMARY\n%s\n\n# NEW CONVERSATION\n%s",
+		strings.TrimSpace(instructions), previous, summary.Conversation(conversation))))
+}
+
+// defaultSummaryInstructions are the summary prompt's instructions unless
+// WithSummaryPrompt replaces them.
+const defaultSummaryInstructions = `# Role
+You maintain the working memory of an AI agent in the middle of a long task. Write an updated
+summary that lets the agent continue without the messages it replaces.
+
+# Task
+Update the previous summary (if any) with the new conversation below. Keep everything from the
+previous summary that is still true; replace what changed. Use exactly these sections:
+
+## Task
+The user's goal and the current sub-task, in their words where it matters.
+
+## Decisions and facts
+Decisions taken and why, constraints, and facts learned.
+
+## Work done
+Actions taken and their outcome: the tool calls that mattered and what they used or changed,
+errors met and whether they were resolved.
+
+## User preferences
+Explicit or implicit preferences about the work and the answers.
+
+## Open items / next steps
+What is left to do, pending questions, and the next step the agent was about to take.
+
+# Constraints
+- Be dense and factual. Use Markdown bullet points under each section.
+- No filler such as "The user and the assistant discussed".
+- If something changed, record only its latest state.`
 
 // summaryBudgetPrompt asks for a summary within a budget, in tokens and words.
 const summaryBudgetPrompt = `
@@ -310,7 +371,7 @@ func (c *SummaryCompactor) keepFrom(in CompactInput) int {
 }
 
 // clipToolResults returns messages with each tool result's text cut to
-// DefaultKeptToolResultChars, keeping its start and end.
+// keptToolResultChars, keeping its start and end.
 func clipToolResults(messages []llm.Message) []llm.Message {
 	out := make([]llm.Message, len(messages))
 
@@ -323,7 +384,7 @@ func clipToolResults(messages []llm.Message) []llm.Message {
 		out[i].Parts = make([]llm.ContentPart, len(m.Parts))
 		for j, p := range m.Parts {
 			if p.Type == llm.ContentTypeText {
-				p.Text = clipMiddle(p.Text, DefaultKeptToolResultChars)
+				p.Text = clipMiddle(p.Text, keptToolResultChars)
 			}
 
 			out[i].Parts[j] = p

@@ -109,7 +109,7 @@ func TestAgent_LongRunCompaction(t *testing.T) {
 
 	var compactions atomic.Int32
 
-	summarizer := agent.NewSummaryCompactor(client, agent.WithKeepRecent(6))
+	summarizer := agent.NewSummaryCompactor(client, agent.WithSummaryKeepRecent(6))
 	a.SetCompaction(agent.CompactorFunc(func(ctx context.Context, in agent.CompactInput) (*agent.Compaction, error) {
 		compactions.Add(1)
 		t.Logf("compacting %d messages (highest chunk %d)", len(in.Messages), highest.Load())

@@ -69,7 +69,7 @@ func main() {
 	// Compaction summarizes the older history into a snapshot the memory
 	// keeps: later turns start from the summary and the recent messages.
 	if *enableCompaction {
-		a.SetCompaction(agent.NewSummaryCompactor(llmClient, agent.WithKeepRecent(*keepRecent)), *compactAt)
+		a.SetCompaction(agent.NewSummaryCompactor(llmClient, agent.WithSummaryKeepRecent(*keepRecent)), *compactAt)
 	}
 
 	// Add helpful tools

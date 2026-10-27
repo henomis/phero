@@ -69,7 +69,7 @@ func View(messages []llm.Message, offset int, snapshot memory.Snapshot) []llm.Me
 // (memory.ErrSnapshotConflict), and upTo must name a message saved so far
 // and move past current's (memory.ErrInvalidCursor).
 func Cutoff(current, prev *memory.Snapshot, upTo memory.Cursor, next int) (int, error) {
-	if !memory.SameSnapshot(current, prev) {
+	if !Same(current, prev) {
 		return 0, memory.ErrSnapshotConflict
 	}
 
@@ -100,4 +100,14 @@ func Position(c memory.Cursor) (int, error) {
 	}
 
 	return pos, nil
+}
+
+// Same reports whether a and b are the same stored snapshot, as SaveSnapshot
+// compares prev: both nil, or both saved up to the same cursor.
+func Same(a, b *memory.Snapshot) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+
+	return a.UpTo == b.UpTo
 }

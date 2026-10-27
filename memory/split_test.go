@@ -57,18 +57,6 @@ func TestSplitPoint(t *testing.T) {
 	}
 }
 
-func TestTrimOrphanToolResults(t *testing.T) {
-	msgs := toolSession()
-
-	if got := memory.TrimOrphanToolResults(msgs[2:]); len(got) != 1 || got[0].Role != llm.RoleAssistant {
-		t.Fatalf("got %+v, want only the final assistant message", got)
-	}
-
-	if got := memory.TrimOrphanToolResults(msgs); len(got) != len(msgs) {
-		t.Fatalf("trimmed a slice without orphans: %d messages", len(got))
-	}
-}
-
 func TestFormatSummaryPrompt_IncludesToolCalls(t *testing.T) {
 	prompt := memory.FormatSummaryPrompt(toolSession()).TextContent()
 

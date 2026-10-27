@@ -16,8 +16,8 @@ package memory
 
 import (
 	"fmt"
-	"strings"
 
+	"github.com/henomis/phero/v2/internal/summary"
 	"github.com/henomis/phero/v2/llm"
 )
 
@@ -53,12 +53,6 @@ run, errors met.
 const (
 	SummarySystemMessagePrefix = "Summary of previous conversation:\n"
 	summaryDefaultHalve        = 2
-
-	// summaryToolArgsLimit and summaryToolTextLimit cap, in runes, the
-	// arguments of a tool call and the text of a tool result in the summary
-	// prompt.
-	summaryToolArgsLimit = 500
-	summaryToolTextLimit = 4000
 )
 
 // ClampSummarySize validates and normalises a (summarizeThreshold, summarySize)
@@ -95,99 +89,5 @@ func ClampSummarySize(summarizeThreshold, summarySize uint) uint {
 // text, both cut to a few hundred or thousand characters, so the summary can
 // record what the agent did and not only what it said.
 func FormatSummaryPrompt(conversation []llm.Message) llm.Message {
-	return llm.UserMessage(llm.Text(fmt.Sprintf(summaryPrompt, formatConversation(conversation))))
-}
-
-//nolint:misspell // accepted as is
-const snapshotPrompt = `# Role
-You maintain the working memory of an AI agent in the middle of a long task. Write an updated
-summary that lets the agent continue the task without the messages it replaces.
-
-# Task
-Update the previous summary (if any) with the new conversation below. Keep everything from the
-previous summary that is still true; replace what changed. Use exactly these sections:
-
-## Task
-The user's goal and the current sub-task, in their words where it matters.
-
-## Decisions and facts
-Decisions taken and why, constraints, and facts learned (APIs, versions, configuration).
-
-## Files and commands
-Files read, created or changed (with what changed), commands run and their outcome, errors met
-and whether they were fixed.
-
-## User preferences
-Explicit or implicit preferences about the work and the answers.
-
-## Open items / next steps
-What is left to do, pending questions, and the next step the agent was about to take.
-
-# Constraints
-- Be dense and factual. Use Markdown bullet points under each section.
-- No filler such as "The user and the assistant discussed".
-- If something changed, record only its latest state.
-
-# PREVIOUS SUMMARY
-%s
-
-# NEW CONVERSATION
-%s`
-
-// FormatSnapshotPrompt builds the request that updates previous, the summary
-// of an earlier snapshot (empty for none), with conversation, the messages the
-// new snapshot will also stand for. It formats conversation as
-// FormatSummaryPrompt does, and asks for fixed sections: task, decisions and
-// facts, files and commands, user preferences, open items.
-func FormatSnapshotPrompt(previous string, conversation []llm.Message) llm.Message {
-	if strings.TrimSpace(previous) == "" {
-		previous = "(none)"
-	}
-
-	return llm.UserMessage(llm.Text(fmt.Sprintf(snapshotPrompt, previous, formatConversation(conversation))))
-}
-
-// formatConversation renders messages for a summary prompt: each message's
-// role and text, tool results with their status and call ID, and tool calls
-// with their arguments, cut to a few hundred or thousand characters.
-func formatConversation(conversation []llm.Message) string {
-	var formatted strings.Builder
-
-	for _, msg := range conversation {
-		text := msg.TextContent()
-
-		formatted.WriteString("## " + msg.Role)
-
-		if msg.Role == llm.RoleTool {
-			status := "result"
-			if msg.ToolError {
-				status = "error"
-			}
-
-			formatted.WriteString(" " + status + " (call " + msg.ToolCallID + ")")
-
-			text = clip(text, summaryToolTextLimit)
-		}
-
-		formatted.WriteString("\n" + text + "\n")
-
-		for _, tc := range msg.ToolCalls {
-			formatted.WriteString("- tool call " + tc.ID + ": " + tc.Function.Name + "(" +
-				clip(tc.Function.Arguments, summaryToolArgsLimit) + ")\n")
-		}
-
-		formatted.WriteString("\n")
-	}
-
-	return formatted.String()
-}
-
-// clip returns s cut to at most limit runes, marking the cut.
-func clip(s string, limit int) string {
-	runes := []rune(s)
-	if len(runes) <= limit {
-		return s
-	}
-
-	return string(runes[:limit]) + " […]"
+	return llm.UserMessage(llm.Text(fmt.Sprintf(summaryPrompt, summary.Conversation(conversation))))
 }

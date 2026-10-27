@@ -416,7 +416,7 @@ a = next</code></pre>
       </p>
 
       <pre><code class="language-go">// Summarize with a cheaper model; keep the last 20 messages whole.
-a.SetCompaction(agent.NewSummaryCompactor(cheapLLM, agent.WithKeepRecent(20)), 150_000)</code></pre>
+a.SetCompaction(agent.NewSummaryCompactor(cheapLLM, agent.WithSummaryKeepRecent(20)), 150_000)</code></pre>
 
       <ul>
         <li>Before an LLM call, once the previous call's prompt and output tokens reached the threshold (here
@@ -431,12 +431,13 @@ a.SetCompaction(agent.NewSummaryCompactor(cheapLLM, agent.WithKeepRecent(20)), 1
           a system message into the system prompt), the pinned task, and the kept messages. A later compaction
           updates that summary instead of summarizing it again.</li>
         <li><code>NewSummaryCompactor</code> writes the summary from a prompt that lists tool calls and results, in
-          fixed sections (task, decisions, files and commands, preferences, open items). It keeps at most
-          <code>WithKeepRecent</code> messages, fewer when they pass a token budget (a quarter of the threshold, or
-          <code>WithKeepTokens</code>), and cuts kept tool results longer than
-          <code>agent.DefaultKeptToolResultChars</code>. It never separates a tool call from its results, and it
+          fixed, domain-neutral sections (task, decisions and facts, work done, preferences, open items).
+          <code>WithSummaryPrompt(instructions)</code> replaces those instructions, for example with sections that fit
+          a coding agent or a support chat; the previous summary and the conversation are added after them. It keeps at most
+          <code>WithSummaryKeepRecent</code> messages, fewer when they pass a token budget (a quarter of the threshold, or
+          <code>WithSummaryKeepTokens</code>), and cuts kept tool results longer than 8,000 characters. It never separates a tool call from its results, and it
           pins the latest user request word for word, so the task is not lost.
-          <code>WithMaxSummaryTokens(n)</code> bounds the summary, for small context windows: the prompt asks for at
+          <code>WithSummaryMaxTokens(n)</code> bounds the summary, for small context windows: the prompt asks for at
           most <code>n</code> tokens and the call's output limit is <code>1.5 × n</code>. A summary cut at that limit is
           dropped and asked for again without it.</li>
         <li>Any <code>agent.Compactor</code> (or <code>agent.CompactorFunc</code>) can replace it. It gets an

@@ -85,7 +85,7 @@ func assertValidConversation(t *testing.T, msgs []llm.Message) {
 
 func TestSummaryCompactor_KeepsRecentAndTask(t *testing.T) {
 	sum := &summaryLLM{}
-	c := agent.NewSummaryCompactor(sum, agent.WithKeepRecent(3))
+	c := agent.NewSummaryCompactor(sum, agent.WithSummaryKeepRecent(3))
 
 	in := agent.CompactInput{Messages: toolSession(5)}
 
@@ -141,7 +141,7 @@ func (l *limitLLM) Execute(_ context.Context, msgs []llm.Message, opts ...llm.Ca
 
 func TestSummaryCompactor_MaxSummaryTokens(t *testing.T) {
 	l := &limitLLM{}
-	c := agent.NewSummaryCompactor(l, agent.WithKeepRecent(2), agent.WithMaxSummaryTokens(400))
+	c := agent.NewSummaryCompactor(l, agent.WithSummaryKeepRecent(2), agent.WithSummaryMaxTokens(400))
 
 	out, err := c.Compact(context.Background(), agent.CompactInput{Messages: toolSession(4)})
 	if err != nil || out == nil || out.Snapshot.Summary != "summary" {
@@ -154,7 +154,7 @@ func TestSummaryCompactor_MaxSummaryTokens(t *testing.T) {
 
 	// Without the option, the call has no limit and the prompt no budget.
 	l = &limitLLM{}
-	if _, err = agent.NewSummaryCompactor(l, agent.WithKeepRecent(2)).Compact(
+	if _, err = agent.NewSummaryCompactor(l, agent.WithSummaryKeepRecent(2)).Compact(
 		context.Background(), agent.CompactInput{Messages: toolSession(4)}); err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestSummaryCompactor_MaxSummaryTokens(t *testing.T) {
 
 func TestSummaryCompactor_CutSummaryIsAskedAgain(t *testing.T) {
 	l := &limitLLM{cut: true}
-	c := agent.NewSummaryCompactor(l, agent.WithKeepRecent(2), agent.WithMaxSummaryTokens(400))
+	c := agent.NewSummaryCompactor(l, agent.WithSummaryKeepRecent(2), agent.WithSummaryMaxTokens(400))
 
 	out, err := c.Compact(context.Background(), agent.CompactInput{Messages: toolSession(4)})
 	if err != nil || out == nil {
@@ -179,9 +179,41 @@ func TestSummaryCompactor_CutSummaryIsAskedAgain(t *testing.T) {
 	}
 }
 
+func TestSummaryCompactor_Prompt(t *testing.T) {
+	sum := &summaryLLM{}
+	previous := &memory.Snapshot{Summary: "- earlier: read the repo"}
+
+	if _, err := agent.NewSummaryCompactor(sum, agent.WithSummaryKeepRecent(2)).Compact(
+		context.Background(), agent.CompactInput{Previous: previous, Messages: toolSession(4)}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{
+		"- earlier: read the repo",                // the previous summary is updated, not lost
+		"tool call a: bash(", "go test", "FAIL a", // tool work is listed
+		"## Task", "## Decisions and facts", "## Work done", "## User preferences", "## Open items",
+	} {
+		if !strings.Contains(sum.prompts[0], want) {
+			t.Errorf("default prompt lacks %q", want)
+		}
+	}
+
+	sum = &summaryLLM{}
+	if _, err := agent.NewSummaryCompactor(sum, agent.WithSummaryKeepRecent(2), agent.WithSummaryPrompt("# Support chat\nSummarize the ticket.")).Compact(
+		context.Background(), agent.CompactInput{Messages: toolSession(4)}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := sum.prompts[0]
+	if !strings.HasPrefix(got, "# Support chat\nSummarize the ticket.") || strings.Contains(got, "## Work done") ||
+		!strings.Contains(got, "# PREVIOUS SUMMARY\n(none)") || !strings.Contains(got, "FAIL a") {
+		t.Fatalf("prompt = %q, want the custom instructions, then no previous summary and the conversation", got)
+	}
+}
+
 func TestSummaryCompactor_UpdatesThePreviousSnapshot(t *testing.T) {
 	sum := &summaryLLM{}
-	c := agent.NewSummaryCompactor(sum, agent.WithKeepRecent(2))
+	c := agent.NewSummaryCompactor(sum, agent.WithSummaryKeepRecent(2))
 
 	task := llm.UserMessage(llm.Text("the original task"))
 	previous := &memory.Snapshot{Summary: "- earlier work", Pinned: []llm.Message{task}}
@@ -203,7 +235,7 @@ func TestSummaryCompactor_UpdatesThePreviousSnapshot(t *testing.T) {
 
 func TestSummaryCompactor_KeepsByTokens(t *testing.T) {
 	sum := &summaryLLM{}
-	c := agent.NewSummaryCompactor(sum, agent.WithKeepRecent(20))
+	c := agent.NewSummaryCompactor(sum, agent.WithSummaryKeepRecent(20))
 
 	// Tool results of 40k characters: 20 messages would keep about 100k tokens.
 	msgs := toolSession(10)
@@ -223,7 +255,7 @@ func TestSummaryCompactor_KeepsByTokens(t *testing.T) {
 	}
 
 	for _, m := range out.Kept {
-		if m.Role == llm.RoleTool && len(m.TextContent()) > agent.DefaultKeptToolResultChars+100 {
+		if m.Role == llm.RoleTool && len(m.TextContent()) > 8_000+100 {
 			t.Fatalf("kept tool result of %d characters, want it cut", len(m.TextContent()))
 		}
 	}
@@ -234,7 +266,7 @@ func TestSummaryCompactor_KeepsByTokens(t *testing.T) {
 func TestSummaryCompactor_NothingToSummarize(t *testing.T) {
 	sum := &summaryLLM{}
 
-	out, err := agent.NewSummaryCompactor(sum, agent.WithKeepRecent(10)).Compact(context.Background(), agent.CompactInput{Messages: toolSession(1)})
+	out, err := agent.NewSummaryCompactor(sum, agent.WithSummaryKeepRecent(10)).Compact(context.Background(), agent.CompactInput{Messages: toolSession(1)})
 	if err != nil || out != nil || len(sum.prompts) != 0 {
 		t.Fatalf("out = %+v, err = %v, prompts = %d; want nothing to compact", out, err, len(sum.prompts))
 	}
@@ -243,7 +275,7 @@ func TestSummaryCompactor_NothingToSummarize(t *testing.T) {
 func TestSummaryCompactor_ErrorIsCompactionError(t *testing.T) {
 	cause := errors.New("summary model down")
 
-	_, err := agent.NewSummaryCompactor(&summaryLLM{err: cause}, agent.WithKeepRecent(1)).Compact(context.Background(), agent.CompactInput{Messages: toolSession(3)})
+	_, err := agent.NewSummaryCompactor(&summaryLLM{err: cause}, agent.WithSummaryKeepRecent(1)).Compact(context.Background(), agent.CompactInput{Messages: toolSession(3)})
 
 	var cErr *agent.CompactionError
 	if !errors.As(err, &cErr) || !errors.Is(err, cause) {
@@ -505,7 +537,7 @@ func TestRun_CompactionErrorEndsRun(t *testing.T) {
 	addEchoTool(t, a)
 
 	cause := errors.New("summary model down")
-	a.SetCompaction(agent.NewSummaryCompactor(&summaryLLM{err: cause}, agent.WithKeepRecent(1)), 1000)
+	a.SetCompaction(agent.NewSummaryCompactor(&summaryLLM{err: cause}, agent.WithSummaryKeepRecent(1)), 1000)
 
 	_, err := a.Run(context.Background(), llm.Text("go"))
 
@@ -624,7 +656,7 @@ func TestRunStream_CompactionEventCarriesTheError(t *testing.T) {
 	addEchoTool(t, a)
 
 	cause := errors.New("summary model down")
-	a.SetCompaction(agent.NewSummaryCompactor(&summaryLLM{err: cause}, agent.WithKeepRecent(1)), 1000)
+	a.SetCompaction(agent.NewSummaryCompactor(&summaryLLM{err: cause}, agent.WithSummaryKeepRecent(1)), 1000)
 
 	events, err := compactionEvents(a)
 	if !errors.Is(err, cause) {
@@ -938,7 +970,7 @@ func TestRun_SnapshotsUnsupportedFallsBack(t *testing.T) {
 }
 
 func TestRun_SnapshotsStoredAfterClippedToolResults(t *testing.T) {
-	// Tool results longer than DefaultKeptToolResultChars are clipped in the
+	// Tool results longer than 8,000 characters are clipped in the
 	// kept messages; later compactions of the run must still be stored.
 	big := strings.Repeat("y", 20_000)
 
@@ -957,7 +989,7 @@ func TestRun_SnapshotsStoredAfterClippedToolResults(t *testing.T) {
 
 	store := simple.New(100)
 	a.SetMemory(store)
-	a.SetCompaction(agent.NewSummaryCompactor(&summaryLLM{}, agent.WithKeepRecent(2), agent.WithKeepTokens(100_000)), 1000)
+	a.SetCompaction(agent.NewSummaryCompactor(&summaryLLM{}, agent.WithSummaryKeepRecent(2), agent.WithSummaryKeepTokens(100_000)), 1000)
 
 	if _, err := a.Run(context.Background(), llm.Text("go")); err != nil {
 		t.Fatal(err)

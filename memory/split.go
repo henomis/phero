@@ -32,11 +32,3 @@ func SplitPoint(messages []llm.Message, i int) int {
 
 	return i
 }
-
-// TrimOrphanToolResults returns messages without its leading tool results,
-// which answer tool calls no longer in the slice, for example after the
-// oldest messages were evicted. messages is returned as is when it does not
-// start with one.
-func TrimOrphanToolResults(messages []llm.Message) []llm.Message {
-	return messages[SplitPoint(messages, 0):]
-}

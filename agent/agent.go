@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/henomis/phero/v2/internal/snaplog"
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/memory"
 	"github.com/henomis/phero/v2/trace"
@@ -615,7 +616,7 @@ func snapshotCursor(
 		return "", err
 	}
 
-	if !memory.SameSnapshot(current, rs.stored) {
+	if !snaplog.Same(current, rs.stored) {
 		return "", memory.ErrSnapshotConflict
 	}
 
@@ -647,7 +648,7 @@ func snapshotCursor(
 
 // alignedWithLog reports whether logged holds msgs, one for one. A tool
 // result is matched by its call ID, not its text: a compaction may have
-// clipped the session's copy (DefaultKeptToolResultChars), while the log keeps
+// clipped the session's copy (keptToolResultChars), while the log keeps
 // the original.
 func alignedWithLog(logged []memory.LoggedMessage, msgs []llm.Message) bool {
 	for i, m := range msgs {

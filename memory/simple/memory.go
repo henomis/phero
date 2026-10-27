@@ -122,7 +122,8 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 	if m.needSummarization() {
 		// Summarize the oldest summarySize messages, moved past tool results
 		// so none is kept without its tool call.
-		toSummarize := memory.TrimOrphanToolResults(m.buffer.Get())
+		buffered := m.buffer.Get()
+		toSummarize := buffered[memory.SplitPoint(buffered, 0):]
 		split := memory.SplitPoint(toSummarize, int(m.summarySize))
 		toAppend := toSummarize[split:]
 		toSummarize = toSummarize[:split]
@@ -155,7 +156,9 @@ func (m *Memory) Retrieve(_ context.Context, _ string) ([]llm.Message, error) {
 	defer m.mu.Unlock()
 
 	if m.snapshot == nil || m.llm != nil {
-		return memory.TrimOrphanToolResults(m.buffer.Get()), nil
+		buffered := m.buffer.Get()
+
+		return buffered[memory.SplitPoint(buffered, 0):], nil
 	}
 
 	msgs := m.buffer.Get()
