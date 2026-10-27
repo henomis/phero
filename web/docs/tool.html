@@ -135,6 +135,9 @@ if err := a.AddTool(readTool.Tool()); err != nil {
         <code>read</code> returns plain <code>cat -n</code> text (a 6-wide line number, a tab, then the line), not JSON.
         Tabs and quotes reach the model as they are in the file, so it can copy them into an edit's
         <code>old_string</code>. <code>file.ReadOutput</code> is deprecated since v2.3.0.
+        <strong>Migrating from v2.2:</strong> code that calls the read tool's handler directly and decoded its JSON
+        (<code>file.ReadOutput</code>) now gets a string: the numbered lines, followed by a note when the read was cut
+        or paged.
       </p>
 
       <p>Available options:</p>
@@ -642,6 +645,9 @@ policy.Apply(readTool.Tool(), bashTool.Tool(), editTool.Tool())</code></pre>
           working directory.</li>
         <li><code>WithSubject(tool, argument)</code> sets the subject argument of other tools, such as an MCP tool's URL.
           A subject argument named <code>file_path</code> or <code>path</code> is matched as a file path.</li>
+        <li>The policy knows the built-in tools by name. Only a tool named <code>bash</code> has its command line parsed
+          into commands; a shell tool under another name is matched on its whole argument, unparsed, so give it rules
+          for whole command lines, or keep the name <code>bash</code>.</li>
       </ul>
     </section>
 

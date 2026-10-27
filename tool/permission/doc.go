@@ -32,6 +32,12 @@
 // named file_path or path is a file path, for any tool. A rule with no
 // pattern matches every call of its tool.
 //
+// The Policy knows the built-in tools by name: only a tool named bash has its
+// command line parsed into commands, and only the built-in names get a
+// subject without WithSubject. A shell tool under another name is matched on
+// its whole subject argument, unparsed, so give it rules for whole command
+// lines, or keep the name bash.
+//
 // File paths, in subjects and in rule patterns, are matched as the file tools
 // open them: cleaned, made absolute against the working directory
 // (WithWorkingDir, the process's by default), with a leading ~ read as the

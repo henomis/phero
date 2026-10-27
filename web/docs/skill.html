@@ -113,7 +113,8 @@ Use this skill when the user asks for a random quote (inspirational, motivationa
         <code>Bash(*)</code>, a <code>*</code> tool name), with a quoted or escaped command (<code>\sh</code>),
         with a command that runs others (<code>sh</code>, <code>sudo</code>, <code>env</code>,
         <code>python3.12</code>, <code>busybox</code>, …), or with <code>git</code> and no subcommand
-        (<code>git -c</code> can run anything).
+        (<code>git -c</code> can run anything). The refused commands are a heuristic that may grow in later
+        versions, not a contract.
       </p>
       <pre><code class="language-go">skillTool, err := skilltool.New("",
     skilltool.WithRoots(userSkillsDir, "./skills"), // earlier roots win on the same skill name
@@ -141,6 +142,13 @@ for _, skipped := range skillTool.Skipped() {
         <code>skill.NewMulti(roots...)</code> is the parser behind <code>WithRoots</code>: a user's own skills and a
         project's, with the earlier root winning when both have a skill directory of the same name. Pass the user's
         root first, so a cloned project cannot shadow a skill the user trusts. A missing root holds no skills.
+      </p>
+      <p>
+        Roots, in one place: <code>skilltool.New(root)</code> reads one root (<code>skill.New(root)</code>).
+        <code>WithRoots(roots...)</code> replaces it with several (<code>skill.NewMulti</code>), so pass
+        <code>""</code> as <code>New</code>'s root when you use it. <code>WithParser</code> replaces both, and the last
+        of <code>WithRoots</code> and <code>WithParser</code> wins. Across roots the earlier one wins, both for a skill
+        directory name and for a skill name.
       </p>
     </section>
 

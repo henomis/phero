@@ -85,7 +85,9 @@ type catalogEntry struct {
 // WithRoots reads skills from several roots, such as the user's own and the
 // project's; when two hold a skill directory of the same name, the earlier
 // root wins, so pass the user's root first: a cloned project then cannot
-// shadow a skill the user trusts. It replaces the root given to New.
+// shadow a skill the user trusts. The earlier root also wins when skills in
+// differently named directories have the same name (see Skipped). It replaces
+// the root given to New, and the last of WithRoots and WithParser wins.
 func WithRoots(roots ...string) Option {
 	return func(t *Tool) {
 		t.parser = skillpkg.NewMulti(roots...)

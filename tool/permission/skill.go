@@ -46,6 +46,10 @@ var plainCommand = regexp.MustCompile(`^[A-Za-z0-9_./+-]+$`)
 // ("\sh"), a tool-name pattern that covers bash ("*", "b*"), a command such as
 // sh, sudo, env or python, and git without a subcommand.
 //
+// The refused commands are a heuristic, not a contract: the list may grow in
+// later versions as more commands that run others are found. Do not rely on a
+// grant it allows today staying allowed.
+//
 //	granted, refused := permission.SkillGrants(s.Tools())
 //	_ = policy.AllowForRun(ctx, granted...) // log refused
 func SkillGrants(specs []string) (granted, refused []string) {
