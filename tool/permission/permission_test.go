@@ -191,8 +191,8 @@ func TestMiddleware_RequestShowsTheCommandAndWhatAlwaysAllows(t *testing.T) {
 	}
 
 	first := reqs[0]
-	if first.Raw != "go test ./... | tee out && make lint" {
-		t.Fatalf("Raw = %q, want the command line as written", first.Raw)
+	if first.Raw != "go test ./... | tee out && make lint" || first.Subject != first.Raw {
+		t.Fatalf("Raw = %q, Subject = %q; want both the command line as written", first.Raw, first.Subject)
 	}
 
 	if want := []string{"go test ./...", "tee out", "make lint"}; !slices.Equal(first.Subjects, want) {

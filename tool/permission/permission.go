@@ -113,9 +113,9 @@ type Request struct {
 	CallID string
 	// Arguments is the call's raw JSON arguments.
 	Arguments string
-	// Subject is what the call touches, such as the command or the file path.
-	// For bash, it lists the parsed commands joined by " ; ", without the
-	// pipes and operators between them.
+	// Subject is what the call touches, for a person to read: for bash, the
+	// whole command line, as Raw; for a file tool, the path after it is
+	// cleaned and resolved; for another tool, the subject argument's value.
 	Subject string
 	// Raw is the subject argument's value as the call gives it: for bash, the
 	// whole command line as it will run; for a file tool, the path before it
@@ -446,9 +446,11 @@ func (p *Policy) check(ctx context.Context, tool, arguments string) error {
 	decision, subjects, written := p.evaluate(ctx, tool, arguments)
 	raw, _, _ := p.subjectValue(tool, arguments)
 
-	subject := joinSubjects(subjects)
-	if subjects == nil {
-		subject = raw
+	// A file tool's subject is its resolved path; a command line is shown
+	// whole, with its pipes and operators.
+	subject := raw
+	if p.isPathTool(tool) && len(subjects) == 1 {
+		subject = subjects[0]
 	}
 
 	switch decision {
@@ -825,9 +827,4 @@ func (p *Policy) resolvePattern(pattern string) string {
 	}
 
 	return strings.TrimSuffix(p.resolvePath(dir), "/") + pattern[slash:]
-}
-
-// joinSubjects renders subjects for an error or a question.
-func joinSubjects(subjects []string) string {
-	return strings.Join(subjects, " ; ")
 }

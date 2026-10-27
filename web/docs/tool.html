@@ -624,7 +624,8 @@ policy.Apply(readTool.Tool(), bashTool.Tool(), editTool.Tool())</code></pre>
         <li>A denied call returns a <code>*permission.DeniedError</code> (matches <code>permission.ErrDenied</code>),
           which the model sees as a failed tool call.</li>
         <li>The <code>Request</code> an <code>Asker</code> gets carries the model's tool call ID (<code>CallID</code>),
-          the subject argument as written (<code>Raw</code>: for bash, the whole command line with its pipes and
+          what the call touches for a person to read (<code>Subject</code>: the whole command line for bash, the resolved
+          path for a file tool), the subject argument as written (<code>Raw</code>: for bash, the whole command line with its pipes and
           <code>&amp;&amp;</code>), and the subjects an <code>AllowAlways</code> answer allows from then on
           (<code>Subjects</code>), so a question can show both exactly. <code>Subjects</code> lists each subject once and leaves
           out those an earlier answer already allows, and those an ask rule matches, which are never stored: the ask
