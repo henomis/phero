@@ -20,8 +20,6 @@ import (
 	"maps"
 	"os"
 	"time"
-
-	"github.com/henomis/phero/v2/llm"
 )
 
 // SetMeta stores value under key in the file's metadata and writes the
@@ -68,10 +66,6 @@ type Info struct {
 	Messages int
 	// UpdatedAt is when the file was last written.
 	UpdatedAt time.Time
-	// FirstUserText is the text of the first user message the file still
-	// holds; empty when there is none, as after WithPruneCompacted dropped
-	// it. Store what must outlive pruning with SetMeta.
-	FirstUserText string
 	// Compacted reports whether the file holds a snapshot, so Retrieve
 	// returns its summary in place of the messages it covers.
 	Compacted bool
@@ -80,8 +74,9 @@ type Info struct {
 }
 
 // Inspect reads the memory file at path without opening it as a Memory:
-// for listing sessions. The messages are not decoded, except up to the first
-// user one. It returns an error matching os.ErrNotExist when there is no such
+// for listing sessions. The messages are not decoded; keep what a list shows,
+// such as a title, in the metadata (SetMeta), which outlives pruning. It
+// returns an error matching os.ErrNotExist when there is no such
 // file, and ErrUnknownFileVersion for a format this version does not know.
 func Inspect(path string) (Info, error) {
 	if path == "" {
@@ -103,35 +98,10 @@ func Inspect(path string) (Info, error) {
 		return Info{}, fmt.Errorf("%s: %w", path, err)
 	}
 
-	info := Info{
+	return Info{
 		Messages:  f.Offset + len(f.Messages),
 		UpdatedAt: stat.ModTime(),
 		Compacted: f.Snapshot != nil,
 		Meta:      f.Meta,
-	}
-
-	for _, raw := range f.Messages {
-		var role struct {
-			Role string `json:"role"`
-		}
-
-		if err = json.Unmarshal(raw, &role); err != nil {
-			return Info{}, fmt.Errorf("%s: %w", path, err)
-		}
-
-		if role.Role != llm.RoleUser {
-			continue
-		}
-
-		var msg llm.Message
-		if err = json.Unmarshal(raw, &msg); err != nil {
-			return Info{}, fmt.Errorf("%s: %w", path, err)
-		}
-
-		info.FirstUserText = msg.TextContent()
-
-		break
-	}
-
-	return info, nil
+	}, nil
 }

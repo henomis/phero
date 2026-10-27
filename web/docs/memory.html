@@ -130,9 +130,9 @@ a.SetMemory(conversationMemory)</code></pre>
         For an app that keeps one file per session, <code>SetMeta(key, value)</code> stores metadata in the file, such
         as the session's title (an empty value removes the key; <code>Meta()</code> reads it back, and
         <code>Clear</code> removes it). <code>jsonfile.Inspect(path)</code> reads a file without opening it as a memory,
-        to list sessions: the number of messages ever saved, when the file was last written, the first user message's
-        text, whether it holds a snapshot, and its metadata. With pruning, the first user message can be gone: keep
-        what must last in the metadata.
+        to list sessions: the number of messages ever saved, when the file was last written, whether it holds a
+        snapshot, and its metadata. Keep what a list shows, such as a title from the first prompt, in the metadata: it
+        outlives pruning.
       </p>
 
       <pre><code class="language-go">_ = mem.SetMeta("title", "fix the failing test")

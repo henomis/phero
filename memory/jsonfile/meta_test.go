@@ -103,9 +103,8 @@ func TestInspect(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if info.Messages != 3 || info.FirstUserText != "fix the failing test" || info.Compacted || info.Meta != nil ||
-		info.UpdatedAt.Before(before) {
-		t.Fatalf("Info = %+v, want 3 messages, the first user text, no snapshot", info)
+	if info.Messages != 3 || info.Compacted || info.Meta != nil || info.UpdatedAt.Before(before) {
+		t.Fatalf("Info = %+v, want 3 messages, no snapshot", info)
 	}
 
 	if err = m.SetMeta("title", "failing test"); err != nil {
@@ -117,12 +116,12 @@ func TestInspect(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The first two messages are pruned: the count keeps them, the text is gone.
+	// The first two messages are pruned: the count keeps them.
 	if info, err = jsonfile.Inspect(path); err != nil {
 		t.Fatal(err)
 	}
 
-	if info.Messages != 3 || info.FirstUserText != "thanks" || !info.Compacted || info.Meta["title"] != "failing test" {
+	if info.Messages != 3 || !info.Compacted || info.Meta["title"] != "failing test" {
 		t.Fatalf("Info after pruning = %+v", info)
 	}
 
