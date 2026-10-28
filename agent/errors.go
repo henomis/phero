@@ -36,6 +36,16 @@ var (
 	// ErrIncompleteStream is returned by RunStream when the LLM stream ended without
 	// a terminal chunk carrying the assembled message.
 	ErrIncompleteStream = errors.New("llm stream ended without a complete message")
+	// ErrInvalidCompaction is returned when a Compactor's result does not
+	// keep the session's last messages as they were (see Compaction.Kept).
+	ErrInvalidCompaction = errors.New("invalid compaction")
+	// ErrSnapshotMismatch is recorded when a compaction's snapshot cannot be
+	// stored because the compacted messages are not found in the memory's
+	// log; the snapshot then lives in the run only.
+	ErrSnapshotMismatch = errors.New("compacted messages not found in the memory log")
+	// ErrNoCompactor is returned by Compact for an agent without a Compactor
+	// (SetCompaction).
+	ErrNoCompactor = errors.New("no compactor set")
 )
 
 // StopRun returns the error a tool's handler returns to end the agent's run
@@ -87,5 +97,31 @@ func (e *ToolExecutionError) Error() string {
 }
 
 func (e *ToolExecutionError) Unwrap() error {
+	return e.Err
+}
+
+// ToolPanicError is the error of a tool whose handler panicked. The agent
+// recovers the panic and reports it to the model as a failed tool call, so
+// one faulty tool does not crash the process.
+type ToolPanicError struct {
+	Name  string
+	Value any
+}
+
+func (e *ToolPanicError) Error() string {
+	return fmt.Sprintf("tool %s panicked: %v", e.Name, e.Value)
+}
+
+// CompactionError is returned when compacting a running session fails, for
+// example because the summary model's call failed.
+type CompactionError struct {
+	Err error
+}
+
+func (e *CompactionError) Error() string {
+	return fmt.Sprintf("session compaction failed: %v", e.Err)
+}
+
+func (e *CompactionError) Unwrap() error {
 	return e.Err
 }

@@ -16,6 +16,8 @@ package google
 
 import (
 	"errors"
+	"net/http"
+	"strings"
 	"time"
 
 	"google.golang.org/genai"
@@ -44,11 +46,22 @@ func wrapAPIError(err error) error {
 	}
 
 	return &llm.ProviderError{
-		Provider:   providerName,
-		StatusCode: apiErr.Code,
-		RetryAfter: retryAfter(apiErr.Details),
-		Err:        err,
+		Provider:              providerName,
+		StatusCode:            apiErr.Code,
+		RetryAfter:            retryAfter(apiErr.Details),
+		ContextLengthExceeded: isContextLengthError(apiErr.Code, apiErr.Message),
+		Err:                   err,
 	}
+}
+
+// isContextLengthError reports whether an API error says the prompt has more
+// tokens than the model accepts: a 400 "The input token count (N) exceeds the
+// maximum number of tokens allowed (M)".
+func isContextLengthError(status int, message string) bool {
+	message = strings.ToLower(message)
+
+	return status == http.StatusBadRequest &&
+		strings.Contains(message, "token count") && strings.Contains(message, "exceeds the maximum")
 }
 
 // retryAfter reads the retryDelay of a google.rpc.RetryInfo detail ("30s",

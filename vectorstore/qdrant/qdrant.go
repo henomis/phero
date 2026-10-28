@@ -61,7 +61,7 @@ type Store struct {
 	batchSize  int
 
 	// wait controls whether write operations block until applied.
-	wait *bool
+	wait bool
 }
 
 // Option configures a Store created by New.
@@ -95,10 +95,16 @@ func WithDistance(distance Distance) Option {
 	}
 }
 
-// WithWait configures whether write operations should wait until applied.
+// WithWait configures whether write operations wait until they are applied.
+//
+// Default is true: once Upsert, Delete or Clear returns, a search sees the
+// change, as with the other vector stores. With false, a write returns as soon
+// as Qdrant has accepted it, which is faster, but a search right after it (a
+// RAG query after ingestion, a semantic cache's lookup after a store) may
+// miss it.
 func WithWait(wait bool) Option {
 	return func(s *Store) {
-		s.wait = qdrantapi.PtrOf(wait)
+		s.wait = wait
 	}
 }
 
@@ -120,6 +126,7 @@ func New(client *qdrantapi.Client, collection string, opts ...Option) (*Store, e
 		collection: collection,
 		distance:   defaultDistance,
 		batchSize:  defaultBatchSize,
+		wait:       true,
 	}
 
 	for _, opt := range opts {
@@ -231,7 +238,7 @@ func (s *Store) upsertOnce(ctx context.Context, points []vectorstore.Point) erro
 	_, err := s.client.Upsert(ctx, &qdrantapi.UpsertPoints{
 		CollectionName: s.collection,
 		Points:         qPoints,
-		Wait:           s.wait,
+		Wait:           qdrantapi.PtrOf(s.wait),
 	})
 
 	return err
@@ -325,7 +332,7 @@ func (s *Store) Delete(ctx context.Context, ids []string) error {
 	_, err := s.client.Delete(ctx, &qdrantapi.DeletePoints{
 		CollectionName: s.collection,
 		Points:         qdrantapi.NewPointsSelectorIDs(qIDs),
-		Wait:           s.wait,
+		Wait:           qdrantapi.PtrOf(s.wait),
 	})
 
 	return err
@@ -340,7 +347,7 @@ func (s *Store) Clear(ctx context.Context) error {
 	_, err := s.client.Delete(ctx, &qdrantapi.DeletePoints{
 		CollectionName: s.collection,
 		Points:         qdrantapi.NewPointsSelectorFilter(&qdrantapi.Filter{}),
-		Wait:           s.wait,
+		Wait:           qdrantapi.PtrOf(s.wait),
 	})
 
 	return err

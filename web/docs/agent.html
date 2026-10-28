@@ -205,12 +205,13 @@ for _, h := range result.Handoffs {
     <section>
       <h2>Run result</h2>
       <p>
-        <code>Agent.Run</code> returns a <code>*Result</code> with three fields:
+        <code>Agent.Run</code> returns a <code>*Result</code> with four fields:
       </p>
       <ul>
         <li><code>Parts []llm.ContentPart</code>: the model's final response; call <code>result.TextContent()</code> to get the plain text</li>
         <li><code>Handoffs []Handoff</code>: the handoffs the model made, each with its target <code>Agent</code> and the <code>Context</code> passed to it; empty when there was no handoff, and more than one means fan-out</li>
         <li><code>Summary *trace.RunSummary</code>: aggregated observability data for the run (token usage, latency, tool call counts, etc.)</li>
+        <li><code>FinishReason llm.FinishReason</code>: why the last LLM call stopped; empty when the provider reports no reason</li>
       </ul>
 
       <pre><code class="language-go">result, err := a.Run(ctx, llm.Text(input))
@@ -224,6 +225,32 @@ if result.Summary != nil {
         result.Summary.Usage.InputTokens,
         result.Summary.Usage.OutputTokens)
     fmt.Printf("llm latency: %s\n", result.Summary.Latency.LLM)
+}</code></pre>
+    </section>
+
+    <section>
+      <h2>Truncated answers</h2>
+      <p>
+        A model that hits its output limit stops mid-answer, and the provider reports <code>llm.FinishLength</code>.
+      </p>
+      <ul>
+        <li><strong>With tool calls</strong>: the agent does not run them, because their arguments are probably cut
+          too (a large <code>write</code>, for example). Each call gets an error result that asks the model to retry with smaller arguments, and the
+          loop goes on. Streaming still emits <code>EventToolCall</code> and <code>EventToolResult</code> for them.</li>
+        <li><strong>Without tool calls</strong>: the cut answer is returned as final, with
+          <code>Result.FinishReason == llm.FinishLength</code>. The app decides what to do, for example run again
+          with "continue".</li>
+      </ul>
+
+      <pre><code class="language-go">result, err := a.Run(ctx, llm.Text(input))
+if err != nil {
+    return err
+}
+
+if result.FinishReason == llm.FinishLength {
+    // The answer was cut off: ask the model to go on. This needs memory
+    // (SetMemory), so the next run sees the cut answer.
+    result, err = a.Run(ctx, llm.Text("Continue exactly where you stopped."))
 }</code></pre>
     </section>
 
@@ -263,9 +290,16 @@ if err := json.Unmarshal([]byte(result.TextContent()), &v); err != nil {
       <p>
         <code>Agent.RunStream</code> runs the agent like <code>Run</code> but yields progress as a sequence of
         <code>Event</code>s over a Go 1.23 iterator: text and reasoning deltas as the model produces them, a
-        <code>ToolCall</code> and <code>ToolResult</code> event around each tool invocation, and a final
+        <code>ToolCall</code> and <code>ToolResult</code> event around each tool invocation, an
+        <code>EventUsage</code> with the token usage of each LLM call, an <code>EventCompactionStart</code> and
+        <code>EventCompactionEnd</code> around each compaction (see below), and a final
         <code>EventDone</code> whose <code>Result</code> mirrors <code>Run</code>. It uses the underlying LLM's
         streaming API when available and otherwise falls back to a single buffered response.
+      </p>
+      <p>
+        The tool calls of one round run concurrently. Their <code>ToolCall</code> events come in call order before
+        they start, and each <code>ToolResult</code> comes as soon as its call finishes, so a slow tool does not hold
+        back the results of fast ones. Match a result to its call with <code>ToolCallID</code>.
       </p>
 
       <pre><code class="language-go">for ev, err := range a.RunStream(ctx, llm.Text("Tell me a story.")) {
@@ -333,6 +367,102 @@ a.SetMaxIterations(10)</code></pre>
         The conversation is saved even when the run is cancelled: the save does not inherit the cancellation of the
         run's context, so a turn stopped from inside a tool is still recorded.
       </p>
+
+      <p>
+        By default the turn is saved once, when the run ends. For long runs, <code>a.SetCheckpoint(true)</code> saves
+        the new messages after every iteration that ran tool calls, so a process that crashes loses at most the
+        iteration in progress. An assistant message is always saved with the results of its tool calls, and
+        <code>Run</code> with no input continues from what memory holds.
+      </p>
+    </section>
+
+    <section>
+      <h2>Changing the prompt or the model</h2>
+      <p>
+        To switch models between turns, call <code>SetLLM</code>: the agent keeps its tools, handoffs, memory and
+        settings, and the next run continues the same conversation with the new model. Call it between runs, not
+        during one.
+      </p>
+      <p>
+        <code>SetLLM</code> changes only the agent's own client. A <code>SummaryCompactor</code> keeps the client it
+        was built with, so set the compaction again to write summaries with the new model too.
+      </p>
+      <pre><code class="language-go">if err := a.SetLLM(otherLLM); err != nil {
+    return err
+}
+a.SetCompaction(agent.NewSummaryCompactor(otherLLM), threshold) // as you set it before</code></pre>
+      <p>
+        The system prompt is set when the agent is built. To change it, build a new agent and give it the same
+        memory: the next run loads the session from memory, so the conversation goes on.
+      </p>
+      <pre><code class="language-go">next, err := agent.New(otherLLM, "coder", newPrompt)
+if err != nil {
+    return err
+}
+for _, t := range tools {
+    _ = next.AddTool(t)
+}
+next.SetMemory(mem) // the same memory as the old agent
+a = next</code></pre>
+    </section>
+
+    <section>
+      <h2>Compaction: long runs</h2>
+      <p>
+        Every tool call and result stays in the session, so a run with many iterations, such as a coding agent
+        reading files and running tests, eventually outgrows the model's context window. <code>SetCompaction</code>
+        shortens the session during the run:
+      </p>
+
+      <pre><code class="language-go">// Summarize with a cheaper model; keep the last 20 messages whole.
+a.SetCompaction(agent.NewSummaryCompactor(cheapLLM, agent.WithSummaryKeepRecent(20)), 150_000)</code></pre>
+
+      <ul>
+        <li>Before an LLM call, once the previous call's prompt and output tokens reached the threshold (here
+          150k), the session is handed to the compactor. Pass 0 to skip this check. Before the provider has reported
+          a size (the first call of a run, after a compaction, or with no usage at all), the session is estimated with
+          <code>llm.EstimateTokens</code> (about four characters per token), so a long history loaded from memory
+          is compacted before it is sent.</li>
+        <li>When a call fails with <code>llm.ErrContextLengthExceeded</code>, the session is compacted and the call
+          made again, once. A second such error in a row ends the run.</li>
+        <li>The session becomes the system prompt, the summary as a user message
+          (<code>memory.SummaryMessages</code>: a user message keeps its place, where Anthropic and Gemini would move
+          a system message into the system prompt), the pinned task, and the kept messages. A later compaction
+          updates that summary instead of summarizing it again.</li>
+        <li><code>NewSummaryCompactor</code> writes the summary from a prompt that lists tool calls and results, in
+          fixed, domain-neutral sections (task, decisions and facts, work done, preferences, open items).
+          <code>WithSummaryPrompt(instructions)</code> replaces those instructions, for example with sections that fit
+          a coding agent or a support chat; the previous summary and the conversation are added after them. It keeps at most
+          <code>WithSummaryKeepRecent</code> messages, fewer when they pass a token budget (a quarter of the threshold, or
+          <code>WithSummaryKeepTokens</code>), and cuts kept tool results longer than 8,000 characters. It never separates a tool call from its results, and it
+          pins the latest user request word for word, so the task is not lost.
+          <code>WithSummaryMaxTokens(n)</code> bounds the summary, for small context windows: the prompt asks for at
+          most <code>n</code> tokens and the call's output limit is <code>1.5 × n</code>. A summary cut at that limit is
+          dropped and asked for again without it.</li>
+        <li>Any <code>agent.Compactor</code> (or <code>agent.CompactorFunc</code>) can replace it. It gets an
+          <code>agent.CompactInput</code> (the previous snapshot, the messages after it, the token budget) and
+          returns an <code>agent.Compaction</code>: a <code>memory.Snapshot</code> and the last input messages it
+          keeps, possibly shortened. Kept messages that are not the input's last ones, or that start with a tool
+          result, fail with <code>agent.ErrInvalidCompaction</code>; <code>nil</code> means nothing to compact.</li>
+        <li>Memory keeps every message once: before compacting the run saves the messages it has not saved yet, and
+          after it only the messages added later. With a memory that keeps snapshots
+          (<code>memory.SnapshotStore</code>, such as <code>memory/simple</code>), the summary is stored as a
+          snapshot and the next run starts from it: the summary, then only the messages after it. If another writer
+          stored a snapshot first, or the log no longer holds the compacted messages, the summary lives in the run
+          only, as with any other memory, and the run goes on. Each compaction is traced as a memory span with op
+          <code>compact</code>; a failure returns an <code>*agent.CompactionError</code>.</li>
+        <li><code>RunStream</code> emits <code>EventCompactionStart</code> and <code>EventCompactionEnd</code> around
+          each compaction, so a UI can say "compacting…" while the summary is written. Their
+          <code>Compaction</code> (<code>*agent.CompactionInfo</code>) holds the trigger
+          (<code>CompactThreshold</code> or <code>CompactContextLength</code>), the session's estimated tokens and
+          message count before and, at the end, after, whether it was compacted, and the error it failed with.</li>
+        <li><code>a.Compact(ctx)</code> compacts the conversation in memory now, between runs, for a
+          <code>/compact</code> command. It loads the session, runs the compactor and stores the snapshot, so the next
+          run starts from the summary; it returns the <code>CompactionInfo</code> (trigger
+          <code>CompactManual</code>). It needs a compactor (<code>agent.ErrNoCompactor</code>) and a memory that keeps
+          snapshots (<code>memory.ErrSnapshotsUnsupported</code>): outside a run, a summary that is not stored would be
+          lost.</li>
+      </ul>
     </section>
 
     <section>
@@ -341,7 +471,9 @@ a.SetMaxIterations(10)</code></pre>
         Every agent has an iteration limit of <code>agent.DefaultMaxIterations</code> (25 LLM calls per run). When it
         is reached, <code>Run</code> returns <code>ErrMaxIterationsReached</code> together with a non-nil result
         holding any text the model produced so far and the run's <code>Summary</code>. Change the limit with
-        <code>SetMaxIterations(n)</code>; <code>SetMaxIterations(0)</code> removes it.
+        <code>SetMaxIterations(n)</code>; <code>SetMaxIterations(0)</code> removes it. 25 suits short tool-using
+        tasks. An agent that works over many turns, such as a coding agent that reads, edits and runs tests,
+        should raise it (200 or more), or remove it and bound the run with a context deadline.
       </p>
       <p>
         A tool stops the run on purpose, for example to wait for a human answer, by returning
@@ -391,6 +523,15 @@ if errors.Is(err, errAskedHuman) {
 
       <p>
         Tool handlers can return any Go value; non-string results are JSON-marshaled before being added to the chat.
+      </p>
+
+      <p>
+        When the model calls several tools at once, the calls run concurrently. <code>a.SetMaxParallelTools(n)</code>
+        caps how many run at the same time. A tool marked with <code>tool.SetExclusive(true)</code> runs alone, in call
+        order: after the calls before it and before the calls after it. The built-in <code>edit</code> and
+        <code>write</code> tools are exclusive, so two edits of the same file in one round apply in order. A panic in a
+        tool is recovered and reported to the model as a failed call. A handler can read its call (ID, name,
+        arguments) with <code>llm.ToolCallFromContext(ctx)</code>.
       </p>
     </section>
 

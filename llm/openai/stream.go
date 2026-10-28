@@ -57,12 +57,13 @@ func (c *Client) ExecuteStream(
 		defer func() { _ = stream.Close() }()
 
 		var (
-			textBuilder strings.Builder
-			toolCalls   = map[int]*llm.ToolCall{}
-			toolOrder   []int
-			usage       *llm.Usage
-			model       = c.model
-			finish      string
+			textBuilder      strings.Builder
+			reasoningBuilder strings.Builder
+			toolCalls        = map[int]*llm.ToolCall{}
+			toolOrder        []int
+			usage            *llm.Usage
+			model            = c.model
+			finish           string
 		)
 
 		for {
@@ -95,6 +96,8 @@ func (c *Client) ExecuteStream(
 			delta := response.Choices[0].Delta
 
 			if delta.ReasoningContent != "" {
+				reasoningBuilder.WriteString(delta.ReasoningContent)
+
 				if !yield(llm.StreamChunk{ReasoningDelta: delta.ReasoningContent}, nil) {
 					return
 				}
@@ -149,8 +152,12 @@ func (c *Client) ExecuteStream(
 		}
 
 		message := &llm.Message{Role: llm.RoleAssistant, ToolCalls: assembled}
+		if reasoning := reasoningBuilder.String(); strings.TrimSpace(reasoning) != "" {
+			message.Parts = append(message.Parts, llm.Reasoning(reasoning, ""))
+		}
+
 		if text := textBuilder.String(); text != "" {
-			message.Parts = []llm.ContentPart{llm.Text(text)}
+			message.Parts = append(message.Parts, llm.Text(text))
 		}
 
 		yield(llm.StreamChunk{

@@ -15,6 +15,7 @@
 package jsonfile
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -22,11 +23,19 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/henomis/phero/v2/internal/snaplog"
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/memory"
+	"github.com/henomis/phero/v2/trace"
 )
 
-var _ memory.Memory = (*Memory)(nil)
+var _ memory.SnapshotStore = (*Memory)(nil)
+
+// fileVersion is the file format with a snapshot or metadata: an object
+// holding the messages, the absolute position of the first one, the snapshot
+// and the metadata. A file without them stays a plain JSON array of messages
+// (version 1), which older versions read.
+const fileVersion = 2
 
 // Option configures a Memory instance.
 type Option func(*Memory)
@@ -41,6 +50,22 @@ type Memory struct {
 
 	summaryThreshold uint
 	summarySize      uint
+
+	// offset is the absolute position of messages[0]: pruned messages keep
+	// their positions, so cursors stay valid.
+	offset   int
+	snapshot *memory.Snapshot
+	prune    bool
+	meta     map[string]string
+}
+
+// WithPruneCompacted drops the messages a snapshot stands for when it is
+// saved, and rewrites the file without them. Off by default: the file keeps
+// the whole log.
+func WithPruneCompacted(prune bool) Option {
+	return func(m *Memory) {
+		m.prune = prune
+	}
 }
 
 // New creates a Memory that persists all messages as JSON to filePath.
@@ -67,9 +92,22 @@ func New(filePath string, options ...Option) (*Memory, error) {
 
 // WithSummarization enables automatic summarization of memory when the number of stored
 // messages exceeds summarizeThreshold.
+//
+// This mirrors the behavior of memory/simple.WithSummarization: the oldest summarySize
+// messages, moved past tool results, are replaced by a summary.
+//
+// Deprecated: use agent.SetCompaction with this memory instead: it keeps
+// snapshots (memory.SnapshotStore), so the agent's summary is stored and the
+// log is not rewritten. Summarization here counts messages rather than
+// tokens, calls the LLM inside Save, and replaces the oldest messages. It
+// keeps working as before, and cannot be combined with snapshots
+// (memory.ErrSnapshotsUnsupported).
 func WithSummarization(summaryLLM llm.LLM, summarizeThreshold, summarySize uint) Option {
 	return func(m *Memory) {
-		m.llm = summaryLLM
+		if summaryLLM != nil {
+			// Traced so the summary call counts in the run that saves.
+			m.llm = trace.InstrumentLLM(summaryLLM)
+		}
 
 		m.summarySize = memory.ClampSummarySize(summarizeThreshold, summarySize)
 		m.summaryThreshold = summarizeThreshold
@@ -87,14 +125,57 @@ func (m *Memory) load() error {
 		return err
 	}
 
-	var msgs []llm.Message
-	if unmarshalErr := json.Unmarshal(data, &msgs); unmarshalErr != nil {
-		return unmarshalErr
+	f, err := decodeFile[llm.Message](data)
+	if err != nil {
+		return err
 	}
 
-	m.messages = msgs
+	m.messages, m.offset, m.snapshot, m.meta = f.Messages, f.Offset, f.Snapshot, f.Meta
 
 	return nil
+}
+
+// storedFile is the content of a memory file of either version, with its
+// messages decoded as M.
+type storedFile[M any] struct {
+	Version  int               `json:"version"`
+	Offset   int               `json:"offset"`
+	Messages []M               `json:"messages"`
+	Snapshot *memory.Snapshot  `json:"snapshot,omitempty"`
+	Meta     map[string]string `json:"meta,omitempty"`
+}
+
+// decodeFile decodes a memory file of either version.
+func decodeFile[M any](data []byte) (storedFile[M], error) {
+	var f storedFile[M]
+
+	if !bytes.HasPrefix(bytes.TrimSpace(data), []byte("{")) {
+		err := json.Unmarshal(data, &f.Messages)
+
+		return f, err
+	}
+
+	if err := json.Unmarshal(data, &f); err != nil {
+		return f, err
+	}
+
+	if f.Version != fileVersion {
+		return f, fmt.Errorf("%w: %d", ErrUnknownFileVersion, f.Version)
+	}
+
+	return f, nil
+}
+
+// encode returns the file contents: a plain array without a snapshot, the
+// version 2 object with one.
+func (m *Memory) encode() ([]byte, error) {
+	if m.snapshot == nil && m.offset == 0 && len(m.meta) == 0 {
+		return json.MarshalIndent(m.messages, "", "  ")
+	}
+
+	return json.MarshalIndent(storedFile[llm.Message]{
+		Version: fileVersion, Offset: m.offset, Messages: m.messages, Snapshot: m.snapshot, Meta: m.meta,
+	}, "", "  ")
 }
 
 // persist atomically writes the current message slice to the JSON file.
@@ -102,7 +183,7 @@ func (m *Memory) load() error {
 // the target to avoid partial writes corrupting the stored messages on crash.
 // The caller must hold the write lock.
 func (m *Memory) persist() error {
-	data, err := json.MarshalIndent(m.messages, "", "  ")
+	data, err := m.encode()
 	if err != nil {
 		return err
 	}
@@ -152,12 +233,27 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.messages = append(m.messages, messages...)
+	// A failed Save stores nothing, so the caller can save the same messages
+	// again without duplicating them.
+	old := m.messages
+	if err := m.save(ctx, messages); err != nil {
+		m.messages = old
+		return err
+	}
+
+	return nil
+}
+
+// save appends messages, summarizing when needed, and flushes to disk. The
+// caller must hold the write lock.
+func (m *Memory) save(ctx context.Context, messages []llm.Message) error {
+	m.messages = append(m.messages[:len(m.messages):len(m.messages)], messages...)
 
 	if m.needSummarization() {
-		toSummarize := m.messages
-		toAppend := toSummarize[m.summarySize:]
-		toSummarize = toSummarize[:m.summarySize]
+		// Split past tool results so none is kept without its tool call.
+		split := memory.SplitPoint(m.messages, int(m.summarySize))
+		toSummarize := m.messages[:split]
+		toAppend := m.messages[split:]
 
 		history := memory.FormatSummaryPrompt(toSummarize)
 
@@ -175,10 +271,16 @@ func (m *Memory) Save(ctx context.Context, messages []llm.Message) error {
 	return m.persist()
 }
 
-// Retrieve returns all messages currently in memory, ordered from oldest to newest.
+// Retrieve returns all messages currently in memory, ordered from oldest to
+// newest. With a snapshot, the messages it stands for are replaced by
+// memory.SummaryMessages.
 func (m *Memory) Retrieve(_ context.Context, _ string) ([]llm.Message, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
+	if m.snapshot != nil && m.llm == nil {
+		return snaplog.View(m.messages, m.offset, *m.snapshot), nil
+	}
 
 	result := make([]llm.Message, len(m.messages))
 	copy(result, m.messages)
@@ -186,12 +288,73 @@ func (m *Memory) Retrieve(_ context.Context, _ string) ([]llm.Message, error) {
 	return result, nil
 }
 
-// Clear removes all messages from memory and truncates the file.
+// LoadSnapshot returns the latest snapshot (nil when there is none) and the
+// messages after it, with their cursors. It returns
+// memory.ErrSnapshotsUnsupported with WithSummarization, which rewrites the
+// log.
+func (m *Memory) LoadSnapshot(_ context.Context) (*memory.Snapshot, []memory.LoggedMessage, error) {
+	if m.llm != nil {
+		return nil, nil, memory.ErrSnapshotsUnsupported
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	tail := snaplog.Tail(m.messages, m.offset, m.snapshot)
+	if m.snapshot == nil {
+		return nil, tail, nil
+	}
+
+	snap := *m.snapshot
+
+	return &snap, tail, nil
+}
+
+// SaveSnapshot stores s as standing for every message up to and including
+// upTo and writes the file, when the latest snapshot is still prev
+// (memory.ErrSnapshotConflict otherwise). upTo must be a cursor of this
+// memory after prev's (memory.ErrInvalidCursor otherwise).
+func (m *Memory) SaveSnapshot(_ context.Context, s memory.Snapshot, upTo memory.Cursor, prev *memory.Snapshot) error {
+	if m.llm != nil {
+		return memory.ErrSnapshotsUnsupported
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	pos, err := snaplog.Cutoff(m.snapshot, prev, upTo, m.offset+len(m.messages))
+	if err != nil {
+		return err
+	}
+
+	oldMessages, oldOffset, oldSnapshot := m.messages, m.offset, m.snapshot
+
+	s.UpTo = upTo
+	m.snapshot = &s
+
+	if m.prune && pos >= m.offset {
+		m.messages = append([]llm.Message(nil), m.messages[pos+1-m.offset:]...)
+		m.offset = pos + 1
+	}
+
+	if err = m.persist(); err != nil {
+		m.messages, m.offset, m.snapshot = oldMessages, oldOffset, oldSnapshot
+		return err
+	}
+
+	return nil
+}
+
+// Clear removes all messages, the snapshot and the metadata from memory and
+// truncates the file.
 func (m *Memory) Clear(_ context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	m.messages = nil
+	m.offset = 0
+	m.snapshot = nil
+	m.meta = nil
 
 	return m.persist()
 }

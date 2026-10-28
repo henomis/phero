@@ -15,6 +15,7 @@
 package file
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,6 +24,24 @@ import (
 )
 
 const dotDot = ".."
+
+// resolveSearchRootIn is resolveSearchRoot that also accepts an absolute path
+// inside one of readRoots (see WithReadOnlyRoots). A relative path is still
+// resolved against the working directory.
+func resolveSearchRootIn(workingDir string, readRoots []string, inputPath string) (string, error) {
+	root, err := resolveSearchRoot(workingDir, inputPath)
+	if !errors.Is(err, ErrPathOutsideWorkingDirectory) || !filepath.IsAbs(filepath.Clean(inputPath)) {
+		return root, err
+	}
+
+	for _, readRoot := range readRoots {
+		if inRoot, rootErr := resolveSearchRoot(readRoot, inputPath); rootErr == nil {
+			return inRoot, nil
+		}
+	}
+
+	return "", err
+}
 
 func resolveSearchRoot(workingDir, inputPath string) (string, error) {
 	if strings.TrimSpace(inputPath) == "" {

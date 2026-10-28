@@ -42,6 +42,7 @@ type Client struct {
 	apiKey          string
 	temperature     float32
 	reasoningEffort string
+	noStrictTools   bool
 	maxTokens       int64
 	legacyMaxTokens bool
 	config          openai.ClientConfig
@@ -166,11 +167,16 @@ func (c *Client) buildRequest(messages []llm.Message, opts []llm.CallOption) (op
 		ReasoningEffort: c.reasoningEffort,
 	}
 
-	if c.maxTokens > 0 {
+	maxTokens := int(c.maxTokens)
+	if cfg.MaxOutputTokens > 0 {
+		maxTokens = cfg.MaxOutputTokens
+	}
+
+	if maxTokens > 0 {
 		if c.legacyMaxTokens {
-			request.MaxTokens = int(c.maxTokens)
+			request.MaxTokens = maxTokens
 		} else {
-			request.MaxCompletionTokens = int(c.maxTokens)
+			request.MaxCompletionTokens = maxTokens
 		}
 	}
 
@@ -221,13 +227,76 @@ func (s jsonSchema) MarshalJSON() ([]byte, error) {
 }
 
 // messagesToOpenAI converts Phero messages to go-openai wire types.
+//
+// Chat Completions rejects images in tool messages, and every tool message
+// must follow the assistant message that made the calls. So the images of a
+// run of tool messages are moved into one user message sent right after the
+// run, and each tool message keeps only its text.
 func messagesToOpenAI(messages []llm.Message) []openai.ChatCompletionMessage {
 	out := make([]openai.ChatCompletionMessage, 0, len(messages))
+
+	var toolImages []llm.ContentPart
+
 	for _, m := range messages {
-		out = append(out, messageToOpenAI(m))
+		if m.Role != llm.RoleTool && len(toolImages) > 0 {
+			out = append(out, messageToOpenAI(llm.UserMessage(toolImages...)))
+			toolImages = nil
+		}
+
+		if m.Role == llm.RoleTool {
+			var images []llm.ContentPart
+
+			m, images = splitToolImages(m)
+			if len(images) > 0 {
+				toolImages = append(toolImages, llm.Text("Images returned by tool call "+m.ToolCallID+":"))
+				toolImages = append(toolImages, images...)
+			}
+		}
+
+		msg := messageToOpenAI(m)
+
+		// An assistant message holding only reasoning, which is not sent, would
+		// go out with no content and no tool call; some servers reject that
+		// (Ollama: "invalid message content type: <nil>").
+		if msg.Role == llm.RoleAssistant && len(msg.ToolCalls) == 0 && msg.Content == "" && len(msg.MultiContent) == 0 {
+			continue
+		}
+
+		out = append(out, msg)
+	}
+
+	if len(toolImages) > 0 {
+		out = append(out, messageToOpenAI(llm.UserMessage(toolImages...)))
 	}
 
 	return out
+}
+
+// splitToolImages returns the tool message m without its image parts, and
+// those parts. A tool message left with no text says that its images follow.
+func splitToolImages(m llm.Message) (llm.Message, []llm.ContentPart) {
+	var text, images []llm.ContentPart
+
+	for _, p := range m.Parts {
+		switch p.Type {
+		case llm.ContentTypeImageURL, llm.ContentTypeImageBase64:
+			images = append(images, p)
+		case llm.ContentTypeText, llm.ContentTypeReasoning, llm.ContentTypeRedactedReasoning:
+			text = append(text, p)
+		}
+	}
+
+	if len(images) == 0 {
+		return m, nil
+	}
+
+	if strings.TrimSpace(llm.TextContent(text...)) == "" {
+		text = []llm.ContentPart{llm.Text("The tool returned images; they follow in the next message.")}
+	}
+
+	m.Parts = text
+
+	return m, images
 }
 
 // messageToOpenAI converts a single Phero Message to a go-openai ChatCompletionMessage.
@@ -296,6 +365,13 @@ func messageToOpenAI(m llm.Message) openai.ChatCompletionMessage {
 		}
 	}
 
+	// One text part left once the reasoning is dropped: send it as a string,
+	// which servers that accept only string content need.
+	if len(multi) == 1 && multi[0].Type == openai.ChatMessagePartTypeText {
+		msg.Content = multi[0].Text
+		return msg
+	}
+
 	msg.MultiContent = multi
 
 	return msg
@@ -343,19 +419,29 @@ func messageFromOpenAI(m openai.ChatCompletionMessage) llm.Message {
 		msg.Parts = []llm.ContentPart{llm.Text(m.Content)}
 	}
 
+	// OpenAI-compatible servers (DeepSeek, Qwen on vLLM or llama.cpp) return
+	// the model's thinking in reasoning_content. It is kept as a reasoning part,
+	// first as on the other providers; it is not sent back to the server.
+	if strings.TrimSpace(m.ReasoningContent) != "" {
+		msg.Parts = append([]llm.ContentPart{llm.Reasoning(m.ReasoningContent, "")}, msg.Parts...)
+	}
+
 	return msg
 }
 
 func (c *Client) openaiTools(tools []*llm.Tool) []openai.Tool {
 	openaiTools := make([]openai.Tool, len(tools))
 	for i, tool := range tools {
+		// Strict JSON schema by default, for reliability; a tool or the client
+		// can turn it off.
+		strict := tool.Strict() && !c.noStrictTools
 		openaiTools[i] = openai.Tool{
 			Type: openai.ToolTypeFunction,
 			Function: &openai.FunctionDefinition{
 				Name:        tool.Name(),
-				Parameters:  tool.InputSchema(),
+				Parameters:  tool.Schema(strict),
 				Description: tool.Description(),
-				Strict:      true, // default to strict JSON schema for better performance and reliability
+				Strict:      strict,
 			},
 		}
 	}
@@ -390,6 +476,16 @@ func WithOllamaBaseURL() Option {
 func WithTemperature(temp float32) Option {
 	return func(c *Client) {
 		c.temperature = temp
+	}
+}
+
+// WithStrictTools chooses whether tools are sent in strict mode; they are by
+// default. With false, every tool goes without strict mode and with its schema
+// as reflected, where omitempty fields are optional (see llm.Tool.SetStrict),
+// for OpenAI-compatible servers that mishandle strict schemas.
+func WithStrictTools(strict bool) Option {
+	return func(c *Client) {
+		c.noStrictTools = !strict
 	}
 }
 

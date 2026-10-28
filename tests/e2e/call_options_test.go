@@ -19,6 +19,7 @@ package e2e_test
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -44,11 +45,12 @@ func TestLLM_ResponseFormat(t *testing.T) {
 		"anthropic": buildAnthropicLLM(),
 	} {
 		t.Run(name, func(t *testing.T) {
-			// Ollama's Anthropic-compatible endpoint (0.35) accepts output_config.format
-			// and ignores it, answering in free text. That the field is sent is covered
-			// by the anthropic unit tests; here it needs the real API.
-			if name == "anthropic" && anthropicBaseURL() == defaultAnthropicURL {
-				t.Skip("Ollama's Anthropic endpoint ignores structured output; set ANTHROPIC_BASE_URL to the real API")
+			// Anthropic-compatible endpoints of local servers (Ollama 0.35,
+			// llama.cpp's llama-server) accept output_config.format and ignore it,
+			// answering in free text. That the field is sent is covered by the
+			// anthropic unit tests; here it needs the real API.
+			if name == "anthropic" && !isAnthropicAPI(anthropicBaseURL()) {
+				t.Skipf("%s is not the Anthropic API, and local Anthropic endpoints ignore structured output", anthropicBaseURL())
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -112,4 +114,11 @@ func TestLLM_ForcedTool(t *testing.T) {
 			}
 		})
 	}
+}
+
+// isAnthropicAPI reports whether baseURL points at the Anthropic API.
+func isAnthropicAPI(baseURL string) bool {
+	u, err := url.Parse(baseURL)
+
+	return err == nil && u.Hostname() == "api.anthropic.com"
 }

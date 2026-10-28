@@ -39,9 +39,9 @@ type TimeOutput struct {
 
 func main() {
 	// Parse command-line flags
-	enableSummarization := flag.Bool("summarize", false, "Enable automatic summarization of conversation history")
-	summarizationThreshold := flag.Uint("summary-threshold", 8, "Number of messages before triggering summarization (only used with -summarize)")
-	summarySize := flag.Uint("summary-size", 15, "Number of messages before triggering summarization (only used with -summarize)")
+	enableCompaction := flag.Bool("summarize", false, "Summarize older history once the prompt passes -compact-at tokens")
+	compactAt := flag.Int("compact-at", 2000, "Prompt size in tokens that triggers a summary (only used with -summarize)")
+	keepRecent := flag.Int("keep-recent", 6, "Messages kept whole after the summary (only used with -summarize)")
 	maxMessages := flag.Uint("max-messages", 20, "Maximum number of messages to keep in memory")
 
 	flag.Parse()
@@ -52,12 +52,7 @@ func main() {
 	llmClient, llmInfo := buildLLMFromEnv()
 
 	// Create agent with memory
-	var conversationMemory *memory.Memory
-	if *enableSummarization {
-		conversationMemory = memory.New(*maxMessages, memory.WithSummarization(llmClient, *summarizationThreshold, *summarySize))
-	} else {
-		conversationMemory = memory.New(*maxMessages)
-	}
+	conversationMemory := memory.New(*maxMessages)
 
 	a, err := agent.New(
 		llmClient,
@@ -70,6 +65,12 @@ func main() {
 
 	a.SetMemory(conversationMemory)
 	a.SetMaxIterations(10)
+
+	// Compaction summarizes the older history into a snapshot the memory
+	// keeps: later turns start from the summary and the recent messages.
+	if *enableCompaction {
+		a.SetCompaction(agent.NewSummaryCompactor(llmClient, agent.WithSummaryKeepRecent(*keepRecent)), *compactAt)
+	}
 
 	// Add helpful tools
 	timeTool, err := llm.NewTool(
@@ -91,8 +92,8 @@ func main() {
 	fmt.Printf("LLM: %s\n", llmInfo)
 	fmt.Printf("Memory: %d messages max\n", *maxMessages)
 
-	if *enableSummarization {
-		fmt.Printf("Summarization: enabled (threshold=%d, summary_size=%d)\n", *summarizationThreshold, *summarySize)
+	if *enableCompaction {
+		fmt.Printf("Summarization: enabled (at %d tokens, keeping %d messages)\n", *compactAt, *keepRecent)
 	} else {
 		fmt.Println("Summarization: disabled")
 	}

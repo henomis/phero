@@ -74,6 +74,36 @@ a.SetMemory(conversationMemory)</code></pre>
     </section>
 
     <section>
+      <h2 id="snapshots">Snapshots: a summary that stands for the oldest messages</h2>
+      <p>
+        A memory that implements <code>memory.SnapshotStore</code> keeps a log of messages plus a stored
+        <code>memory.Snapshot</code>: a summary (and a few pinned messages, such as the task) that stands for the oldest
+        messages. <code>Retrieve</code> then returns the summary followed by the messages after it, so a long
+        conversation stays short without losing its log. <code>memory/simple</code>, <code>memory/jsonfile</code>,
+        <code>memory/psql</code> and <code>memory/nats</code> implement it; the agent's compaction uses it.
+      </p>
+
+      <pre><code class="language-go">snap, tail, err := store.LoadSnapshot(ctx) // latest snapshot (or nil) and the messages after it, with cursors
+// ... summarize, then cover everything up to a message:
+err = store.SaveSnapshot(ctx, memory.Snapshot{Summary: text}, tail[len(tail)-5].Cursor, snap)</code></pre>
+
+      <ul>
+        <li>A <code>memory.Cursor</code> is an absolute position in the log: it stays valid while older messages are
+          evicted and newer ones appended, even by another writer.</li>
+        <li><code>SaveSnapshot</code> compares and swaps: it fails with <code>memory.ErrSnapshotConflict</code> when
+          the latest snapshot is no longer <code>prev</code>, and with <code>memory.ErrInvalidCursor</code> for a
+          cursor that does not move past it.</li>
+        <li>The summary is sent as a user message (<code>memory.SummaryMessages</code>), not a system message, so it
+          keeps its place in the conversation. The agent's <code>SummaryCompactor</code> updates the previous summary
+          with the new messages (see the agent docs).</li>
+        <li>The messages a snapshot covers are kept by default; <code>WithPruneCompacted(true)</code> (simple, jsonfile,
+          psql) drops them; <code>memory/nats</code> drops them by default, as a session must fit in one NATS
+          message. Snapshots can't be combined with a backend's own <code>WithSummarization</code>, which rewrites the log
+          (<code>memory.ErrSnapshotsUnsupported</code>).</li>
+      </ul>
+    </section>
+
+    <section>
       <h2>JSON file memory (persistent local state)</h2>
       <p>
         <code>memory/jsonfile</code> stores the full conversation in a JSON file on disk.
@@ -91,24 +121,53 @@ a.SetMemory(conversationMemory)</code></pre>
 
       <p>
         This is a good fit for local assistants or skill workflows that need persistence without introducing a database.
+        It keeps <a href="#snapshots">snapshots</a> too: the file stays a plain JSON array until the first snapshot,
+        then holds the messages and the snapshot (older versions of the file are still read), and
+        <code>jsonfile.WithPruneCompacted(true)</code> rewrites it without the messages a snapshot covers.
       </p>
+
+      <p>
+        For an app that keeps one file per session, <code>SetMeta(key, value)</code> stores metadata in the file, such
+        as the session's title (an empty value removes the key; <code>Meta()</code> reads it back, and
+        <code>Clear</code> removes it). <code>jsonfile.Inspect(path)</code> reads a file without opening it as a memory,
+        to list sessions: the number of messages ever saved, when the file was last written, whether it holds a
+        snapshot, and its metadata. Keep what a list shows, such as a title from the first prompt, in the metadata: it
+        outlives pruning.
+      </p>
+
+      <pre><code class="language-go">_ = mem.SetMeta("title", "fix the failing test")
+
+files, _ := filepath.Glob(filepath.Join(sessionsDir, "*.json"))
+for _, f := range files {
+    info, err := memory.Inspect(f)
+    if err != nil {
+        continue // not a memory file
+    }
+    fmt.Printf("%s  %d messages  %s  %s\n", filepath.Base(f), info.Messages,
+        info.UpdatedAt.Format(time.DateTime), info.Meta["title"])
+}</code></pre>
     </section>
 
     <section>
-      <h2>Optional summarization</h2>
+      <h2>Summarization: use the agent's compaction</h2>
       <p>
-        The in-process and persistent memories can optionally summarize history when the number of stored messages reaches a threshold.
-        The idea is to keep a compact “state snapshot” plus the most recent turns.
+        To keep a long conversation short, let the agent summarize it: <code>agent.SetCompaction</code> compacts by
+        tokens, during the run, and stores the summary as a <a href="#snapshots">snapshot</a> in any of these memories,
+        so the log is never rewritten and the next run starts from the summary.
       </p>
 
-      <pre><code class="language-go">// From examples/conversational-agent (edited for brevity)
+      <pre><code class="language-go">conversationMemory := memory.New(200)
 
-conversationMemory := memory.New(
-    20,
-    memory.WithSummarization(llmClient, 8, 15),
-)
+a.SetMemory(conversationMemory)
+a.SetCompaction(agent.NewSummaryCompactor(llmClient, agent.WithSummaryKeepRecent(20)), 150_000)</code></pre>
 
-a.SetMemory(conversationMemory)</code></pre>
+      <p>
+        <strong>Deprecated:</strong> the backends' own <code>WithSummarization(llm, threshold, size)</code> still works
+        as before, but it counts messages rather than tokens, calls the LLM inside <code>Save</code>, and replaces the
+        oldest <code>size</code> messages with a summary system message, rewriting the stored history. It can't be
+        combined with snapshots (<code>memory.ErrSnapshotsUnsupported</code>). The size must be below the threshold:
+        a larger one is lowered to <code>threshold - 1</code>.
+      </p>
     </section>
 
     <section>
@@ -163,7 +222,7 @@ a.SetMemory(conversationMemory)</code></pre>
         <code>Save</code> returns <code>ErrSessionTooLarge</code> (a <code>*SessionTooLargeError</code> with the
         session and its size). Through an agent, this shows up as <code>agent.ErrSessionSaveFailed</code>: the
         answer is still returned, but the turn is not stored, and later turns will not be either. To stay under
-        it, enable <code>WithSummarization</code>, which also drops the images of the messages it summarizes;
+        it, use the agent's compaction, whose snapshots drop the messages they cover (and their images);
         start a new session or <code>Clear</code> this one; raise <code>max_payload</code> on the NATS server;
         or, for long sessions with many images, use <code>memory/psql</code>, which stores each message as its
         own row.
@@ -198,13 +257,19 @@ a.SetMemory(conversationMemory)</code></pre>
         <a href="https://github.com/henomis/phero/tree/main/examples/nats-memory">NATS Memory example</a>,
         which demonstrates session resumption across two process runs.
       </p>
+      <p>
+        A session is one KV value, so it must fit in one NATS message (1 MB by default). It keeps
+        <a href="#snapshots">snapshots</a>, written with the same compare-and-swap as <code>Save</code>, and saving one
+        drops the messages it covers by default, so a long session stays under the limit;
+        <code>natsmemory.WithPruneCompacted(false)</code> keeps them.
+      </p>
     </section>
 
     <section>
       <h2>PostgreSQL conversation memory (persistent)</h2>
       <p>
         If you want conversation history to survive process restarts (or be shared across replicas), use <code>memory/psql</code>.
-        It's a session-scoped store backed by PostgreSQL (JSONB rows), with optional automatic summarization similar to <code>memory/simple</code>.
+        It's a session-scoped store backed by PostgreSQL (JSONB rows) that keeps <a href="#snapshots">snapshots</a>, as <code>memory/simple</code> does.
       </p>
 
       <pre><code class="language-go">import (
@@ -221,11 +286,7 @@ if err != nil {
     // handle error
 }
 
-conversationMemory, err := psql.New(
-    db,
-    "session-123",
-    psql.WithSummarization(llmClient, 50, 25),
-)
+conversationMemory, err := psql.New(db, "session-123")
 if err != nil {
     // handle error
 }
@@ -235,12 +296,26 @@ a.SetMemory(conversationMemory)</code></pre>
       <p>
         By default the store auto-creates its table/index (you can disable that with <code>psql.WithEnsureSchema(false)</code>).
       </p>
+      <p>
+        It keeps <a href="#snapshots">snapshots</a> in a second table named after the first, with
+        <code>_snapshots</code> appended: one row per session, whose cursor is the <code>seq</code> of the last message it
+        covers. <code>SaveSnapshot</code> compares and swaps in SQL, so two processes on the same session cannot
+        overwrite each other's snapshot, and <code>psql.WithPruneCompacted(true)</code> deletes the covered rows in the
+        same transaction. With <code>WithEnsureSchema(false)</code>, create it yourself:
+      </p>
+
+      <pre><code class="language-sql">CREATE TABLE IF NOT EXISTS conversation_memory_snapshots (
+    session_id text        PRIMARY KEY,
+    upto_seq   bigint      NOT NULL,
+    snapshot   jsonb       NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);</code></pre>
     </section>
 
     <section>
       <h2>Run an example</h2>
       <p>
-        The conversational agent example uses simple FIFO memory, with an option to enable summarization.
+        The conversational agent example uses simple FIFO memory, with an option to enable the agent's compaction.
       </p>
 
       <pre><code class="language-bash"># from repo root
@@ -249,7 +324,7 @@ go run ./examples/conversational-agent
 
 # with summarization enabled
 
-go run ./examples/conversational-agent -summarize -summary-threshold 8 -summary-size 15 -max-messages 20</code></pre>
+go run ./examples/conversational-agent -summarize -compact-at 2000 -keep-recent 6 -max-messages 20</code></pre>
 
       <p>
         The skills example uses local JSON-backed memory:
@@ -277,7 +352,7 @@ go run ./examples/nats-memory -session my-session</code></pre>
         <li><strong>Local persistence</strong>: use <code>memory/jsonfile</code> when you want history to survive restarts on one machine</li>
         <li><strong>Shared persistence</strong>: use <code>memory/psql</code> when sessions should live in PostgreSQL</li>
         <li><strong>Lightweight network persistence</strong>: use <code>memory/nats</code> when you want NATS JetStream KV as the store (easy Docker setup, named sessions)</li>
-        <li><strong>Long conversations</strong>: enable summarization to keep context compact</li>
+        <li><strong>Long conversations</strong>: use the agent's compaction (<code>SetCompaction</code>) to keep context compact</li>
         <li><strong>Long-term recall</strong>: use semantic memory via <code>memory/rag</code></li>
       </ul>
     </section>

@@ -23,6 +23,7 @@ import (
 
 	"github.com/henomis/phero/v2/agent"
 	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/memory/simple"
 	"github.com/henomis/phero/v2/trace"
 	"github.com/henomis/phero/v2/trace/tracetest"
 )
@@ -351,5 +352,82 @@ func TestTracing_ProviderInheritedFromContext(t *testing.T) {
 
 	if len(rec.ByKind(trace.KindRun)) != 1 || res.Summary.SessionID != "s1" {
 		t.Fatalf("provider or session not taken from ctx: %+v", res.Summary)
+	}
+}
+
+func TestTracing_SummaryCompactorCallsCountInTheRun(t *testing.T) {
+	client := &scriptedLLM{fn: func(call int, _ []llm.Message) (*llm.Result, error) {
+		if call == 1 {
+			return toolCallResultWithUsage("echo", "c1", paddedArgs, &llm.Usage{InputTokens: 900, OutputTokens: 200}), nil
+		}
+
+		return textResult("done"), nil
+	}}
+
+	summarizer := llm.Func(func(_ context.Context, _ []llm.Message, _ ...llm.CallOption) (*llm.Result, error) {
+		r := textResult("summary")
+		r.Model = "summary-model"
+		r.Usage = &llm.Usage{InputTokens: 50, OutputTokens: 7}
+
+		return r, nil
+	})
+
+	rec, p := newTracedProvider()
+	a := mustNew(t, client, "agent", "desc")
+	a.SetTracing(p)
+	addEchoTool(t, a)
+	a.SetCompaction(agent.NewSummaryCompactor(summarizer, agent.WithSummaryKeepRecent(1)), 1000)
+
+	res, err := a.Run(context.Background(), llm.Text("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	compacts := rec.ByName(string(trace.KindMemory) + " compact")
+	if len(compacts) != 1 {
+		t.Fatalf("expected 1 compaction span, got %d", len(compacts))
+	}
+
+	children := rec.Children(compacts[0].Context)
+	if len(children) != 1 || children[0].Kind != trace.KindLLM {
+		t.Fatalf("the summary call should nest under the compaction span: %+v", children)
+	}
+
+	s := res.Summary
+	if got := s.ByModel["summary-model"]; got.Calls != 1 || got.Usage.InputTokens != 50 || got.Usage.OutputTokens != 7 {
+		t.Fatalf("summary call not rolled up: %+v", s.ByModel)
+	}
+
+	agentUsage := s.ByModel["unknown"].Usage
+	if s.LLMCalls != 3 || s.Usage.InputTokens != agentUsage.InputTokens+50 || s.Usage.OutputTokens != agentUsage.OutputTokens+7 {
+		t.Fatalf("run totals miss the summary call: %+v", s)
+	}
+}
+
+func TestTracing_MemorySummarizationCountsInTheRun(t *testing.T) {
+	client := llm.Func(func(_ context.Context, _ []llm.Message, _ ...llm.CallOption) (*llm.Result, error) {
+		return textResult("done"), nil
+	})
+
+	summarizer := llm.Func(func(_ context.Context, _ []llm.Message, _ ...llm.CallOption) (*llm.Result, error) {
+		r := textResult("summary")
+		r.Model = "summary-model"
+		r.Usage = &llm.Usage{InputTokens: 50, OutputTokens: 7}
+
+		return r, nil
+	})
+
+	_, p := newTracedProvider()
+	a := mustNew(t, client, "agent", "desc")
+	a.SetTracing(p)
+	a.SetMemory(simple.New(10, simple.WithSummarization(summarizer, 2, 1))) //nolint:staticcheck // the deprecated summarization is what is tested
+
+	res, err := a.Run(context.Background(), llm.Text("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := res.Summary.ByModel["summary-model"]; got.Calls != 1 || got.Usage.InputTokens != 50 || got.Usage.OutputTokens != 7 {
+		t.Fatalf("memory summary call not rolled up: %+v", res.Summary.ByModel)
 	}
 }

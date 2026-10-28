@@ -22,11 +22,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/henomis/phero/v2/llm"
 )
@@ -36,9 +38,9 @@ import (
 // Command is the bash command to execute. Description provides context on why the command is being run.
 type Input struct {
 	Command         string `json:"command" jsonschema:"description=The command to execute."`
-	Description     string `json:"description,omitempty" jsonschema:"description=Clear, concise command description (5-10 words)."` //nolint:lll
-	Timeout         int    `json:"timeout,omitempty" jsonschema:"description=Optional timeout in milliseconds (max 600000)."`       //nolint:lll
-	RunInBackground bool   `json:"run_in_background,omitempty" jsonschema:"description=Set true to run the command in background."` //nolint:lll
+	Description     string `json:"description,omitempty" jsonschema_description:"Clear, concise command description (5-10 words)."`                    //nolint:lll
+	Timeout         int    `json:"timeout,omitempty" jsonschema:"description=Optional timeout in milliseconds (max 600000 for a foreground command)."` //nolint:lll
+	RunInBackground bool   `json:"run_in_background,omitempty" jsonschema:"description=Set true to run the command in background."`                    //nolint:lll
 }
 
 // Output represents the output from bash_tool.
@@ -49,6 +51,9 @@ type Output struct {
 	BashID    string `json:"bash_id,omitempty"`
 	Running   bool   `json:"running"`
 	Truncated bool   `json:"truncated"`
+	// TimedOut reports that the command was killed when its timeout expired;
+	// Output holds what it printed until then.
+	TimedOut bool `json:"timed_out,omitempty"`
 }
 
 // OutputInput represents input for retrieving background shell output.
@@ -62,6 +67,10 @@ type OutputOutput struct {
 	Output    string `json:"output"`
 	Running   bool   `json:"running"`
 	Truncated bool   `json:"truncated"`
+	// Dropped is how many bytes the shell wrote since the last read that were
+	// dropped, unread, to keep its output under the cap (see
+	// WithMaxBackgroundOutput). Output starts with a note when it is not 0.
+	Dropped int `json:"dropped,omitempty"`
 }
 
 // KillShellInput represents input for terminating a background shell.
@@ -84,9 +93,24 @@ const DefaultTimeout = 120 * time.Second
 // MaxTimeout is the maximum allowed timeout for command execution.
 const MaxTimeout = 600 * time.Second
 
-// MaxOutputChars is the maximum number of output characters returned from a
-// single tool call before truncation.
-const MaxOutputChars = 30000
+// DefaultMaxBackgroundOutput is the most output, in bytes, a background shell
+// keeps: older output is dropped. See WithMaxBackgroundOutput.
+const DefaultMaxBackgroundOutput = 1 << 20
+
+// DefaultMaxOutputChars is the most output, in bytes, a single tool call
+// returns unless WithMaxOutputChars sets another cap. Truncated output keeps
+// its start and its end, where errors usually are, and marks the cut.
+const DefaultMaxOutputChars = 30000
+
+// MaxOutputChars is DefaultMaxOutputChars.
+//
+// Deprecated: use DefaultMaxOutputChars.
+const MaxOutputChars = DefaultMaxOutputChars
+
+// waitDelay is how long a command killed at its timeout may keep its output
+// open (a child process still writing) before the pipes are closed, so the
+// call returns.
+const waitDelay = 2 * time.Second
 
 const randomIDBytes = 8
 
@@ -119,9 +143,24 @@ type Tool struct {
 	maxOutputChars int
 	blocklist      []string
 	allowlist      []string
+	runner         Runner
+	envAllowlist   []string
+	extraEnv       []string
+	persistent     bool
+	state          shellState
+	onOutput       func(context.Context, []byte)
 
-	mu    sync.RWMutex
-	shell map[string]*backgroundShell
+	backgroundTimeout   time.Duration
+	maxBackgroundOutput int
+
+	// baseCtx is the parent of every background shell's context; Close
+	// cancels it.
+	baseCtx    context.Context //nolint:containedctx // owns the background shells' lifetime
+	baseCancel context.CancelFunc
+
+	mu     sync.RWMutex
+	shell  map[string]*backgroundShell
+	closed bool
 }
 
 type backgroundShell struct {
@@ -135,6 +174,10 @@ type backgroundShell struct {
 	out        bytes.Buffer
 	readOffset int
 	running    bool
+	// maxOut caps out (0 or less: no cap); unreadDropped counts the bytes
+	// dropped before bash_output returned them.
+	maxOut        int
+	unreadDropped int
 }
 
 // Option represents a configuration option for the bash_tool.
@@ -143,17 +186,27 @@ type Option func(*Tool)
 // New creates a new instance of the bash_tool.
 func New(options ...Option) (*Tool, error) {
 	name := "bash"
-	description := "Executes a given bash command in a persistent shell session with optional timeout and background execution." //nolint:lll
 
 	bashTool := &Tool{
-		defaultTimeout: DefaultTimeout,
-		maxTimeout:     MaxTimeout,
-		maxOutputChars: MaxOutputChars,
-		shell:          map[string]*backgroundShell{},
+		defaultTimeout:      DefaultTimeout,
+		maxTimeout:          MaxTimeout,
+		maxOutputChars:      DefaultMaxOutputChars,
+		maxBackgroundOutput: DefaultMaxBackgroundOutput,
+		runner:              LocalRunner{},
+		shell:               map[string]*backgroundShell{},
 	}
+
+	bashTool.baseCtx, bashTool.baseCancel = context.WithCancel(context.Background())
 
 	for _, option := range options {
 		option(bashTool)
+	}
+
+	description := "Executes a given bash command with optional timeout and background execution. " +
+		"Each command starts in a fresh shell: cd and exported variables do not carry over."
+	if bashTool.persistent {
+		description = "Executes a given bash command in a persistent shell session with optional timeout and " +
+			"background execution: the working directory and exported variables carry over between commands."
 	}
 
 	tool, err := llm.NewTool(
@@ -214,6 +267,80 @@ func WithWorkingDirectory(dir string) Option {
 	}
 }
 
+// WithRunner sets how commands are launched: LocalRunner (the default) runs
+// them on the host; NewBubblewrapRunner runs them in a sandbox.
+func WithRunner(r Runner) Option {
+	return func(t *Tool) {
+		if r != nil {
+			t.runner = r
+		}
+	}
+}
+
+// WithEnvAllowlist limits the environment commands get to the variables
+// named, instead of the agent process's whole environment, which may hold
+// secrets such as API keys. DefaultEnvAllowlist() is a sane choice.
+func WithEnvAllowlist(names ...string) Option {
+	return func(t *Tool) {
+		t.envAllowlist = append([]string{}, names...)
+	}
+}
+
+// WithPersistentShell makes the working directory and the exported
+// environment variables carry over from one command to the next, as in an
+// interactive shell: after `cd sub`, the next command runs in sub. Each
+// command still runs in its own process. A command that calls exit, times out
+// or runs in the background does not change the carried state, and a
+// background command starts from it. Commands run concurrently update it in
+// the order they finish.
+func WithPersistentShell() Option {
+	return func(t *Tool) {
+		t.persistent = true
+	}
+}
+
+// WithEnv adds KEY=VALUE entries to the environment of every command.
+func WithEnv(entries ...string) Option {
+	return func(t *Tool) {
+		t.extraEnv = append(t.extraEnv, entries...)
+	}
+}
+
+// WithOutputHandler calls fn with each piece of output a foreground command
+// writes, as it writes it, so a UI can show a long command's progress (for
+// example go test) before the call returns. Stdout and stderr arrive
+// interleaved, as in the result. fn gets the tool call's context: the agent
+// sets the call in it, so llm.ToolCallFromContext(ctx) tells which call the
+// chunk belongs to. fn runs on the command's output path, so it should be
+// quick, and calls for one command never overlap. Background commands are not
+// streamed: read them with the bash_output tool.
+func WithOutputHandler(fn func(ctx context.Context, chunk []byte)) Option {
+	return func(t *Tool) {
+		t.onOutput = fn
+	}
+}
+
+// WithBackgroundTimeout limits how long a background command may run before
+// it is killed. 0 (the default) means no limit, so a dev server or a watcher
+// keeps running until kill_shell or Close. When set, it also caps the timeout
+// the model asks for. The foreground limits (WithTimeout, WithDefaultTimeout,
+// WithMaxTimeout) do not apply to background commands.
+func WithBackgroundTimeout(d time.Duration) Option {
+	return func(t *Tool) {
+		t.backgroundTimeout = d
+	}
+}
+
+// WithMaxBackgroundOutput sets how many bytes of output each background shell
+// keeps (default DefaultMaxBackgroundOutput). When a shell writes more, its
+// oldest output is dropped, and bash_output says how much was dropped unread.
+// 0 or less means no cap.
+func WithMaxBackgroundOutput(bytes int) Option {
+	return func(t *Tool) {
+		t.maxBackgroundOutput = bytes
+	}
+}
+
 // WithTimeout sets a maximum execution duration for each command.
 // When the context deadline is shorter than the configured timeout, the
 // context deadline takes precedence. A value of 0 (the default) means no
@@ -239,7 +366,8 @@ func WithMaxTimeout(d time.Duration) Option {
 	}
 }
 
-// WithMaxOutputChars sets the output truncation threshold.
+// WithMaxOutputChars sets how much output, in bytes, a call returns at most;
+// the default is DefaultMaxOutputChars.
 func WithMaxOutputChars(chars int) Option {
 	return func(t *Tool) {
 		t.maxOutputChars = chars
@@ -295,35 +423,12 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 		return nil, ErrTimeoutTooLarge
 	}
 
-	lower := strings.ToLower(input.Command)
-	for _, pat := range t.blocklist {
-		if strings.Contains(lower, pat) {
-			return nil, ErrCommandBlocked
-		}
-	}
-
-	if len(t.allowlist) > 0 {
-		allowed := false
-
-		for _, pat := range t.allowlist {
-			if strings.Contains(lower, pat) {
-				allowed = true
-				break
-			}
-		}
-
-		if !allowed {
-			return nil, ErrCommandNotAllowed
-		}
-	}
-
-	cmdTimeout, err := t.resolveTimeout(input.Timeout)
-	if err != nil {
+	if err := t.checkCommand(input.Command); err != nil {
 		return nil, err
 	}
 
 	if input.RunInBackground {
-		shellID, startErr := t.startBackground(input.Command, cmdTimeout)
+		shellID, startErr := t.startBackground(input.Command, t.resolveBackgroundTimeout(input.Timeout))
 		if startErr != nil {
 			return nil, startErr
 		}
@@ -331,6 +436,19 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 		return &Output{BashID: shellID, Running: true}, nil
 	}
 
+	cmdTimeout, err := t.resolveTimeout(input.Timeout)
+	if err != nil {
+		return nil, err
+	}
+
+	return t.runForeground(ctx, input.Command, cmdTimeout)
+}
+
+// runForeground runs command and waits for it, killing it when timeout (if
+// any) expires. A command that times out returns what it printed so far, and
+// one that fails returns its output with its exit code; an error means the
+// command could not run or ctx ended.
+func (t *Tool) runForeground(ctx context.Context, command string, cmdTimeout time.Duration) (*Output, error) {
 	runCtx := ctx
 
 	if cmdTimeout > 0 {
@@ -340,22 +458,57 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(runCtx, "bash", "-c", input.Command) //nolint:gosec,lll // intentional: bash tool executes arbitrary commands by design
-	if t.workingDir != "" {
-		cmd.Dir = t.workingDir
+	script := command
+	if t.persistent {
+		script = persistentScript(command)
 	}
 
-	combined, err := cmd.CombinedOutput()
+	cmd, err := t.newCommand(runCtx, script)
+	if err != nil {
+		return nil, err
+	}
+
+	var report *stateReport
+	if t.persistent {
+		if report, err = attachStateReport(cmd); err != nil {
+			return nil, err
+		}
+	}
+
+	var buf bytes.Buffer
+
+	w := &streamWriter{ctx: ctx, buf: &buf, fn: t.onOutput}
+	cmd.Stdout, cmd.Stderr = w, w
+
+	err = cmd.Run()
+	combined := buf.Bytes()
+
+	if report != nil {
+		t.recordState(cmd, report, runCtx.Err() == nil)
+	}
+
 	out, truncated := t.truncateOutput(string(combined))
 
 	if err == nil {
 		return &Output{Output: out, Running: false, Truncated: truncated}, nil
 	}
 
-	// If the context expired (timeout or cancellation), surface that error
-	// rather than the process exit error so callers can distinguish policy failures.
+	// The caller's context ended: surface that rather than the exit error.
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	// The command's own timeout expired: return what it printed so far, so
+	// the model can see how far it got.
 	if runCtx.Err() != nil {
-		return nil, runCtx.Err()
+		if out != "" && !strings.HasSuffix(out, "\n") {
+			out += "\n"
+		}
+
+		// The output is already truncated: the note goes after it, uncut.
+		out += fmt.Sprintf("command timed out after %s", cmdTimeout)
+
+		return &Output{Output: out, Truncated: truncated, TimedOut: true}, nil
 	}
 
 	// If the command executed but failed (non-zero exit), return output with an inline marker
@@ -366,8 +519,8 @@ func (t *Tool) run(ctx context.Context, input *Input) (*Output, error) {
 			out += "\n"
 		}
 
+		// The output is already truncated: the note goes after it, uncut.
 		out += fmt.Sprintf("exit code: %d", exitErr.ExitCode())
-		out, truncated = t.truncateOutput(out)
 
 		return &Output{Output: out, Running: false, Truncated: truncated}, nil
 	}
@@ -414,7 +567,16 @@ func (t *Tool) output(_ context.Context, input *OutputInput) (*OutputOutput, err
 	incremental := raw[shell.readOffset:]
 	shell.readOffset = len(raw)
 	running := shell.running
+	dropped := shell.unreadDropped
+	shell.unreadDropped = 0
 	shell.mu.Unlock()
+
+	// A finished shell whose output has now been read in full is forgotten.
+	if !running {
+		t.mu.Lock()
+		delete(t.shell, input.BashID)
+		t.mu.Unlock()
+	}
 
 	if re != nil && incremental != "" {
 		lines := strings.Split(incremental, "\n")
@@ -430,8 +592,11 @@ func (t *Tool) output(_ context.Context, input *OutputInput) (*OutputOutput, err
 	}
 
 	trimmed, truncated := t.truncateOutput(incremental)
+	if dropped > 0 {
+		trimmed = fmt.Sprintf("[... %d bytes dropped ...]\n", dropped) + trimmed
+	}
 
-	return &OutputOutput{Output: trimmed, Running: running, Truncated: truncated}, nil
+	return &OutputOutput{Output: trimmed, Running: running, Truncated: truncated, Dropped: dropped}, nil
 }
 
 func (t *Tool) kill(_ context.Context, input *KillShellInput) (*KillShellOutput, error) {
@@ -460,7 +625,7 @@ func (t *Tool) kill(_ context.Context, input *KillShellInput) (*KillShellOutput,
 		return &KillShellOutput{Killed: false}, nil
 	}
 
-	if err := proc.Kill(); err != nil {
+	if err := killProcessGroup(proc); err != nil {
 		return nil, err
 	}
 
@@ -493,16 +658,72 @@ func (t *Tool) resolveTimeout(timeoutMs int) (time.Duration, error) {
 	return effective, nil
 }
 
+// resolveBackgroundTimeout returns the timeout of a background command: the
+// one the model asked for, else WithBackgroundTimeout's, capped by it when it
+// is set. 0 means no limit.
+func (t *Tool) resolveBackgroundTimeout(timeoutMs int) time.Duration {
+	if timeoutMs <= 0 {
+		return t.backgroundTimeout
+	}
+
+	requested := time.Duration(timeoutMs) * time.Millisecond
+	if t.backgroundTimeout > 0 && requested > t.backgroundTimeout {
+		return t.backgroundTimeout
+	}
+
+	return requested
+}
+
+// checkCommand applies the blocklist and the allowlist, case-insensitively,
+// to command.
+func (t *Tool) checkCommand(command string) error {
+	lower := strings.ToLower(command)
+	for _, pat := range t.blocklist {
+		if strings.Contains(lower, pat) {
+			return ErrCommandBlocked
+		}
+	}
+
+	if len(t.allowlist) == 0 {
+		return nil
+	}
+
+	for _, pat := range t.allowlist {
+		if strings.Contains(lower, pat) {
+			return nil
+		}
+	}
+
+	return ErrCommandNotAllowed
+}
+
+// truncateOutput cuts output longer than maxOutputChars bytes to its first and
+// last halves, joined by a marker saying how many bytes were cut. The cuts
+// fall on UTF-8 character boundaries.
 func (t *Tool) truncateOutput(output string) (string, bool) {
-	if t.maxOutputChars <= 0 {
+	if t.maxOutputChars <= 0 || len(output) <= t.maxOutputChars {
 		return output, false
 	}
 
-	if len(output) <= t.maxOutputChars {
-		return output, false
+	head := runeBoundary(output, t.maxOutputChars/2) //nolint:mnd // half for the start, half for the end
+	tail := len(output) - (t.maxOutputChars - head)
+
+	// Move the tail's start forward to the next character boundary.
+	for tail < len(output) && !utf8.RuneStart(output[tail]) {
+		tail++
 	}
 
-	return output[:t.maxOutputChars], true
+	return output[:head] + fmt.Sprintf("\n[... %d bytes truncated ...]\n", tail-head) + output[tail:], true
+}
+
+// runeBoundary returns the largest index i <= n where a UTF-8 character of s
+// starts, so s[:i] does not split one.
+func runeBoundary(s string, n int) int {
+	for n > 0 && n < len(s) && !utf8.RuneStart(s[n]) {
+		n--
+	}
+
+	return n
 }
 
 func (t *Tool) startBackground(command string, timeout time.Duration) (string, error) {
@@ -511,16 +732,21 @@ func (t *Tool) startBackground(command string, timeout time.Duration) (string, e
 		return "", err
 	}
 
-	baseCtx := context.Background()
+	var (
+		baseCtx context.Context
+		cancel  context.CancelFunc
+	)
 
-	var cancel context.CancelFunc
 	if timeout > 0 {
-		baseCtx, cancel = context.WithTimeout(context.Background(), timeout)
+		baseCtx, cancel = context.WithTimeout(t.baseCtx, timeout)
+	} else {
+		baseCtx, cancel = context.WithCancel(t.baseCtx)
 	}
 
-	cmd := exec.CommandContext(baseCtx, "bash", "-c", command) //nolint:gosec,lll // intentional: bash tool executes arbitrary commands by design
-	if t.workingDir != "" {
-		cmd.Dir = t.workingDir
+	cmd, err := t.newCommand(baseCtx, command)
+	if err != nil {
+		cancel()
+		return "", err
 	}
 
 	shell := &backgroundShell{
@@ -529,26 +755,34 @@ func (t *Tool) startBackground(command string, timeout time.Duration) (string, e
 		doneCh:  make(chan struct{}),
 		cancel:  cancel,
 		running: true,
+		maxOut:  t.maxBackgroundOutput,
 	}
 
 	writer := &lockedWriter{shell: shell}
 	cmd.Stdout = writer
 	cmd.Stderr = writer
 
+	// The lock covers the closed check and the start, so Close either sees
+	// the shell or makes the start fail.
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.closed {
+		cancel()
+		return "", ErrClosed
+	}
+
 	if startErr := cmd.Start(); startErr != nil {
+		cancel()
 		return "", startErr
 	}
 
-	t.mu.Lock()
 	t.shell[shellID] = shell
-	t.mu.Unlock()
 
 	go func() {
 		_ = cmd.Wait()
 
-		if shell.cancel != nil {
-			shell.cancel()
-		}
+		shell.cancel()
 
 		shell.mu.Lock()
 		shell.running = false
@@ -568,13 +802,103 @@ func randomID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// streamWriter collects a foreground command's output and passes each piece
+// to fn as it arrives. The lock keeps writes ordered when stdout and stderr
+// are copied by separate goroutines.
+type streamWriter struct {
+	ctx context.Context //nolint:containedctx // handed to fn with each chunk
+	fn  func(context.Context, []byte)
+
+	mu  sync.Mutex
+	buf *bytes.Buffer
+}
+
+func (w *streamWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	n, err := w.buf.Write(p)
+	if w.fn != nil && n > 0 {
+		// The caller may reuse p once Write returns.
+		w.fn(w.ctx, bytes.Clone(p[:n]))
+	}
+
+	return n, err
+}
+
 type lockedWriter struct {
 	shell *backgroundShell
 }
 
+// Write appends p to the shell's output. Past the cap it drops the oldest
+// bytes, on a UTF-8 character boundary.
 func (w *lockedWriter) Write(p []byte) (int, error) {
-	w.shell.mu.Lock()
-	defer w.shell.mu.Unlock()
+	s := w.shell
 
-	return w.shell.out.Write(p)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	n, err := s.out.Write(p)
+
+	if s.maxOut > 0 && s.out.Len() > s.maxOut {
+		data := s.out.Bytes()
+
+		drop := len(data) - s.maxOut
+		for drop < len(data) && !utf8.RuneStart(data[drop]) {
+			drop++
+		}
+
+		s.unreadDropped += max(drop-s.readOffset, 0)
+		s.readOffset = max(s.readOffset-drop, 0)
+		s.out.Next(drop) // discards without copying
+	}
+
+	return n, err
+}
+
+// Close kills every background shell the tool started and waits, briefly, for
+// them to exit. Call it with defer when the app ends, so dev servers and
+// watchers do not outlive it. Foreground commands still run afterwards, but a
+// new background command returns ErrClosed.
+func (t *Tool) Close() error {
+	t.mu.Lock()
+	t.closed = true
+
+	shells := make([]*backgroundShell, 0, len(t.shell))
+	for _, shell := range t.shell {
+		shells = append(shells, shell)
+	}
+	t.mu.Unlock()
+
+	var errs []error
+
+	for _, shell := range shells {
+		shell.mu.Lock()
+		running := shell.running
+		shell.mu.Unlock()
+
+		if !running {
+			continue
+		}
+
+		if err := killProcessGroup(shell.cmd.Process); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			errs = append(errs, err)
+		}
+	}
+
+	timer := time.NewTimer(waitDelay)
+	defer timer.Stop()
+
+wait:
+	for _, shell := range shells {
+		select {
+		case <-shell.doneCh:
+		case <-timer.C:
+			break wait
+		}
+	}
+
+	t.baseCancel()
+
+	return errors.Join(errs...)
 }

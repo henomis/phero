@@ -17,6 +17,7 @@ package memory
 import (
 	"fmt"
 
+	"github.com/henomis/phero/v2/internal/summary"
 	"github.com/henomis/phero/v2/llm"
 )
 
@@ -33,6 +34,8 @@ Analyze the dialogue below and generate a concise summary based on these four pi
 2. **User Preferences:** Explicit or implicit likes, dislikes, and stylistic requirements
 (e.g., "Prefers Go over Python," "Dislikes verbose explanations").
 3. **Current Progress:** What was achieved in this window? What problems were solved?
+Include the tool calls that mattered and their outcome: files read or changed, commands
+run, errors met.
 4. **Open Loops:** What are the pending questions, tasks, or follow-up items the user is expecting?
 
 # Constraints
@@ -81,11 +84,10 @@ func ClampSummarySize(summarizeThreshold, summarySize uint) uint {
 // FormatSummaryPrompt builds the summarization request message sent to the LLM
 // when a memory backend needs to condense its conversation history. The returned
 // message has the user role so that the model treats it as a regular user turn.
+//
+// Tool calls are listed with their arguments and tool results with their
+// text, both cut to a few hundred or thousand characters, so the summary can
+// record what the agent did and not only what it said.
 func FormatSummaryPrompt(conversation []llm.Message) llm.Message {
-	var formatted string
-	for _, msg := range conversation {
-		formatted += "## " + msg.Role + "\n" + msg.TextContent() + "\n\n"
-	}
-
-	return llm.UserMessage(llm.Text(fmt.Sprintf(summaryPrompt, formatted)))
+	return llm.UserMessage(llm.Text(fmt.Sprintf(summaryPrompt, summary.Conversation(conversation))))
 }

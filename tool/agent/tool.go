@@ -31,7 +31,7 @@ const (
 type Input struct {
 	Name        string `json:"name" jsonschema:"description=The name of the agent to create and run."`
 	Description string `json:"description" jsonschema:"description=The system prompt or role description for the agent."`
-	Input       string `json:"input" jsonschema:"description=Instructions for the delegated agent. Describe the task, question, or problem the agent should solve."` //nolint:lll
+	Input       string `json:"input" jsonschema_description:"Instructions for the delegated agent. Describe the task, question, or problem the agent should solve."` //nolint:lll
 }
 
 // Output defines the JSON output schema returned by the tool.

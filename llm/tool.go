@@ -35,6 +35,25 @@ type ToolHandler func(ctx context.Context, arguments string) (any, error)
 // Middleware order is preserved: if you call tool.Use(m1, m2), m1 runs before m2.
 type ToolMiddleware func(tool *Tool, next ToolHandler) ToolHandler
 
+// toolCallKey is the context key of the tool call a handler runs for.
+type toolCallKey struct{}
+
+// ContextWithToolCall returns ctx carrying call, the model's tool call a tool
+// handler is about to run for. The agent sets it before running each tool, so
+// handlers and tool middlewares can read the call's ID and arguments with
+// ToolCallFromContext.
+func ContextWithToolCall(ctx context.Context, call ToolCall) context.Context {
+	return context.WithValue(ctx, toolCallKey{}, call)
+}
+
+// ToolCallFromContext returns the tool call ctx carries, set with
+// ContextWithToolCall, and whether it carries one.
+func ToolCallFromContext(ctx context.Context) (ToolCall, bool) {
+	call, ok := ctx.Value(toolCallKey{}).(ToolCall)
+
+	return call, ok
+}
+
 // Tool is a Tool that wraps a function.
 type Tool struct {
 	// The name of the tool, as shown to the LLM. Generally the name of the function.
@@ -43,8 +62,13 @@ type Tool struct {
 	// A description of the tool, as shown to the LLM.
 	description string
 
-	// The JSON schema for the tool's parameters.
+	// The JSON schema for the tool's parameters, in the strict form, and as
+	// reflected or given, where optional fields are not required.
 	inputSchema map[string]any
+	looseSchema map[string]any
+
+	// strict reports whether InputSchema returns the strict schema.
+	strict bool
 
 	// Handle calls the underlying function with the given arguments.
 	handle ToolHandler
@@ -52,6 +76,51 @@ type Tool struct {
 	// middlewares wraps the tool handler to provide cross-cutting behavior
 	// (e.g., input validation, permission checks, logging).
 	middlewares []ToolMiddleware
+
+	// exclusive marks a tool whose calls must not overlap any other call.
+	exclusive bool
+}
+
+// SetStrict chooses the schema the tool is offered with. Strict (the default)
+// lists every property as required and forbids others, as OpenAI and
+// Anthropic strict tool use need, so the model always sends every field. Not
+// strict keeps the schema as reflected (a field tagged omitempty is optional)
+// or as given to NewRawTool, and providers send the tool without strict mode:
+// useful for optional arguments, and for local servers that mishandle strict
+// schemas.
+func (t *Tool) SetStrict(strict bool) *Tool {
+	t.strict = strict
+	return t
+}
+
+// Strict reports whether the tool is offered in strict mode (see SetStrict).
+func (t *Tool) Strict() bool {
+	return t.strict
+}
+
+// Schema returns the tool's input schema in the strict form, or as reflected
+// or given when strict is false. Providers that can turn strict mode off for
+// every tool use it; InputSchema returns the tool's own choice.
+func (t *Tool) Schema(strict bool) map[string]any {
+	if strict || t.looseSchema == nil {
+		return t.inputSchema
+	}
+
+	return t.looseSchema
+}
+
+// SetExclusive marks the tool as exclusive: when the model calls several
+// tools at once, an agent runs each call of this tool alone, in call order,
+// after the calls before it and before the calls after it. Use it for tools
+// whose calls depend on each other, such as edits of the same file.
+func (t *Tool) SetExclusive(exclusive bool) *Tool {
+	t.exclusive = exclusive
+	return t
+}
+
+// Exclusive reports whether the tool is exclusive (see SetExclusive).
+func (t *Tool) Exclusive() bool {
+	return t.exclusive
 }
 
 // Name returns the stable name used to identify this tool to the LLM.
@@ -66,7 +135,7 @@ func (t *Tool) Description() string {
 
 // InputSchema returns the JSON schema for the tool's parameters, as shown to the LLM.
 func (t *Tool) InputSchema() map[string]any {
-	return t.inputSchema
+	return t.Schema(t.strict)
 }
 
 // Handle calls the underlying function with the given arguments.
@@ -132,20 +201,17 @@ func NewTool[T, R any](name, description string, handler func(ctx context.Contex
 		return nil, &ToolSchemaTransformError{Err: err}
 	}
 
-	schemaMap, err = ensureStrictJSONSchema(schemaMap)
+	strictSchema, looseSchema, err := strictAndLoose(schemaMap, description)
 	if err != nil {
-		return nil, &ToolSchemaStrictnessError{Err: err}
-	}
-
-	// Add description at the top level if provided
-	if description != "" && schemaMap != nil {
-		schemaMap["description"] = description
+		return nil, err
 	}
 
 	return &Tool{
 		name:        name,
 		description: description,
-		inputSchema: schemaMap,
+		inputSchema: strictSchema,
+		looseSchema: looseSchema,
+		strict:      true,
 		handle: func(ctx context.Context, arguments string) (any, error) {
 			var args T
 			if parseErr := json.Unmarshal([]byte(arguments), &args); parseErr != nil {
@@ -227,19 +293,50 @@ func NewRawTool(name, description string, inputSchema map[string]any, handler To
 		return nil, &ToolSchemaTransformError{Err: err}
 	}
 
-	schemaMap, err = ensureStrictJSONSchema(schemaMap)
+	strictSchema, looseSchema, err := strictAndLoose(schemaMap, description)
 	if err != nil {
-		return nil, &ToolSchemaStrictnessError{Err: err}
-	}
-
-	if description != "" && schemaMap != nil {
-		schemaMap["description"] = description
+		return nil, err
 	}
 
 	return &Tool{
 		name:        name,
 		description: description,
-		inputSchema: schemaMap,
+		inputSchema: strictSchema,
+		looseSchema: looseSchema,
+		strict:      true,
 		handle:      handler,
 	}, nil
+}
+
+// strictAndLoose returns the strict form of schemaMap and a copy of it as it
+// is, both with the tool's description at the top level when given. It may
+// modify schemaMap.
+func strictAndLoose(schemaMap map[string]any, description string) (map[string]any, map[string]any, error) {
+	looseSchema, err := jsonEncodeDecode[map[string]any](schemaMap)
+	if err != nil {
+		return nil, nil, &ToolSchemaTransformError{Err: err}
+	}
+
+	// An empty schema has no loose form worth keeping: the strict empty
+	// object is valid either way.
+	if len(looseSchema) == 0 {
+		looseSchema = nil
+	}
+
+	strictSchema, err := ensureStrictJSONSchema(schemaMap)
+	if err != nil {
+		return nil, nil, &ToolSchemaStrictnessError{Err: err}
+	}
+
+	if description != "" {
+		if strictSchema != nil {
+			strictSchema["description"] = description
+		}
+
+		if looseSchema != nil {
+			looseSchema["description"] = description
+		}
+	}
+
+	return strictSchema, looseSchema, nil
 }

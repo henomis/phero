@@ -62,3 +62,20 @@ func (e *TooLargeError) Error() string {
 func (e *TooLargeError) Is(target error) bool {
 	return target == ErrFileTooLarge
 }
+
+// ErrFileNotRead is returned by write and edit, with a ReadTracker, for an
+// existing file the read tool has not read.
+var ErrFileNotRead = errors.New("file must be read before it is changed")
+
+// ChangedError is returned by write and edit, with a ReadTracker, for a
+// file that changed on disk since the read tool read it.
+type ChangedError struct {
+	Path string
+}
+
+func (e *ChangedError) Error() string {
+	return fmt.Sprintf("%s changed since it was read: read it again", e.Path)
+}
+
+// ErrEditsRequired is returned when multi_edit is called without edits.
+var ErrEditsRequired = errors.New("edits are required")

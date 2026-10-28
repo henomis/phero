@@ -168,7 +168,7 @@ Extend this example to learn more:
 
 1. **Add save/load commands** - Persist conversations to JSON files
 2. **Topic detection** - Auto-clear memory when topic changes
-3. **Summarization** - Keep summaries when buffer is full
+3. **Summarization** - Run with `-summarize` (and `-compact-at`, `-keep-recent`): the agent summarizes older history into a snapshot the memory keeps (`agent.SetCompaction`)
 4. **More tools** - Weather, calculator, search, etc.
 5. **Colored output** - Use ANSI colors for better readability
 6. **Streaming responses** - Show partial responses as they're generated

@@ -220,10 +220,15 @@ func (t *Totals) addOwn(payload Payload, agent string, dur time.Duration, failed
 		})
 	case *Memory:
 		t.MemoryTime += dur
-		if p.Op == MemorySave {
+
+		switch p.Op {
+		case MemorySave:
 			t.MemorySaved += p.Count
-		} else {
+		case MemoryRetrieve:
 			t.MemoryRetrieved += p.Count
+		case MemoryCompact, MemorySnapshot:
+			// They rewrite the session or store a summary: no message is
+			// loaded from or saved to the log.
 		}
 	}
 }

@@ -116,3 +116,58 @@ func TestRetryAfter(t *testing.T) {
 		}
 	}
 }
+
+func TestIsContextLengthError(t *testing.T) {
+	cases := []struct {
+		status  int
+		message string
+		want    bool
+	}{
+		{http.StatusBadRequest, "prompt is too long: 210000 tokens > 200000 maximum", true},
+		{http.StatusRequestEntityTooLarge, "request_too_large", true},
+		{http.StatusBadRequest, "messages: field required", false},
+		{http.StatusTooManyRequests, "prompt is too long", false},
+	}
+
+	for _, tc := range cases {
+		if got := isContextLengthError(tc.status, tc.message); got != tc.want {
+			t.Errorf("isContextLengthError(%d, %q) = %v, want %v", tc.status, tc.message, got, tc.want)
+		}
+	}
+}
+
+func TestToolCallInput(t *testing.T) {
+	cases := map[string]int{
+		`{"path": "a.go"}`: 1,
+		`{"path": "a.go"`:  0, // cut off at the token limit
+		`[1, 2]`:           0,
+		`null`:             0,
+		``:                 0,
+	}
+
+	for args, want := range cases {
+		if got := toolCallInput(args); got == nil || len(got) != want {
+			t.Errorf("toolCallInput(%q) = %v, want an object with %d keys", args, got, want)
+		}
+	}
+}
+
+func TestAnthropicTools_Strictness(t *testing.T) {
+	type input struct {
+		Path  string `json:"path"`
+		Limit int    `json:"limit,omitempty"`
+	}
+
+	tool, err := llm.NewTool("read", "read a file", func(context.Context, input) (string, error) { return "", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := anthropicTools([]*llm.Tool{tool}, false)[0].OfTool; !got.Strict.Valid() || len(got.InputSchema.Required) != 2 {
+		t.Fatalf("default tool = %+v, want strict with every field required", got)
+	}
+
+	if got := anthropicTools([]*llm.Tool{tool}, true)[0].OfTool; got.Strict.Valid() || len(got.InputSchema.Required) != 1 {
+		t.Fatalf("non-strict tool = %+v, want no strict flag and only path required", got)
+	}
+}

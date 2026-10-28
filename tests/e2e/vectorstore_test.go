@@ -534,7 +534,7 @@ func TestVectorStoreQdrant_QueryWithFilter(t *testing.T) {
 
 	collection := "e2e-flt-" + uuid.New().String()
 
-	store, err := vsqdrant.New(qc, collection, vsqdrant.WithVectorSize(4), vsqdrant.WithWait(true))
+	store, err := vsqdrant.New(qc, collection, vsqdrant.WithVectorSize(4))
 	if err != nil {
 		t.Fatalf("vsqdrant.New: %v", err)
 	}

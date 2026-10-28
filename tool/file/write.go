@@ -43,6 +43,8 @@ type WriteTool struct {
 	tool        *llm.Tool
 	workingDir  string
 	noOverwrite bool
+	tracker     *ReadTracker
+	onWrite     WriteHook
 }
 
 // NewWriteTool creates a new write tool.
@@ -52,6 +54,8 @@ func NewWriteTool(opts ...Option) (*WriteTool, error) {
 	w := &WriteTool{
 		workingDir:  o.workingDir,
 		noOverwrite: o.noOverwrite,
+		tracker:     o.tracker,
+		onWrite:     o.onWrite,
 	}
 
 	tool, err := llm.NewTool(
@@ -63,7 +67,8 @@ func NewWriteTool(opts ...Option) (*WriteTool, error) {
 		return nil, err
 	}
 
-	w.tool = tool
+	// Writes of one round run alone and in order: they may touch the same file.
+	w.tool = tool.SetExclusive(true)
 
 	return w, nil
 }
@@ -73,7 +78,29 @@ func (w *WriteTool) Tool() *llm.Tool {
 	return w.tool
 }
 
-func (w *WriteTool) write(_ context.Context, input *WriteInput) (*WriteOutput, error) {
+// Preview returns the change a call with input would make, without making
+// it. It runs the call's code and checks, so it fails as the call would.
+func (w *WriteTool) Preview(input *WriteInput) (*Change, error) {
+	return w.plan(input, true)
+}
+
+func (w *WriteTool) write(ctx context.Context, input *WriteInput) (*WriteOutput, error) {
+	// The old content is read only for the hook.
+	change, err := w.plan(input, w.onWrite != nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if err = applyChange(ctx, change, w.tracker, w.onWrite); err != nil {
+		return nil, err
+	}
+
+	return &WriteOutput{BytesWritten: len(input.Content)}, nil
+}
+
+// plan returns the change a call with input makes. Its Before is read only
+// when withBefore is true.
+func (w *WriteTool) plan(input *WriteInput, withBefore bool) (*Change, error) {
 	if input == nil {
 		return nil, fmt.Errorf("nil input")
 	}
@@ -87,27 +114,42 @@ func (w *WriteTool) write(_ context.Context, input *WriteInput) (*WriteOutput, e
 		return nil, err
 	}
 
-	perm := os.FileMode(defaultFileMode)
+	if err = w.tracker.check(resolvedPath); err != nil {
+		return nil, err
+	}
 
-	if info, statErr := os.Stat(resolvedPath); statErr == nil {
-		if w.noOverwrite {
-			return nil, ErrFileExists
+	change := &Change{Path: resolvedPath, After: []byte(input.Content), Perm: defaultFileMode}
+
+	info, err := os.Stat(resolvedPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return change, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	if w.noOverwrite {
+		return nil, ErrFileExists
+	}
+
+	change.Existed, change.Perm = true, info.Mode().Perm()
+
+	if withBefore {
+		if change.Before, err = os.ReadFile(resolvedPath); err != nil { //nolint:gosec // path is resolved and validated above
+			return nil, err
 		}
-
-		perm = info.Mode().Perm()
-	} else if !errors.Is(statErr, os.ErrNotExist) {
-		return nil, statErr
 	}
 
-	if mkdirErr := os.MkdirAll(filepath.Dir(resolvedPath), 0o750); mkdirErr != nil {
-		return nil, mkdirErr
-	}
+	return change, nil
+}
 
-	if writeErr := atomicWriteFile(resolvedPath, []byte(input.Content), perm); writeErr != nil {
-		return nil, writeErr
-	}
-
-	return &WriteOutput{BytesWritten: len(input.Content)}, nil
+// WriteFileAtomic writes data to the file at path with permissions perm, as
+// the write and edit tools do: to a temporary file in the same directory,
+// then renamed over path, so a reader sees the old content or the new one,
+// never a part. Use it to restore a Change's Before.
+func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+	return atomicWriteFile(path, data, perm)
 }
 
 func atomicWriteFile(path string, data []byte, perm os.FileMode) (retErr error) {

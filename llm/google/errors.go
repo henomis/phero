@@ -65,6 +65,9 @@ func (e *UnknownToolCallError) Error() string {
 
 // ToolArgumentsParseError is returned when a tool call's Arguments field is not
 // a JSON object, which Gemini requires as the function call's args.
+//
+// Deprecated: stored tool calls with invalid arguments are now sent with an
+// empty object instead, so this error is no longer returned.
 type ToolArgumentsParseError struct {
 	ToolName string
 	Err      error

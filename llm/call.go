@@ -60,6 +60,9 @@ type CallConfig struct {
 	// ResponseFormat constrains the final answer to a JSON schema; nil means
 	// free-form text.
 	ResponseFormat *ResponseFormat
+	// MaxOutputTokens caps the tokens the model may generate on this call,
+	// overriding the client's own setting; 0 leaves the client's.
+	MaxOutputTokens int
 }
 
 // NewCallConfig applies opts, in order, to an empty CallConfig. Nil options
@@ -143,6 +146,15 @@ func WithToolChoice(mode ToolChoiceMode) CallOption {
 func WithForcedTool(name string) CallOption {
 	return func(c *CallConfig) {
 		c.ToolChoice = &ToolChoice{Mode: ToolChoiceTool, Name: name}
+	}
+}
+
+// WithMaxOutputTokens caps the tokens the model may generate on this call,
+// overriding the limit the client was built with. An answer cut at the limit
+// ends with FinishLength. A value of 0 or less leaves the client's limit.
+func WithMaxOutputTokens(n int) CallOption {
+	return func(c *CallConfig) {
+		c.MaxOutputTokens = max(n, 0)
 	}
 }
 

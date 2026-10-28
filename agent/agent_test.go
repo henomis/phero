@@ -20,6 +20,7 @@ import (
 	"math"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -288,6 +289,31 @@ func TestRun_Simple(t *testing.T) {
 	}
 }
 
+func TestSetLLM_NextRunUsesTheNewModel(t *testing.T) {
+	a := mustNew(t, makeStub(textResult("first"), nil), "agent", "desc")
+
+	if _, err := a.Run(context.Background(), llm.Text("hi")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.SetLLM(nil); !errors.Is(err, agent.ErrUndefinedLLM) {
+		t.Fatalf("SetLLM(nil) = %v, want ErrUndefinedLLM", err)
+	}
+
+	if err := a.SetLLM(makeStub(textResult("second"), nil)); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := a.Run(context.Background(), llm.Text("again"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.TextContent() != "second" {
+		t.Fatalf("reply = %q, want the new model's", result.TextContent())
+	}
+}
+
 func TestRun_LLMError(t *testing.T) {
 	stub := makeStub(nil, errors.New("model unavailable"))
 	a := mustNew(t, stub, "agent", "a helpful agent")
@@ -379,6 +405,40 @@ func TestRun_ToolCall_ToolErrors_AgentContinues(t *testing.T) {
 
 	if result.TextContent() != "recovered" {
 		t.Fatalf("expected %q, got %q", "recovered", result.TextContent())
+	}
+}
+
+func TestRun_ToolCall_PanicIsRecovered(t *testing.T) {
+	// A tool that panics produces an error tool result and the run goes on,
+	// instead of crashing the process.
+	panicTool := mustTool(t, "panic_tool", func(_ context.Context, _ *struct{}) (string, error) {
+		panic("boom")
+	})
+
+	stub := &stubLLM{
+		responses: []*llm.Result{
+			toolCallResult("panic_tool", "call-1", "{}"),
+			textResult("recovered"),
+		},
+		errs: []error{nil, nil},
+	}
+
+	a := mustNew(t, stub, "agent", "desc")
+	if err := a.AddTool(panicTool); err != nil {
+		t.Fatalf("AddTool: %v", err)
+	}
+
+	result, err := a.Run(context.Background(), llm.Text("panic"))
+	if err != nil {
+		t.Fatalf("Run: unexpected error: %v", err)
+	}
+
+	if result.TextContent() != "recovered" {
+		t.Fatalf("expected %q, got %q", "recovered", result.TextContent())
+	}
+
+	if result.Summary == nil || result.Summary.ToolErrors != 1 {
+		t.Fatalf("summary = %+v, want 1 tool error", result.Summary)
 	}
 }
 
@@ -1112,5 +1172,81 @@ func TestRun_Memory_EmptyAnswerNotReplayed(t *testing.T) {
 		if m := got[i+1]; m.Role != want.Role || len(m.Parts) != len(want.Parts) || len(m.ToolCalls) != len(want.ToolCalls) {
 			t.Errorf("message %d = %+v, want %+v", i, m, want)
 		}
+	}
+}
+
+func TestRun_ToolSeesItsCallInContext(t *testing.T) {
+	var seen llm.ToolCall
+
+	tool := mustTool(t, "probe", func(ctx context.Context, _ *struct{}) (string, error) {
+		seen, _ = llm.ToolCallFromContext(ctx)
+		return "ok", nil
+	})
+
+	stub := &stubLLM{
+		responses: []*llm.Result{toolCallResult("probe", "call-42", "{}"), textResult("done")},
+		errs:      []error{nil, nil},
+	}
+
+	a := mustNew(t, stub, "agent", "desc")
+	if err := a.AddTool(tool); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := a.Run(context.Background(), llm.Text("go")); err != nil {
+		t.Fatal(err)
+	}
+
+	if seen.ID != "call-42" || seen.Function.Name != "probe" {
+		t.Fatalf("tool call in context = %+v", seen)
+	}
+}
+
+func TestRun_ToolSeesItsRunInContext(t *testing.T) {
+	var (
+		runs  []llm.Run
+		ended atomic.Int32
+	)
+
+	tool := mustTool(t, "probe", func(ctx context.Context, _ *struct{}) (string, error) {
+		run, ok := llm.RunFromContext(ctx)
+		if !ok {
+			return "", errors.New("no run in context")
+		}
+
+		runs = append(runs, run)
+		run.AfterEnd(func() { ended.Add(1) })
+
+		return "ok", nil
+	})
+
+	for range 2 {
+		stub := &stubLLM{
+			responses: []*llm.Result{toolCallResult("probe", "c", "{}"), textResult("done")},
+			errs:      []error{nil, nil},
+		}
+
+		a := mustNew(t, stub, "agent", "desc")
+		if err := a.AddTool(tool); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := a.Run(context.Background(), llm.Text("go")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if len(runs) != 2 || runs[0].ID == "" || runs[0].ID == runs[1].ID {
+		t.Fatalf("runs = %+v, want two runs with distinct IDs", runs)
+	}
+
+	// The run's scope ends when Run returns.
+	deadline := time.Now().Add(time.Second)
+	for ended.Load() != 2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+
+	if ended.Load() != 2 {
+		t.Fatalf("ended = %d, want both runs ended", ended.Load())
 	}
 }

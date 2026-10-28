@@ -19,6 +19,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"iter"
 	"sort"
 	"strings"
 	"sync"
@@ -137,14 +138,69 @@ type semanticCacheLLM struct {
 func (s *semanticCacheLLM) Execute(
 	ctx context.Context, messages []llm.Message, opts ...llm.CallOption,
 ) (*llm.Result, error) {
+	entry, cached := s.check(ctx, messages, opts)
+	if cached != nil {
+		return cached, nil
+	}
+
+	result, err := s.inner.Execute(ctx, messages, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	if entry != nil {
+		s.persist(ctx, entry.vector, entry.contract, result)
+	}
+
+	return result, nil
+}
+
+// ExecuteStream serves a cached response as a single terminal chunk, as
+// Execute does. On a miss it streams from inner and stores the assembled
+// result once the stream completes.
+func (s *semanticCacheLLM) ExecuteStream(
+	ctx context.Context, messages []llm.Message, opts ...llm.CallOption,
+) iter.Seq2[llm.StreamChunk, error] {
+	return func(yield func(llm.StreamChunk, error) bool) {
+		entry, cached := s.check(ctx, messages, opts)
+		if cached != nil {
+			yield(chunkFromResult(cached), nil)
+			return
+		}
+
+		for chunk, err := range llm.StreamOrBuffer(ctx, s.inner, messages, opts...) {
+			if err == nil && chunk.Done && entry != nil {
+				s.persist(ctx, entry.vector, entry.contract, resultFromChunk(chunk))
+			}
+
+			if !yield(chunk, err) || err != nil {
+				return
+			}
+		}
+	}
+}
+
+// cacheEntry identifies where a call's response is stored in the cache.
+type cacheEntry struct {
+	vector   vectorstore.Vector
+	contract string
+}
+
+// check looks the call up in the cache. It returns the cached result on a
+// hit; on a miss, the entry to store the response under, or nil when the call
+// is not cached (it offers tools and those skip the cache, or the cache
+// failed: cache failures never block a call).
+func (s *semanticCacheLLM) check(
+	ctx context.Context, messages []llm.Message, opts []llm.CallOption,
+) (*cacheEntry, *llm.Result) {
 	cfg := llm.NewCallConfig(opts...)
 
 	if s.cfg.skipWithTools && len(cfg.Tools) > 0 {
-		return s.inner.Execute(ctx, messages, opts...)
+		return nil, nil
 	}
 
 	if err := s.ensureCollection(ctx); err != nil {
-		return s.inner.Execute(ctx, messages, opts...)
+		return nil, nil
 	}
 
 	contract := callContract(cfg)
@@ -152,7 +208,7 @@ func (s *semanticCacheLLM) Execute(
 
 	vectors, err := s.embedder.Embed(ctx, []string{key})
 	if err != nil || len(vectors) == 0 {
-		return s.inner.Execute(ctx, messages, opts...)
+		return nil, nil
 	}
 
 	vector := vectors[0]
@@ -164,19 +220,12 @@ func (s *semanticCacheLLM) Execute(
 			call.CacheHit = true
 		}
 
-		return cached, nil
+		return nil, cached
 	}
 
 	trace.SpanFrom(ctx).AddEvent(eventCacheMiss)
 
-	result, err := s.inner.Execute(ctx, messages, opts...)
-	if err != nil {
-		return nil, err
-	}
-
-	s.persist(ctx, vector, contract, result)
-
-	return result, nil
+	return &cacheEntry{vector: vector, contract: contract}, nil
 }
 
 // ensureCollection ensures the backing collection exists, at most once.
@@ -258,7 +307,7 @@ func (s *semanticCacheLLM) persist(
 // unconstrained call. Entries stored before contracts existed carry none, so
 // they no longer match anything and the cache re-warms.
 func callContract(cfg *llm.CallConfig) string {
-	if cfg.ResponseFormat == nil && cfg.ToolChoice == nil {
+	if cfg.ResponseFormat == nil && cfg.ToolChoice == nil && cfg.MaxOutputTokens == 0 {
 		return ""
 	}
 
@@ -273,9 +322,12 @@ func callContract(cfg *llm.CallConfig) string {
 		Format     string         `json:"format,omitempty"`
 		Schema     map[string]any `json:"schema,omitempty"`
 		ToolChoice *toolChoice    `json:"tool_choice,omitempty"`
+		// MaxOutputTokens keeps an answer cut at a limit from being served to
+		// a call with another limit.
+		MaxOutputTokens int `json:"max_output_tokens,omitempty"`
 	}
 
-	var c contract
+	c := contract{MaxOutputTokens: cfg.MaxOutputTokens}
 	if tc := cfg.ToolChoice; tc != nil {
 		c.ToolChoice = &toolChoice{Mode: tc.Mode, Name: tc.Name}
 	}

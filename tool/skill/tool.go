@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -41,7 +42,8 @@ type Option func(*Tool)
 
 // Input defines the JSON input schema accepted by the tool.
 type Input struct {
-	Command string `json:"command" jsonschema:"description=The skill name to load (no arguments)."`
+	Command   string `json:"command" jsonschema:"description=The skill name to load (no arguments)."`
+	Arguments string `json:"arguments,omitempty" jsonschema_description:"Arguments for the skill, or an empty string"` //nolint:lll
 }
 
 // AvailableSkill contains frontmatter metadata surfaced in the tool catalog.
@@ -60,6 +62,8 @@ type Output struct {
 	Instructions    string           `json:"instructions"`
 	Expansion       string           `json:"expansion"`
 	AvailableSkills []AvailableSkill `json:"available_skills"`
+	// AllowedTools lists the tools the skill pre-approves (its allowed-tools).
+	AllowedTools []string `json:"allowed_tools,omitempty"`
 }
 
 // Tool wraps an llm.Tool that dispatches skill instruction loading.
@@ -68,12 +72,40 @@ type Tool struct {
 	parser   Parser
 	catalog  []catalogEntry
 	commands map[string]catalogEntry
+	skipped  []error
+	onLoad   func(ctx context.Context, skill *skillpkg.Skill)
 }
 
 type catalogEntry struct {
 	dir       string
 	skillPath string
 	skill     AvailableSkill
+}
+
+// WithRoots reads skills from several roots, such as the user's own and the
+// project's; when two hold a skill directory of the same name, the earlier
+// root wins, so pass the user's root first: a cloned project then cannot
+// shadow a skill the user trusts. The earlier root also wins when skills in
+// differently named directories have the same name (see Skipped). It replaces
+// the root given to New, and the last of WithRoots and WithParser wins.
+func WithRoots(roots ...string) Option {
+	return func(t *Tool) {
+		t.parser = skillpkg.NewMulti(roots...)
+	}
+}
+
+// WithOnLoad calls fn each time the model loads a skill, with the tool call's
+// context, for example to pre-approve the skill's allowed tools in a
+// permission policy for the current run only, leaving out broad bash grants:
+//
+//	skilltool.WithOnLoad(func(ctx context.Context, s *skill.Skill) {
+//		granted, _ := permission.SkillGrants(s.Tools())
+//		_ = policy.AllowForRun(ctx, granted...)
+//	})
+func WithOnLoad(fn func(ctx context.Context, skill *skillpkg.Skill)) Option {
+	return func(t *Tool) {
+		t.onLoad = fn
+	}
 }
 
 // WithParser injects a custom parser, useful for tests.
@@ -86,6 +118,10 @@ func WithParser(parser Parser) Option {
 // New creates a new skill dispatcher tool.
 //
 // skillsRootPath is the directory containing skill subfolders with SKILL.md files.
+// A skill that cannot be used, because its SKILL.md does not parse, it has no
+// name or description, or its name is taken, is left out of the catalog and
+// reported by Skipped; the others still load. New fails only when the skills
+// cannot be listed.
 func New(skillsRootPath string, opts ...Option) (*Tool, error) {
 	skillsRootPath = strings.TrimSpace(skillsRootPath)
 
@@ -99,13 +135,9 @@ func New(skillsRootPath string, opts ...Option) (*Tool, error) {
 		}
 	}
 
-	entries, commands, err := t.buildCatalog(skillsRootPath)
-	if err != nil {
+	if err := t.buildCatalog(skillsRootPath); err != nil {
 		return nil, err
 	}
-
-	t.catalog = entries
-	t.commands = commands
 
 	description := t.buildDescription()
 
@@ -124,10 +156,24 @@ func (t *Tool) Tool() *llm.Tool {
 	return t.tool
 }
 
-func (t *Tool) buildCatalog(skillsRootPath string) ([]catalogEntry, map[string]catalogEntry, error) {
+// Skipped returns why each skill left out of the catalog was skipped: a
+// SKILL.md that does not parse, ErrSkillNameRequired or
+// ErrSkillDescriptionRequired (each wrapped with the skill's directory), or a
+// *DuplicateSkillNameError when an earlier skill, such as one from an earlier
+// root (WithRoots), has the same name. It is nil when every skill loaded.
+func (t *Tool) Skipped() []error {
+	return slices.Clone(t.skipped)
+}
+
+// buildCatalog lists and parses the skills, skipping those that cannot be
+// used (see Skipped). The first skill of a name wins: the parser lists an
+// earlier root's skills first.
+//
+//nolint:funlen
+func (t *Tool) buildCatalog(skillsRootPath string) error {
 	dirs, err := t.parser.List()
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
 
 	entries := make([]catalogEntry, 0, len(dirs))
@@ -136,20 +182,26 @@ func (t *Tool) buildCatalog(skillsRootPath string) ([]catalogEntry, map[string]c
 	for _, dir := range dirs {
 		skillItem, parseErr := t.parser.Parse(dir)
 		if parseErr != nil {
-			return nil, nil, parseErr
+			t.skipped = append(t.skipped, fmt.Errorf("skill tool: skill %q: %w", dir, parseErr))
+			continue
 		}
 
 		name := strings.TrimSpace(skillItem.Name)
 		if name == "" {
-			return nil, nil, ErrSkillNameRequired
+			t.skipped = append(t.skipped, fmt.Errorf("%w: %q", ErrSkillNameRequired, dir))
+			continue
 		}
 
 		description := strings.TrimSpace(skillItem.Description)
 		if description == "" {
-			return nil, nil, ErrSkillDescriptionRequired
+			t.skipped = append(t.skipped, fmt.Errorf("%w: %q", ErrSkillDescriptionRequired, dir))
+			continue
 		}
 
 		skillPath := filepath.Clean(filepath.Join(skillsRootPath, dir))
+		if skillItem.RootPath != "" {
+			skillPath = skillItem.RootPath
+		}
 
 		entry := catalogEntry{
 			dir:       dir,
@@ -162,8 +214,11 @@ func (t *Tool) buildCatalog(skillsRootPath string) ([]catalogEntry, map[string]c
 		}
 
 		normalizedName := strings.ToLower(name)
+		// An earlier skill's name or directory name wins, so a later root
+		// cannot take the command a skill the user trusts answers to.
 		if existing, ok := commands[normalizedName]; ok {
-			return nil, nil, &DuplicateSkillNameError{Name: name, ExistingDir: existing.dir, DuplicateDir: dir}
+			t.skipped = append(t.skipped, &DuplicateSkillNameError{Name: name, ExistingDir: existing.dir, DuplicateDir: dir})
+			continue
 		}
 
 		commands[normalizedName] = entry
@@ -182,7 +237,10 @@ func (t *Tool) buildCatalog(skillsRootPath string) ([]catalogEntry, map[string]c
 		return strings.ToLower(entries[i].skill.Name) < strings.ToLower(entries[j].skill.Name)
 	})
 
-	return entries, commands, nil
+	t.catalog = entries
+	t.commands = commands
+
+	return nil
 }
 
 func (t *Tool) buildDescription() string {
@@ -192,7 +250,8 @@ func (t *Tool) buildDescription() string {
 	b.WriteString("<skills_instructions>\n")
 	b.WriteString("When users ask you to perform tasks, check if any available skill " +
 		"can help complete the task more effectively.\n")
-	b.WriteString("Invoke this tool with the skill name only, using the command field.\n")
+	b.WriteString("Invoke this tool with the skill name only in the command field, " +
+		"and any arguments for the skill in the arguments field.\n")
 	b.WriteString("Do not pass arguments inside command.\n")
 	b.WriteString("After invocation, use the returned base path and instructions " +
 		"to execute the task in the same conversation.\n")
@@ -219,7 +278,7 @@ func (t *Tool) buildDescription() string {
 	return b.String()
 }
 
-func (t *Tool) handle(_ context.Context, input *Input) (*Output, error) {
+func (t *Tool) handle(ctx context.Context, input *Input) (*Output, error) {
 	if input == nil {
 		return nil, ErrNilInput
 	}
@@ -249,8 +308,12 @@ func (t *Tool) handle(_ context.Context, input *Input) (*Output, error) {
 		basePath = entry.skillPath
 	}
 
-	instructions := strings.TrimSpace(skillItem.Body)
+	instructions := withArguments(strings.TrimSpace(skillItem.Body), strings.TrimSpace(input.Arguments))
 	expansion := fmt.Sprintf("Base Path: %s\n\n%s", basePath, instructions)
+
+	if t.onLoad != nil {
+		t.onLoad(ctx, skillItem)
+	}
 
 	available := make([]AvailableSkill, 0, len(t.catalog))
 	for _, item := range t.catalog {
@@ -265,7 +328,25 @@ func (t *Tool) handle(_ context.Context, input *Input) (*Output, error) {
 		Instructions:    instructions,
 		Expansion:       expansion,
 		AvailableSkills: available,
+		AllowedTools:    skillItem.Tools(),
 	}, nil
+}
+
+// argumentsPlaceholder is replaced by the skill's arguments in its body.
+const argumentsPlaceholder = "$ARGUMENTS"
+
+// withArguments puts args into a skill's instructions: in place of
+// $ARGUMENTS when the body has it, else after the body.
+func withArguments(instructions, args string) string {
+	if strings.Contains(instructions, argumentsPlaceholder) {
+		return strings.ReplaceAll(instructions, argumentsPlaceholder, args)
+	}
+
+	if args == "" {
+		return instructions
+	}
+
+	return instructions + "\n\nARGUMENTS: " + args
 }
 
 func escapeXML(s string) string {

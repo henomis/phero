@@ -16,6 +16,7 @@ package middleware
 
 import (
 	"context"
+	"iter"
 	"sync"
 	"time"
 
@@ -46,6 +47,27 @@ func (l *limiterLLM) Execute(ctx context.Context, messages []llm.Message, opts .
 	defer func() { <-l.semaphore }()
 
 	return l.inner.Execute(ctx, messages, opts...)
+}
+
+// ExecuteStream acquires a rate-limit token and a concurrency slot, as Execute
+// does, and holds the slot until the stream ends or the caller stops reading.
+func (l *limiterLLM) ExecuteStream(
+	ctx context.Context, messages []llm.Message, opts ...llm.CallOption,
+) iter.Seq2[llm.StreamChunk, error] {
+	return func(yield func(llm.StreamChunk, error) bool) {
+		if err := l.acquire(ctx); err != nil {
+			yield(llm.StreamChunk{}, err)
+			return
+		}
+
+		defer func() { <-l.semaphore }()
+
+		for chunk, err := range llm.StreamOrBuffer(ctx, l.inner, messages, opts...) {
+			if !yield(chunk, err) || err != nil {
+				return
+			}
+		}
+	}
 }
 
 // acquire takes a rate-limit token and a concurrency slot. If either is not

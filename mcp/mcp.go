@@ -16,6 +16,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/henomis/phero/v2/internal/textcut"
 	"github.com/henomis/phero/v2/llm"
 )
 
@@ -34,20 +36,50 @@ type ToolFilter func(toolName string) bool
 // Server wraps an MCP client session and can expose remote MCP tools as
 // `llm.FunctionTool` values.
 type Server struct {
-	session *mcp.ClientSession
+	session        *mcp.ClientSession
+	toolPrefix     string
+	maxResultChars int
+}
+
+// Option configures a Server.
+type Option func(*Server)
+
+// WithToolPrefix prepends prefix to the name of every tool the Server
+// exposes, so tools of different servers with the same name do not clash.
+// The MCP server is still called with the tool's own name.
+func WithToolPrefix(prefix string) Option {
+	return func(s *Server) { s.toolPrefix = prefix }
+}
+
+// WithMaxOutputChars caps the text of each tool result at n bytes, note
+// included: a longer text is cut on a character boundary and ended with a
+// note saying so, so one call cannot fill the model's context. Images are
+// kept. A value of 0 or less, the default, keeps the whole text.
+func WithMaxOutputChars(n int) Option {
+	return func(s *Server) { s.maxResultChars = n }
 }
 
 // New creates a new Server bound to the provided MCP client session.
-func New(session *mcp.ClientSession) *Server {
-	return &Server{
+func New(session *mcp.ClientSession, opts ...Option) *Server {
+	s := &Server{
 		session: session,
 	}
+
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	return s
 }
 
 // AsTools lists tools from the underlying MCP session and converts them into
 // `llm.FunctionTool` values.
 //
-// The optional filter can be used to include/exclude tools by name.
+// The optional filter can be used to include/exclude tools by name; it gets
+// the MCP tool's own name. Each tool's name, with the prefix, is made one
+// providers accept (llm.SanitizeToolName: [a-zA-Z0-9_-], at most 64
+// characters); when two names become the same, the later gets a numbered
+// suffix. The MCP server is still called with the tool's own name.
 func (s *Server) AsTools(ctx context.Context, filter ToolFilter) ([]*llm.Tool, error) {
 	tools, err := s.session.ListTools(ctx, &mcp.ListToolsParams{})
 	if err != nil {
@@ -55,6 +87,7 @@ func (s *Server) AsTools(ctx context.Context, filter ToolFilter) ([]*llm.Tool, e
 	}
 
 	functionTools := make([]*llm.Tool, 0)
+	taken := map[string]bool{}
 
 	for _, tool := range tools.Tools {
 		if filter != nil && !filter(tool.Name) {
@@ -69,7 +102,7 @@ func (s *Server) AsTools(ctx context.Context, filter ToolFilter) ([]*llm.Tool, e
 		toolName := tool.Name
 
 		newTool, newToolErr := llm.NewRawTool(
-			toolName,
+			uniqueToolName(llm.SanitizeToolName(s.toolPrefix+toolName), taken),
 			tool.Description,
 			schema,
 			func(ctx context.Context, arguments string) (any, error) {
@@ -89,7 +122,13 @@ func (s *Server) AsTools(ctx context.Context, filter ToolFilter) ([]*llm.Tool, e
 					return nil, callErr
 				}
 
-				return callToolResultText(callResult), nil
+				if callResult != nil && callResult.IsError {
+					return nil, &ToolResultError{
+						Name: toolName, Message: cutText(callToolResultText(callResult), s.maxResultChars),
+					}
+				}
+
+				return callToolResultParts(callResult, s.maxResultChars), nil
 			},
 		)
 		if newToolErr != nil {
@@ -100,6 +139,21 @@ func (s *Server) AsTools(ctx context.Context, filter ToolFilter) ([]*llm.Tool, e
 	}
 
 	return functionTools, nil
+}
+
+// uniqueToolName returns name, or name with a numbered suffix when taken
+// already holds it, still within the 64 characters providers accept, and adds
+// the result to taken.
+func uniqueToolName(name string, taken map[string]bool) string {
+	unique := name
+	for n := 2; taken[unique]; n++ {
+		suffix := fmt.Sprintf("_%d", n)
+		unique = name[:min(len(name), llm.MaxToolNameLength-len(suffix))] + suffix
+	}
+
+	taken[unique] = true
+
+	return unique
 }
 
 // normalizeMCPInputSchema validates and clones the raw InputSchema value from an MCP
@@ -126,6 +180,35 @@ func normalizeMCPInputSchema(raw any) (map[string]any, error) {
 	return clone, nil
 }
 
+// callToolResultParts converts an MCP tool call result into content parts: its
+// text as one text part, followed by its images. A result with no image keeps
+// the plain text form of callToolResultText. The text is cut at maxChars
+// (see cutText).
+func callToolResultParts(res *mcp.CallToolResult, maxChars int) any {
+	text := cutText(callToolResultText(res), maxChars)
+
+	var images []llm.ContentPart
+
+	if res != nil {
+		for _, c := range res.Content {
+			if img, ok := c.(*mcp.ImageContent); ok && len(img.Data) > 0 {
+				images = append(images, llm.ImageBase64(img.MIMEType, base64.StdEncoding.EncodeToString(img.Data)))
+			}
+		}
+	}
+
+	if len(images) == 0 {
+		return text
+	}
+
+	parts := make([]llm.ContentPart, 0, len(images)+1)
+	if text != "" {
+		parts = append(parts, llm.Text(text))
+	}
+
+	return append(parts, images...)
+}
+
 // callToolResultText extracts a readable textual representation of an MCP tool
 // call result.
 func callToolResultText(res *mcp.CallToolResult) string {
@@ -140,10 +223,29 @@ func callToolResultText(res *mcp.CallToolResult) string {
 			if strings.TrimSpace(v.Text) != "" {
 				parts = append(parts, strings.TrimSpace(v.Text))
 			}
+		case *mcp.ImageContent:
+			// Returned as an image part by callToolResultParts.
 		default:
 			parts = append(parts, fmt.Sprintf("[%T]", c))
 		}
 	}
 
 	return strings.Join(parts, "\n")
+}
+
+// cutText cuts text to at most maxChars bytes, without splitting a UTF-8
+// character, and ends it with a note giving the cap; the note counts toward
+// maxChars, and is left out when maxChars cannot hold it. A maxChars of 0 or
+// less keeps the whole text.
+func cutText(text string, maxChars int) string {
+	if maxChars <= 0 || len(text) <= maxChars {
+		return text
+	}
+
+	note := fmt.Sprintf("\n[output cut at %d characters]", maxChars)
+	if len(note) >= maxChars {
+		note = ""
+	}
+
+	return textcut.Head(text, maxChars-len(note)) + note
 }

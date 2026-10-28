@@ -446,12 +446,6 @@ func TestExecute_InvalidInputFailsBeforeRequest(t *testing.T) {
 			nil,
 			func(err error) bool { return errors.Is(err, google.ErrImageURLUnsupported) },
 		},
-		{
-			"invalid tool arguments",
-			[]llm.Message{user, llm.AssistantMessage(nil, llm.ToolCall{ID: "c", Function: llm.FunctionCall{Name: "f", Arguments: "{"}})},
-			nil,
-			func(err error) bool { var e *google.ToolArgumentsParseError; return errors.As(err, &e) },
-		},
 	}
 
 	for _, tt := range tests {
@@ -511,5 +505,78 @@ func TestNew_WithoutKey(t *testing.T) {
 	var e *google.ClientInitError
 	if !errors.As(err, &e) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// TestExecute_InvalidStoredToolArgumentsSentAsEmptyObject checks that a stored
+// tool call whose arguments are not a JSON object does not fail the request.
+func TestExecute_InvalidStoredToolArgumentsSentAsEmptyObject(t *testing.T) {
+	f := newFake(t)
+	client := newClient(f)
+
+	for _, args := range []string{`{"path": "a.go"`, `[1, 2]`, `null`} {
+		msgs := []llm.Message{
+			llm.UserMessage(llm.Text("q")),
+			llm.AssistantMessage(nil, llm.ToolCall{ID: "c", Function: llm.FunctionCall{Name: "f", Arguments: args}}),
+			llm.ToolResultMessage("c", llm.Text("Error executing tool 'f': bad arguments")),
+		}
+
+		if _, err := client.Execute(context.Background(), msgs); err != nil {
+			t.Fatalf("args %q: %v", args, err)
+		}
+
+		// The SDK leaves an empty args object out of the request.
+		fc, _ := get(t, f.request(t, f.count()-1), "contents", 1, "parts", 0, "functionCall").(map[string]any)
+		if got, ok := fc["args"].(map[string]any); fc["name"] != "f" || (ok && len(got) != 0) {
+			t.Errorf("args %q: functionCall = %v, want no args", args, fc)
+		}
+	}
+}
+
+func TestExecute_CompactedSessionKeepsTurnOrder(t *testing.T) {
+	f := newFake(t)
+	client := newClient(f)
+
+	// A compacted session whose kept messages start with a tool call: the
+	// summary is a user message, so the function call follows a user turn, as
+	// Gemini requires.
+	msgs := []llm.Message{
+		llm.SystemMessage("you are a coding agent"),
+		llm.UserMessage(llm.Text("Summary of previous conversation:\n- read the repo")),
+		llm.UserMessage(llm.Text("fix the test")),
+		llm.AssistantMessage(nil, llm.ToolCall{ID: "c", Function: llm.FunctionCall{Name: "f", Arguments: "{}"}}),
+		llm.ToolResultMessage("c", llm.Text("PASS")),
+	}
+
+	if _, err := client.Execute(context.Background(), msgs); err != nil {
+		t.Fatal(err)
+	}
+
+	req := f.request(t, f.count()-1)
+
+	roles := make([]any, 0, 3)
+	for i := range 3 {
+		roles = append(roles, get(t, req, "contents", i, "role"))
+	}
+
+	if fmt.Sprint(roles) != "[user model user]" {
+		t.Fatalf("roles = %v, want the summary and task as one user turn, then the call and its result", roles)
+	}
+
+	if parts, _ := get(t, req, "contents", 0, "parts").([]any); len(parts) != 2 {
+		t.Fatalf("first turn parts = %v, want the summary and the task", parts)
+	}
+}
+
+func TestExecute_MaxOutputTokensPerCall(t *testing.T) {
+	f := newFake(t)
+	client := newClient(f, google.WithMaxTokens(256))
+
+	if _, err := client.Execute(ctx, []llm.Message{llm.UserMessage(llm.Text("q"))}, llm.WithMaxOutputTokens(64)); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := get(t, f.request(t, 0), "generationConfig", "maxOutputTokens"); got != 64.0 {
+		t.Fatalf("maxOutputTokens = %v, want the call's 64", got)
 	}
 }

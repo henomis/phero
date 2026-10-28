@@ -18,6 +18,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	anthropicapi "github.com/anthropics/anthropic-sdk-go"
@@ -41,12 +42,27 @@ func wrapAPIError(err error) error {
 		return err
 	}
 
-	pe := &llm.ProviderError{Provider: providerName, StatusCode: apiErr.StatusCode, Err: err}
+	pe := &llm.ProviderError{
+		Provider:              providerName,
+		StatusCode:            apiErr.StatusCode,
+		ContextLengthExceeded: isContextLengthError(apiErr.StatusCode, err.Error()),
+		Err:                   err,
+	}
 	if apiErr.Response != nil {
 		pe.RetryAfter = retryAfter(apiErr.Response.Header, time.Now())
 	}
 
 	return pe
+}
+
+// isContextLengthError reports whether an API error says the request does not
+// fit: a 400 "prompt is too long", or a 413 for a request over the size limit.
+func isContextLengthError(status int, message string) bool {
+	if status == http.StatusRequestEntityTooLarge {
+		return true
+	}
+
+	return status == http.StatusBadRequest && strings.Contains(strings.ToLower(message), "prompt is too long")
 }
 
 // retryAfter reads how long a response asks the caller to wait: retry-after-ms

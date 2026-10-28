@@ -19,7 +19,6 @@ package e2e_test
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"net"
 	"os"
 	"strconv"
@@ -72,7 +71,8 @@ func anthropicKey() string     { return envOr("ANTHROPIC_AUTH_TOKEN", defaultAnt
 func anthropicBaseURL() string { return envOr("ANTHROPIC_BASE_URL", defaultAnthropicURL) }
 func anthropicModel() string   { return envOr("ANTHROPIC_MODEL", defaultAnthropicModel) }
 
-func embedModel() string { return envOr("EMBEDDING_MODEL", defaultEmbedModel) }
+func embedModel() string   { return envOr("EMBEDDING_MODEL", defaultEmbedModel) }
+func embedBaseURL() string { return envOr("EMBEDDING_BASE_URL", openAIBaseURL()) }
 
 func postgresDSN() string { return envOr("POSTGRES_DSN", defaultPostgresDSN) }
 
@@ -117,7 +117,7 @@ func buildAnthropicLLM() *llmanthropic.Client {
 func buildEmbedder() *embeddingOpenAI.Client {
 	return embeddingOpenAI.New(
 		openAIKey(),
-		embeddingOpenAI.WithBaseURL(openAIBaseURL()),
+		embeddingOpenAI.WithBaseURL(embedBaseURL()),
 		embeddingOpenAI.WithModel(embedModel()),
 	)
 }
@@ -152,7 +152,7 @@ func requirePostgres(t *testing.T) *sql.DB {
 func requireQdrant(t *testing.T) *qdrantapi.Client {
 	t.Helper()
 
-	addr := fmt.Sprintf("%s:%d", qdrantHostEnv(), qdrantPortEnv())
+	addr := net.JoinHostPort(qdrantHostEnv(), strconv.Itoa(qdrantPortEnv()))
 
 	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	if err != nil {

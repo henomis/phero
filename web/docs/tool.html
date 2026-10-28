@@ -57,10 +57,13 @@
 
       <ul>
         <li><strong>Agent tool</strong> (<code>tool/agent</code>): create and run a sub-agent at runtime with a given name, role, and instructions</li>
-        <li><strong>Filesystem tools</strong> (<code>tool/file</code>): five separate tools — <code>read</code>, <code>write</code>, <code>edit</code>, <code>glob</code>, <code>grep</code></li>
+        <li><strong>Filesystem tools</strong> (<code>tool/file</code>): six separate tools — <code>read</code>, <code>write</code>, <code>edit</code>, <code>multi_edit</code>, <code>glob</code>, <code>grep</code></li>
         <li><strong>Bash tool</strong> (<code>tool/bash</code>): run bash commands with optional guardrails (blocklist, allowlist, timeout, safe mode) and background execution</li>
         <li><strong>Human tool</strong> (<code>tool/human</code>): present structured questions and collect user answers mid-run</li>
         <li><strong>Skill dispatcher</strong> (<code>tool/skill</code>): load a named <code>SKILL.md</code> into the current conversation</li>
+        <li><strong>Web fetch</strong> (<code>tool/web</code>): fetch a page as text, with a size cap, a timeout and private networks refused</li>
+        <li><strong>Task list</strong> (<code>tool/todo</code>): let the agent write, track and tick off the steps of a long task</li>
+        <li><strong>Permissions</strong> (<code>tool/permission</code>): allow, deny or ask a human before any tool call, with rules such as <code>bash(go test *)</code></li>
       </ul>
 
       <p>
@@ -128,12 +131,94 @@ if err := a.AddTool(readTool.Tool()); err != nil {
     panic(err)
 }</code></pre>
 
+      <p>
+        <code>read</code> returns plain <code>cat -n</code> text (a 6-wide line number, a tab, then the line), not JSON.
+        Tabs and quotes reach the model as they are in the file, so it can copy them into an edit's
+        <code>old_string</code>. <code>file.ReadOutput</code> is deprecated since v2.3.0.
+        <strong>Migrating from v2.2:</strong> code that calls the read tool's handler directly and decoded its JSON
+        (<code>file.ReadOutput</code>) now gets a string: the numbered lines, followed by a note when the read was cut
+        or paged.
+      </p>
+
       <p>Available options:</p>
       <ul>
-        <li><code>WithWorkingDirectory(dir)</code>: confine all operations to a directory; paths are validated against it to prevent traversal</li>
-        <li><code>WithMaxFileSize(bytes)</code>: limit the file size the read tool will return (0 = unlimited)</li>
+        <li><code>WithWorkingDirectory(dir)</code>: confine all operations to a directory; paths are validated against it to prevent traversal, after their symlinks are resolved.
+          <code>file.ResolvePath(dir, path)</code> runs the same resolution and check outside a call</li>
+        <li><code>WithReadOnlyRoots(dirs...)</code>: let read, grep and glob also reach the files under
+          <code>dirs</code>, outside the working directory, such as the user's skill directories, whose
+          <code>SKILL.md</code> points to scripts and references. Symlinks are resolved first, so one that leads out of
+          every allowed directory is still refused. A relative dir is resolved against the working directory. Write,
+          edit and multi_edit ignore it and stay in the working directory</li>
+        <li><code>WithMaxFileSize(bytes)</code>: limit the file size the edit tools accept, and the read tool for a
+          whole-file read (default <code>file.DefaultMaxFileSize</code>, 10 MiB; 0 = unlimited). A read with
+          <code>offset</code> or <code>limit</code> pages a file of any size.</li>
+        <li><code>WithMaxOutputChars(n)</code>: cap the text one read, grep or glob returns (default
+          <code>file.DefaultMaxOutputChars</code>, 30,000; 0 = no cap). A cut read ends with
+          <code>[output cut at … characters: read on with offset=N]</code>, and <code>limit</code> is capped at 2,000
+          lines. Grep and glob drop the entries that do not fit and set <code>Truncated</code>.</li>
+        <li><code>WithReadTracker(tracker)</code>: share a <code>file.NewReadTracker()</code> between the tools so that
+          write, edit and multi_edit refuse to change an existing file the model has not read
+          (<code>ErrFileNotRead</code>), or that changed on disk since it read it (<code>*ChangedError</code>).
+          New files need no read, and the tools' own changes count as seen. <code>tracker.Reset()</code> forgets every
+          read, for a new session that reuses the same tools</li>
         <li><code>WithNoOverwrite()</code>: configure write to return <code>ErrFileExists</code> when the target already exists</li>
+        <li><code>WithOnWrite(hook)</code>: write, edit and multi_edit call <code>hook(ctx, change)</code> after each
+          change they write, with a <code>file.Change</code> holding the resolved path, the content before and after,
+          whether the file existed, and its permissions. It is not called for a failed call. Use it to record changes
+          for an undo</li>
+        <li><code>WithMaxResults(n)</code>: how many paths <code>glob</code>, and entries <code>grep</code>, return at most
+          (default <code>file.DefaultMaxResults</code>, 1000; 0 removes the cap). A cut result sets <code>Truncated</code>.
+          Grep's <code>head_limit</code> can only lower it</li>
+        <li><code>WithNoIgnore()</code>: search everything, including what <code>.gitignore</code> ignores and
+          <code>node_modules</code></li>
       </ul>
+
+      <p>
+        <code>multi_edit</code> (<code>file.NewMultiEditTool</code>) applies a list of exact replacements to one file, in
+        order, each seeing the result of the ones before it. Either every edit applies or none does, so a failed edit
+        never leaves the file half changed. <code>edit</code>, <code>multi_edit</code> and <code>write</code> are
+        exclusive tools: when the model calls several at once, they run one at a time, in call order.
+      </p>
+
+      <p>
+        Each of the three tools has a <code>Preview(input)</code> method that returns the <code>*file.Change</code> a
+        call would make, without writing it. It runs the call's own code and checks (uniqueness,
+        <code>replace_all</code>, the size limit, the read tracker, the working directory), so it fails exactly as the
+        call would. A permission dialog can show the diff before the call runs. The tools decode their arguments
+        with <code>encoding/json</code>, so the dialog can decode <code>Request.Arguments</code> into
+        <code>file.EditInput</code> the same way. <code>file.WriteFileAtomic</code> writes a file as the tools do
+        (a temporary file, then a rename), for example to restore a change's <code>Before</code>.
+      </p>
+      <pre><code class="language-go">journal := []file.Change{}
+opts := []file.Option{
+    file.WithWorkingDirectory("/workspace"),
+    file.WithOnWrite(func(_ context.Context, c file.Change) { journal = append(journal, c) }),
+}
+editTool, _ := file.NewEditTool(opts...)
+
+// In the permission Asker, before the call runs:
+var in file.EditInput
+if err := json.Unmarshal([]byte(req.Arguments), &amp;in); err == nil {
+    if change, err := editTool.Preview(&amp;in); err == nil {
+        showDiff(change.Path, change.Before, change.After)
+    }
+}
+
+// Undo the last change:
+last := journal[len(journal)-1]
+if last.Existed {
+    err = file.WriteFileAtomic(last.Path, last.Before, last.Perm)
+} else {
+    err = os.Remove(last.Path)
+}</code></pre>
+
+      <p>
+        <code>glob</code> and <code>grep</code> are built for real repositories. They skip <code>.git</code>,
+        <code>.hg</code>, <code>.svn</code> and <code>node_modules</code>, and what the <code>.gitignore</code> files
+        ignore, from the repository root down (negation, directory-only and anchored patterns included).
+        <code>grep</code> skips binary files and clips very long lines, such as minified code. With a working
+        directory, a symlinked file whose target is outside it is skipped.
+      </p>
 
       <p>Using middleware to require user confirmation before a write:</p>
       <pre><code class="language-go">writeTool, err := file.NewWriteTool(file.WithWorkingDirectory("/workspace"))
@@ -170,7 +255,8 @@ if err := a.AddTool(writeTool.Tool()); err != nil {
       </p>
       <ul>
         <li><code>Tool()</code>: the main <code>bash</code> tool — execute a command, optionally in the background</li>
-        <li><code>OutputTool()</code>: <code>bash_output</code> — retrieve incremental output from a running background shell</li>
+        <li><code>OutputTool()</code>: <code>bash_output</code> — retrieve incremental output from a running background
+          shell. Once a finished shell's output has been read in full, its ID is forgotten.</li>
         <li><code>KillTool()</code>: <code>kill_shell</code> — terminate a background shell by ID</li>
       </ul>
 
@@ -187,6 +273,7 @@ bashTool, err := bash.New(
 if err != nil {
     panic(err)
 }
+defer bashTool.Close() // kill the background shells when the app ends
 
 // Register all three tools so the agent can manage background processes:
 if err := a.AddTool(bashTool.Tool());       err != nil { panic(err) }
@@ -199,16 +286,133 @@ if err := a.AddTool(bashTool.KillTool());   err != nil { panic(err) }</code></pr
         <li><code>WithTimeout(d)</code>: fixed maximum execution time per command</li>
         <li><code>WithDefaultTimeout(d)</code>: timeout used when the LLM does not supply one in the request (default: 120 s)</li>
         <li><code>WithMaxTimeout(d)</code>: cap on the LLM-supplied per-request timeout value (default: 600 s)</li>
-        <li><code>WithMaxOutputChars(n)</code>: output truncation threshold (default: 30 000 chars)</li>
+        <li><code>WithMaxOutputChars(n)</code>: output truncation threshold (default <code>bash.DefaultMaxOutputChars</code>, 30,000 bytes). Longer output
+          keeps its start and its end, where errors usually are, around a <code>[... N bytes truncated ...]</code>
+          marker, without splitting a UTF-8 character</li>
         <li><code>WithBlocklist(patterns...)</code>: any command containing a pattern (case-insensitive) returns <code>ErrCommandBlocked</code></li>
         <li><code>WithAllowlist(patterns...)</code>: when set, the command must match at least one pattern or <code>ErrCommandNotAllowed</code> is returned</li>
         <li><code>WithWorkingDirectory(dir)</code>: directory in which commands run</li>
+        <li><code>WithRunner(r)</code>: how commands are launched; <code>bash.LocalRunner</code> (the default) runs
+          them on the host, <code>bash.NewBubblewrapRunner</code> in a sandbox (below)</li>
+        <li><code>WithEnvAllowlist(names...)</code>: pass only these environment variables to commands instead of the
+          whole process environment; <code>bash.DefaultEnvAllowlist()</code> keeps what common tools need and no secrets</li>
+        <li><code>WithEnv(entries...)</code>: add <code>KEY=VALUE</code> entries to every command's environment. They
+          are added to the allowlisted variables or, without an allowlist, to the runner's default: the whole
+          process environment for <code>LocalRunner</code>, <code>DefaultEnvAllowlist()</code> in the sandbox. A custom
+          <code>Runner</code> gets them in <code>RunOptions.ExtraEnv</code> and must apply them</li>
+        <li><code>WithPersistentShell()</code>: carry the working directory and exported variables from one command to
+          the next, as in an interactive shell (after <code>cd sub</code>, the next command runs in <code>sub</code>).
+          Each command still runs in its own process; one that exits, times out or runs in the background changes
+          nothing. Without it, every command starts fresh in the working directory, and the tool's description says
+          so to the model.</li>
+        <li><code>WithOutputHandler(fn)</code>: get a foreground command's output as it is written (below)</li>
       </ul>
+      <h3>Streaming output</h3>
+      <p>
+        By default nothing is visible until a command exits, so a long <code>go test</code> looks like a hang.
+        <code>WithOutputHandler</code> calls a function with each piece of output as the command writes it (stdout and
+        stderr interleaved, as in the result). The model still gets the whole output when the command ends. The
+        function gets the tool call's context, so <code>llm.ToolCallFromContext</code> tells which call a chunk
+        belongs to. Background commands are not streamed: the model reads them with <code>bash_output</code>.
+      </p>
+      <pre><code class="language-go">bashTool, err := bash.New(
+    bash.WithOutputHandler(func(ctx context.Context, chunk []byte) {
+        os.Stderr.Write(chunk) // show progress while the command runs
+    }),
+)</code></pre>
+      <h3>Sandbox (Linux)</h3>
+      <p>
+        The blocklist and allowlist match substrings of the command and are easy to get around: they are not a
+        security boundary. On Linux, <code>NewBubblewrapRunner</code> runs every command in a
+        <a href="https://github.com/containers/bubblewrap">bubblewrap</a> sandbox: of the host file system only the
+        system directories (<code>bash.SystemPaths()</code>: <code>/usr</code>, <code>/etc</code>, <code>/lib*</code>, …)
+        are mounted, read-only, plus the workspace. <code>/tmp</code>, <code>/run</code> and <code>$HOME</code> are
+        private and empty, so host Unix sockets (<code>docker.sock</code>, the D-Bus buses, agent sockets) and files
+        such as <code>~/.ssh</code> are out of reach: <code>connect()</code> on a socket ignores read-only mounts, so
+        the sandbox does not mount them at all. A workspace or extra path that is <code>/</code> or contains
+        <code>$HOME</code> is refused (<code>bash.ErrPathTooBroad</code>), and commands run in a new session, detached
+        from the caller's terminal. There is no network by default; <code>WithNetwork(true)</code> shares the host's
+        network namespace, so commands also reach every service on localhost (a Docker TCP socket, databases, a local
+        LLM server) and abstract Unix sockets such as X11's. The environment is limited to
+        <code>DefaultEnvAllowlist()</code>, and the sandbox has its own PID namespace, so a timeout kills everything a
+        command started.
+      </p>
+      <pre><code class="language-go">runner, err := bash.NewBubblewrapRunner(repoDir,
+    bash.WithWritablePaths(goBuildCache, goModCache), // tools that write outside the workspace
+    bash.WithReadOnlyPaths(toolchainDir),              // tools installed outside the system directories
+    bash.WithReadOnlyPaths(repoDir+"/.git"),           // inside the workspace: the most specific mount wins
+    // bash.WithNetwork(true),                         // only if commands need it: it shares the host's network
+)
+if err != nil { panic(err) } // bash.ErrBubblewrapNotFound when bwrap is not installed
+
+bashTool, err := bash.New(bash.WithRunner(runner), bash.WithWorkingDirectory(repoDir))</code></pre>
+      <p>
+        Any type implementing <code>bash.Runner</code> can replace it, for example one that runs commands in a
+        container: it only builds the <code>*exec.Cmd</code>, and the tool keeps timeouts, process groups, background
+        shells and output handling.
+      </p>
       <p>Background execution fields in <code>Input</code>:</p>
       <ul>
         <li><code>RunInBackground bool</code>: start the command in the background; the tool returns a <code>bash_id</code> immediately</li>
-        <li><code>Timeout int</code>: optional per-request timeout in milliseconds, capped by <code>WithMaxTimeout</code></li>
+        <li><code>Timeout int</code>: optional per-request timeout in milliseconds. For a foreground command it is
+          capped by <code>WithMaxTimeout</code>; for a background command, by <code>WithBackgroundTimeout</code> when set</li>
       </ul>
+      <h3>Background shells</h3>
+      <p>
+        A background command has its own lifetime, so a dev server or a watcher keeps running. The foreground limits
+        (<code>WithTimeout</code>, <code>WithDefaultTimeout</code>, <code>WithMaxTimeout</code>, and the safe-mode
+        timeout) do not apply to it.
+      </p>
+      <ul>
+        <li><code>WithBackgroundTimeout(d)</code>: kill a background command after <code>d</code>, and cap the timeout
+          the model asks for. 0 (the default) means no limit</li>
+        <li><code>WithMaxBackgroundOutput(n)</code>: how many bytes of output each shell keeps (default
+          <code>bash.DefaultMaxBackgroundOutput</code>, 1 MiB; 0 = no cap). Older output is dropped; when unread output
+          was dropped, <code>bash_output</code> starts with <code>[... N bytes dropped ...]</code> and sets
+          <code>Dropped</code></li>
+        <li><code>Close()</code>: kill every background shell and wait briefly for them to exit. Call it with
+          <code>defer</code>. Foreground commands still run afterwards; a new background command returns
+          <code>bash.ErrClosed</code></li>
+      </ul>
+      <p>
+        A command killed at its timeout is not an error: the result holds what it printed until then, followed by
+        "command timed out after …", with <code>TimedOut</code> set, so the model sees how far it got. A cancelled
+        caller context still returns the context's error.
+      </p>
+      <p>
+        On Unix, each command runs in its own process group. A timeout, a cancelled context or
+        <code>kill_shell</code> kills the whole group, so processes the command started (a dev server, a
+        test runner's workers) do not outlive it.
+      </p>
+    </section>
+
+    <section id="coding-agent-safety">
+      <h2>Running a coding agent safely</h2>
+      <p>
+        A coding agent runs commands and changes files that a model chose. Each guard below covers a different
+        risk. <a href="https://github.com/henomis/phero/tree/main/examples/coding-agent">examples/coding-agent</a>
+        puts them together.
+      </p>
+      <ul>
+        <li><strong>Bash permission rules are advisory.</strong> They match the command text, so a deny rule misses
+          the same program written another way (<code>/bin/rm</code>, <code>sh -c</code>, a Makefile). Commands that
+          hide what they run (escaped names, substitutions, assignments before a command) are asked, not allowed.
+          Use rules to stop mistakes, not as a boundary.</li>
+        <li><strong>The sandbox is the boundary.</strong> <code>LocalRunner</code>, the default, has no isolation.
+          <code>NewBubblewrapRunner</code> is Linux-only. <code>WithNetwork(true)</code> shares the host network,
+          localhost services included.</li>
+        <li><strong>Keep secrets out of commands.</strong> The sandbox passes only <code>DefaultEnvAllowlist()</code>
+          by default. With <code>LocalRunner</code>, set <code>bash.WithEnvAllowlist(bash.DefaultEnvAllowlist()...)</code>:
+          without it, commands get the agent's whole environment, API keys included.</li>
+        <li><strong>The file tools run outside the sandbox.</strong> Confine them with
+          <code>file.WithWorkingDirectory</code>; without it they reach any path the process can.</li>
+        <li><strong>Bound every turn.</strong> A coding agent needs more than the default 25 iterations: use
+          <code>SetMaxIterations(0)</code> and a <code>context.WithTimeout</code> per turn.</li>
+      </ul>
+      <p>
+        Recommended setup: bubblewrap, an env allowlist, the file tools confined to the workspace, a permission
+        policy with an <code>Asker</code> for everything not allowed, and a deadline per turn.
+      </p>
     </section>
 
     <section>
@@ -288,11 +492,162 @@ if err := a.AddTool(dispatcher.Tool()); err != nil {
       <p>
         The dispatcher scans <code>skillsRootPath</code> for subdirectories containing <code>SKILL.md</code> files,
         builds a catalog, and embeds it in the tool description so the model can select the right skill by name at runtime.
+        A skill that cannot be used (it does not parse, has no name or description, or its name is taken) is left out,
+        and <code>dispatcher.Skipped()</code> says why; the others still load.
       </p>
       <p>Available options:</p>
       <ul>
-        <li><code>WithAvailableSkillsLocation(loc)</code>: override the location string shown in the skill catalog</li>
+        <li><code>WithRoots(roots...)</code>: read skills from several roots (user and project); earlier roots win,
+          on a directory name or a skill name, so pass the user's first</li>
+        <li><code>WithOnLoad(fn)</code>: called each time the model loads a skill, for example to pre-approve its
+          <code>allowed-tools</code> for the run (<code>policy.AllowForRun</code>, filtered by
+          <code>permission.SkillGrants</code>)</li>
         <li><code>WithParser(parser)</code>: inject a custom <code>Parser</code> implementation (useful for testing)</li>
+      </ul>
+      <p>
+        The model passes arguments for a skill in the <code>arguments</code> field: they replace <code>$ARGUMENTS</code>
+        in the skill's body, or are appended after it. The result lists the skill's allowed tools.
+      </p>
+
+    </section>
+
+    <section>
+      <h2>Web fetch (<code>tool/web</code>)</h2>
+      <p>
+        The <code>web_fetch</code> tool fetches a page and returns it as text: HTML becomes readable text with headings,
+        lists and links (as <code>text [url]</code>), without script or style; other text and JSON come back as they
+        are; binary content is refused. Responses are capped (<code>WithMaxBytes</code>, <code>WithMaxOutputChars</code>,
+        <code>WithTimeout</code>) and the result says when it was truncated.
+      </p>
+      <pre><code class="language-go">fetcher := web.New(web.WithAllowedHosts("go.dev", "*.go.dev", "github.com"))
+
+fetchTool, err := fetcher.Tool()
+if err != nil { panic(err) }
+
+if err := a.AddTool(fetchTool); err != nil { panic(err) }</code></pre>
+      <p>
+        The URL comes from the model, so the tool refuses addresses on loopback, private, link-local and
+        carrier-grade NAT networks and <code>0.0.0.0/8</code>, including cloud metadata endpoints, and IPv6 addresses
+        that carry such an IPv4 address (NAT64, 6to4, Teredo). The check runs on the address it connects to, so a redirect or a DNS answer
+        cannot get around it. <code>WithPrivateNetworks(true)</code> allows them, for example to read a local dev server.
+        <code>WithAllowedHosts</code> limits the hosts, redirects included; only <code>http</code> and <code>https</code>
+        URLs are fetched.
+      </p>
+    </section>
+
+    <section>
+      <h2>Task list (<code>tool/todo</code>)</h2>
+      <p>
+        Over many turns an agent loses track of a long task. The <code>todo_write</code> tool lets it write the steps
+        down, mark the one it is on and tick them off. Each call replaces the whole list; at most one item is
+        <code>in_progress</code>. The tool answers with the list as a checklist.
+      </p>
+      <pre><code class="language-go">list := todo.New(todo.WithOnChange(func(items []todo.Item) {
+    fmt.Println(todo.Render(items)) // or update a UI
+}))
+
+todoTool, err := list.Tool()
+if err != nil { panic(err) }
+
+if err := a.AddTool(todoTool); err != nil { panic(err) }</code></pre>
+      <p>
+        <code>list.Items()</code> returns the current items, for example to show them after the run. To resume a
+        session, save the items (they marshal to JSON) and start the next list with <code>todo.WithItems</code>:
+      </p>
+      <pre><code class="language-go">var saved []todo.Item
+if data, err := os.ReadFile(".phero/todo.json"); err == nil {
+    _ = json.Unmarshal(data, &saved)
+}
+
+list := todo.New(
+    todo.WithItems(saved), // must be valid items, as Items() returns
+    todo.WithOnChange(func(items []todo.Item) {
+        data, _ := json.Marshal(items)
+        _ = os.WriteFile(".phero/todo.json", data, 0o600)
+    }),
+)</code></pre>
+    </section>
+
+    <section>
+      <h2>Permissions (<code>tool/permission</code>)</h2>
+      <p>
+        A <code>permission.Policy</code> decides, for each tool call, whether it runs, is denied, or is asked of a human
+        first. Rules name a tool and, optionally, a pattern on the call's subject (the command for bash, the file path for
+        read, write and edit, the search path for glob and grep); <code>*</code> matches any run of characters.
+      </p>
+
+      <pre><code class="language-go">policy, err := permission.New(
+    permission.WithAllow("read", "grep", "glob", "bash(go test *)", "bash(go build *)", "edit(/repo/*)"),
+    permission.WithAsk("edit(/repo/go.mod)"),
+    permission.WithDeny("bash(git push *)", "edit(/repo/secrets/*)"), // bash rules guard against mistakes
+    permission.WithAsker(func(ctx context.Context, req permission.Request) (permission.Answer, error) {
+        fmt.Printf("Allow %s(%s)? [y/a/N] ", req.Tool, req.Subject)
+        // read the answer: permission.AllowOnce, permission.AllowAlways or permission.Reject
+        return permission.AllowOnce, nil
+    }),
+)
+if err != nil { panic(err) }
+
+policy.Apply(readTool.Tool(), bashTool.Tool(), editTool.Tool())</code></pre>
+
+      <ul>
+        <li>A call is denied when a deny rule matches, else asked when an ask rule matches, else allowed when an allow
+          rule matches, else given the default (<code>Ask</code>; change it with <code>WithDefault</code>).</li>
+        <li>A bash command line is parsed as the shell would (<code>mvdan.cc/sh</code>), and every simple command
+          in it must be allowed: those joined by <code>&amp;&amp;</code>, <code>||</code>, <code>;</code>,
+          <code>|</code> and <code>&amp;</code>, and those inside subshells, <code>if</code>/<code>for</code> bodies,
+          functions and substitutions. <code>go test ./... &amp;&amp; rm -rf /</code> does not pass
+          <code>bash(go test *)</code>; a quoted operator does not split (<code>echo 'a &amp;&amp; b'</code> is one
+          command), and commands are matched single-spaced. An assignment before a command is part of it:
+          <code>CGO_ENABLED=0 go test</code> does not pass <code>bash(go test *)</code>, because a variable can change
+          what an allowed program runs (<code>GOFLAGS=-toolexec=...</code>, <code>LD_PRELOAD</code>); a rule that
+          names it does, as <code>bash(CGO_ENABLED=0 go test *)</code>. A line is asked (still denied when a deny rule matches
+          one of its commands) when it does not parse; holds the text of a command or process substitution anywhere,
+          even quoted (bash runs <code>$(...)</code> found in an array subscript or <code>${x@P}</code>); evaluates
+          arithmetic or indirection (<code>$((...))</code>, <code>((...))</code>, <code>[[ ... ]]</code>,
+          <code>${a[i]}</code>, <code>${!a}</code>, …); only assigns or declares variables (<code>PATH=.</code>,
+          <code>export</code>); names its command with something other than a plain word (<code>$CMD</code>, a
+          function it defines); or redirects output to a file
+          (<code>cat a &gt;&gt; ~/.bashrc</code> does not pass <code>bash(cat *)</code>); <code>2&gt;&amp;1</code>,
+          <code>&gt;/dev/null</code>, input redirections and heredocs write no file.</li>
+        <li>File paths are matched as the file tools open them: cleaned, made absolute against the working directory
+          (<code>WithWorkingDir</code>, the process's by default; set it to the file tools' working directory), with
+          a leading <code>~</code> read as the home directory, and resolved through symlinks. Path patterns in rules are resolved the same way, so <code>/repo/src/../secrets/k</code>
+          and a symlink into <code>secrets</code> both meet <code>read(/repo/secrets/*)</code>. Deny and ask rules also
+          match the path as written, so <code>read(/repo/*/.env)</code> still covers a symlinked package.</li>
+        <li>Arguments that give the subject twice (<code>{"command":"go test","COMMAND":"rm -rf ~"}</code>) are denied:
+          the tool's handler decodes keys case-insensitively and keeps the last one, so the rules could otherwise see a
+          different value from the one that runs.</li>
+        <li>Questions come one at a time, even when the agent runs tool calls in parallel. The policy is not locked
+          while a question is open: the <code>Asker</code>, or the UI it waits for, can call <code>Always</code>,
+          <code>Forget</code> or <code>Decide</code>, and calls that need no question run meanwhile. <code>AllowAlways</code>
+          allows the same subject from then on; <code>policy.Always()</code> lists those answers and
+          <code>policy.Forget(tool, subject)</code> drops one. Without an <code>Asker</code>, calls that need asking are
+          denied.</li>
+        <li>A denied call returns a <code>*permission.DeniedError</code> (matches <code>permission.ErrDenied</code>),
+          which the model sees as a failed tool call.</li>
+        <li>The <code>Request</code> an <code>Asker</code> gets carries the model's tool call ID (<code>CallID</code>),
+          what the call touches for a person to read (<code>Subject</code>: the whole command line for bash, the resolved
+          path for a file tool), the subject argument as written (<code>Raw</code>: for bash, the whole command line with its pipes and
+          <code>&amp;&amp;</code>), and the subjects an <code>AllowAlways</code> answer allows from then on
+          (<code>Subjects</code>), so a question can show both exactly. <code>Subjects</code> lists each subject once and leaves
+          out those an earlier answer already allows, and those an ask rule matches, which are never stored: the ask
+          rule would ask again anyway. <code>Reason</code> says why it is asked:
+          <code>ReasonNoRule</code>, <code>ReasonAskRule</code> or <code>ReasonOpaque</code> (a command line it cannot
+          split).</li>
+        <li><strong>Bash rules are advisory, not a security boundary.</strong> They match the command text, so a deny
+          rule misses the same program written another way: <code>bash(rm -rf *)</code> does not match
+          <code>rm  -rf</code>, <code>rm -fr</code>, <code>/bin/rm -rf</code> or <code>\rm -rf</code>, nor rm run from
+          inside <code>sh -c</code>, a script or a Makefile. Use deny rules to stop mistakes, allow rules for commands
+          safe to run unasked, and the bubblewrap sandbox (<code>bash.NewBubblewrapRunner</code>, above) where a restriction must hold.</li>
+        <li>A <code>glob</code> or <code>grep</code> call with no path searches the working directory, so
+          <code>glob(/repo/secrets*)</code> does not cover it: deny the directory itself or keep secrets outside the
+          working directory.</li>
+        <li><code>WithSubject(tool, argument)</code> sets the subject argument of other tools, such as an MCP tool's URL.
+          A subject argument named <code>file_path</code> or <code>path</code> is matched as a file path.</li>
+        <li>The policy knows the built-in tools by name. Only a tool named <code>bash</code> has its command line parsed
+          into commands; a shell tool under another name is matched on its whole argument, unparsed, so give it rules
+          for whole command lines, or keep the name <code>bash</code>.</li>
       </ul>
     </section>
 

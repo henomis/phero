@@ -161,6 +161,32 @@ _ = server.Run(context.Background(), &mcp.StdioTransport{})</code></pre>
     // allowlist only a subset
     return name == "get_random_quote" || strings.HasPrefix(name, "search_")
 })</code></pre>
+      <p>
+        When an agent uses several MCP servers, two of them may offer a tool with the same name. Give each server
+        a prefix with <code>mcp.WithToolPrefix</code>; the MCP server is still called with the tool's own name:
+      </p>
+      <pre><code class="language-go">github := mcp.New(githubSession, mcp.WithToolPrefix("github_"))
+browser := mcp.New(playwrightSession, mcp.WithToolPrefix("browser_"))</code></pre>
+      <p>
+        Tool names, with the prefix, are made ones every provider accepts: characters other than
+        <code>[a-zA-Z0-9_-]</code> become <code>_</code> and names are cut at 64 characters
+        (<code>llm.SanitizeToolName</code>). When two names become the same, the later gets a numbered suffix
+        (<code>files_read_2</code>). The filter still gets the MCP tool's own name.
+      </p>
+    </section>
+
+    <section>
+      <h2>Tool results</h2>
+      <ul>
+        <li>Text content is joined into the tool's text result.</li>
+        <li>Image content, such as a Playwright screenshot, is passed to the model as an image part.</li>
+        <li>A result with <code>IsError</code> set returns an <code>*mcp.ToolResultError</code> holding the result's
+          text, so the agent reports a failed tool call to the model.</li>
+        <li><code>mcp.WithMaxOutputChars(n)</code> caps the text of each result, error text included, at
+          <code>n</code> bytes, the closing <code>[output cut at n characters]</code> note included, so one call cannot fill a small
+          context window. Images are kept. There is no cap by default.</li>
+      </ul>
+      <pre><code class="language-go">server := mcp.New(session, mcp.WithMaxOutputChars(30_000))</code></pre>
     </section>
 
     <section>

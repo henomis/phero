@@ -22,6 +22,34 @@ import (
 	"strings"
 )
 
+// ResolvePath resolves path as the file tools do before they open it: it
+// must be absolute (ErrPathMustBeAbsolute), it is cleaned and its symlinks
+// are resolved, including those of the existing parents of a file that does
+// not exist yet, with or without a workingDir. With a non-empty workingDir,
+// the resolved path must lie inside it (ErrPathOutsideWorkingDirectory). Use it to see the file a call
+// will touch, for example to record it before the call runs.
+func ResolvePath(workingDir, path string) (string, error) {
+	return resolveToolPath(workingDir, path)
+}
+
+// resolveReadPath is resolveToolPath for the tools that only read: a path
+// outside the working directory is accepted when it lies inside one of
+// readRoots (see WithReadOnlyRoots).
+func resolveReadPath(workingDir string, readRoots []string, inputPath string) (string, error) {
+	resolved, err := resolveToolPath(workingDir, inputPath)
+	if !errors.Is(err, ErrPathOutsideWorkingDirectory) {
+		return resolved, err
+	}
+
+	for _, root := range readRoots {
+		if inRoot, rootErr := resolveToolPath(root, inputPath); rootErr == nil {
+			return inRoot, nil
+		}
+	}
+
+	return "", err
+}
+
 func resolveToolPath(workingDir, inputPath string) (string, error) {
 	path := filepath.Clean(inputPath)
 	if !filepath.IsAbs(path) {
@@ -33,8 +61,13 @@ func resolveToolPath(workingDir, inputPath string) (string, error) {
 		return "", fmt.Errorf("resolve path: %w", err)
 	}
 
+	resolvedPath, err := resolvePathWithSymlinks(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve path symlinks: %w", err)
+	}
+
 	if workingDir == "" {
-		return path, nil
+		return resolvedPath, nil
 	}
 
 	resolvedWorkingDir, err := filepath.Abs(filepath.Clean(workingDir))
@@ -45,11 +78,6 @@ func resolveToolPath(workingDir, inputPath string) (string, error) {
 	resolvedWorkingDir, err = filepath.EvalSymlinks(resolvedWorkingDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve working directory symlinks: %w", err)
-	}
-
-	resolvedPath, err := resolvePathWithSymlinks(path)
-	if err != nil {
-		return "", fmt.Errorf("resolve path symlinks: %w", err)
 	}
 
 	rel, err := filepath.Rel(resolvedWorkingDir, resolvedPath)

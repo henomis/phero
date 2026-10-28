@@ -96,13 +96,59 @@ Use this skill when the user asks for a random quote (inspirational, motivationa
     </section>
 
     <section>
-      <h2>Default tools available to skills</h2>
+      <h2>Arguments, allowed tools and several roots</h2>
       <p>
-        Each skill is executed by an internal agent. The agent automatically gets a small built-in toolbox rooted at the skill directory:
-        <code>read</code>, <code>write</code>, <code>edit</code>, and <code>bash</code>.
+        The model loads a skill through the <code>skill</code> tool (<code>tool/skill</code>), giving its name in
+        <code>command</code> and, when the skill takes any, its <code>arguments</code>. A <code>$ARGUMENTS</code>
+        placeholder in the body is replaced with them; without one, they are appended after the body.
       </p>
       <p>
-        That means a skill can inspect local files, edit them, or run commands without extra setup in your application code.
+        The <code>allowed-tools</code> frontmatter field lists the tools a skill pre-approves, in the space-separated form
+        of the Agent Skills spec (<code>Read Grep</code>) or the comma-separated form with patterns
+        (<code>Bash(git status:*), Read</code>). <code>Skill.Tools()</code> returns the entries, the <code>skill</code> tool
+        returns them to the model, and <code>WithOnLoad</code> lets the application grant them, for example in a
+        <a href="tool.html">permission policy</a>. As in Claude Code, the grant should last only for the run that
+        loaded the skill (<code>AllowForRun</code>), and <code>permission.SkillGrants</code> leaves out grants too
+        broad for a skill a cloned project may ship: bash with no fixed command (<code>Bash</code>,
+        <code>Bash(*)</code>, a <code>*</code> tool name), with a quoted or escaped command (<code>\sh</code>),
+        with a command that runs others (<code>sh</code>, <code>sudo</code>, <code>env</code>,
+        <code>python3.12</code>, <code>busybox</code>, …), or with <code>git</code> and no subcommand
+        (<code>git -c</code> can run anything). The refused commands are a heuristic that may grow in later
+        versions, not a contract.
+      </p>
+      <pre><code class="language-go">skillTool, err := skilltool.New("",
+    skilltool.WithRoots(userSkillsDir, "./skills"), // earlier roots win on the same skill name
+    skilltool.WithOnLoad(func(ctx context.Context, s *skill.Skill) {
+        granted, refused := permission.SkillGrants(s.Tools())
+        _ = policy.AllowForRun(ctx, granted...) // pre-approved for this run only
+        if len(refused) > 0 {
+            log.Printf("skill %s: not granted: %v", s.Name, refused)
+        }
+    }),
+)
+if err != nil {
+    return err
+}
+for _, skipped := range skillTool.Skipped() {
+    log.Printf("skill left out: %v", skipped)
+}</code></pre>
+      <p>
+        A skill that cannot be used (a <code>SKILL.md</code> that does not parse, no name or description, or a name
+        an earlier skill already has) is left out of the catalog, and <code>Skipped()</code> says why; the other
+        skills still load. When two roots hold skills of the same name, in directories of different names, the
+        earlier root's skill wins too, so a cloned project cannot turn off or take over the user's skills.
+      </p>
+      <p>
+        <code>skill.NewMulti(roots...)</code> is the parser behind <code>WithRoots</code>: a user's own skills and a
+        project's, with the earlier root winning when both have a skill directory of the same name. Pass the user's
+        root first, so a cloned project cannot shadow a skill the user trusts. A missing root holds no skills.
+      </p>
+      <p>
+        Roots, in one place: <code>skilltool.New(root)</code> reads one root (<code>skill.New(root)</code>).
+        <code>WithRoots(roots...)</code> replaces it with several (<code>skill.NewMulti</code>), so pass
+        <code>""</code> as <code>New</code>'s root when you use it. <code>WithParser</code> replaces both, and the last
+        of <code>WithRoots</code> and <code>WithParser</code> wins. Across roots the earlier one wins, both for a skill
+        directory name and for a skill name.
       </p>
     </section>
 

@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func requireBash(t *testing.T) {
@@ -192,9 +193,36 @@ func TestBashTool_Timeout_KillsLongRunning(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	_, err = tool.run(context.Background(), &Input{Command: "sleep 10"})
-	if err == nil {
-		t.Fatal("expected error from timeout, got nil")
+	start := time.Now()
+
+	out, err := tool.run(context.Background(), &Input{Command: "echo started; sleep 10"})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if !out.TimedOut || !strings.HasPrefix(out.Output, "started\n") || !strings.Contains(out.Output, "timed out") {
+		t.Fatalf("output = %+v, want the output so far and a timeout note", out)
+	}
+
+	// The sleep child keeps the output pipe open: the call must still return.
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("run took %v after a 50ms timeout", elapsed)
+	}
+}
+
+func TestBashTool_CallerCancelReturnsError(t *testing.T) {
+	requireBash(t)
+
+	tool, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	if _, err = tool.run(ctx, &Input{Command: "sleep 10"}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want the caller's context error", err)
 	}
 }
 
@@ -231,12 +259,23 @@ func TestBashTool_OutputTruncated(t *testing.T) {
 		t.Fatalf("expected output")
 	}
 
-	if len(out.Output) != 10 {
-		t.Fatalf("expected length 10, got %d", len(out.Output))
+	if !strings.HasPrefix(out.Output, "abcde") || !strings.HasSuffix(out.Output, "vwxyz") ||
+		!strings.Contains(out.Output, "[... 16 bytes truncated ...]") {
+		t.Fatalf("output = %q, want the start, a marker and the end", out.Output)
 	}
 
 	if !out.Truncated {
 		t.Fatal("expected truncated output")
+	}
+}
+
+func TestTruncateOutput_KeepsUTF8Whole(t *testing.T) {
+	tool := &Tool{maxOutputChars: 7}
+
+	// Each "é" is two bytes: cutting at a fixed byte would split one.
+	out, truncated := tool.truncateOutput("éééééééééé")
+	if !truncated || !utf8.ValidString(out) {
+		t.Fatalf("out = %q, want valid UTF-8 and truncated", out)
 	}
 }
 
@@ -342,5 +381,62 @@ func TestBashTool_SafeMode_AllowsSafeCommand(t *testing.T) {
 
 	if strings.TrimSpace(out.Output) != "safe" {
 		t.Fatalf("unexpected output: %q", out.Output)
+	}
+}
+
+// TestSchema_DescriptionsAreComplete guards against jsonschema tags cutting a
+// description at its first comma.
+func TestSchema_DescriptionsAreComplete(t *testing.T) {
+	tool, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	props, _ := tool.Tool().InputSchema()["properties"].(map[string]any)
+	desc, _ := props["description"].(map[string]any)
+
+	if got, want := desc["description"], "Clear, concise command description (5-10 words)."; got != want {
+		t.Fatalf("description = %q, want %q", got, want)
+	}
+}
+
+func TestBashTool_LongOutputTruncatedOnce(t *testing.T) {
+	requireBash(t)
+
+	tool, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tool.maxOutputChars = 100
+	tool.timeout = 500 * time.Millisecond
+
+	print5000 := "head -c 5000 /dev/zero | tr '\\0' a; echo"
+
+	cases := map[string]struct {
+		command, suffix string
+	}{
+		"timeout":   {print5000 + "; sleep 5", "command timed out after 500ms"},
+		"exit code": {print5000 + "; exit 3", "exit code: 3"},
+	}
+
+	for name, tc := range cases {
+		out, runErr := tool.run(context.Background(), &Input{Command: tc.command})
+		if runErr != nil {
+			t.Fatalf("%s: %v", name, runErr)
+		}
+
+		// 5001 bytes printed (with the newline), 100 kept: one marker, 4901 cut.
+		if n := strings.Count(out.Output, "bytes truncated"); n != 1 {
+			t.Errorf("%s: %d truncation markers in %q, want 1", name, n, out.Output)
+		}
+
+		if !strings.Contains(out.Output, "[... 4901 bytes truncated ...]") {
+			t.Errorf("%s: output %q, want 4901 bytes reported cut", name, out.Output)
+		}
+
+		if !strings.HasSuffix(out.Output, tc.suffix) || !out.Truncated {
+			t.Errorf("%s: output %q (truncated %v), want it to end with %q", name, out.Output, out.Truncated, tc.suffix)
+		}
 	}
 }

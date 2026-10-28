@@ -15,8 +15,12 @@
 package llm
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"time"
 )
 
@@ -165,6 +169,10 @@ type ProviderError struct {
 	// RetryAfter is how long the provider asked the caller to wait, typically
 	// with a 429; 0 when it did not say or the SDK does not expose it.
 	RetryAfter time.Duration
+	// ContextLengthExceeded reports that the provider rejected the request
+	// because the prompt does not fit the model's context window. Such an
+	// error matches ErrContextLengthExceeded with errors.Is.
+	ContextLengthExceeded bool
 	// Err is the SDK's own error.
 	Err error
 }
@@ -175,6 +183,58 @@ func (e *ProviderError) Error() string {
 
 func (e *ProviderError) Unwrap() error {
 	return e.Err
+}
+
+// Is reports whether e matches target: ErrContextLengthExceeded matches an
+// error with ContextLengthExceeded set.
+func (e *ProviderError) Is(target error) bool {
+	return target == ErrContextLengthExceeded && e.ContextLengthExceeded
+}
+
+// ErrContextLengthExceeded is matched with errors.Is by errors that report a
+// prompt too long for the model's context window. Retrying the same request
+// cannot succeed; the conversation has to be shortened first.
+var ErrContextLengthExceeded = errors.New("context length exceeded")
+
+// IsRetryable reports whether retrying the call that returned err may
+// succeed: a rate limit, a timeout, a server or overload error, or a network
+// failure. It returns false for errors the same request will always get, such
+// as a bad request, a bad API key, a prompt too long for the context window or
+// a guardrail block, and for a cancelled context.
+//
+// A deadline that expired counts as a timeout and is retryable: IsRetryable
+// cannot tell a per-request timeout from the caller's own deadline, so a
+// caller checks its context before retrying, as the retry middleware does.
+func IsRetryable(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	if errors.Is(err, ErrContextLengthExceeded) || errors.Is(err, ErrGuardrailBlocked) {
+		return false
+	}
+
+	if pe, ok := errors.AsType[*ProviderError](err); ok {
+		switch {
+		case pe.StatusCode == http.StatusRequestTimeout,
+			pe.StatusCode == http.StatusConflict,
+			pe.StatusCode == http.StatusTooManyRequests,
+			pe.StatusCode >= http.StatusInternalServerError:
+			return true
+		default:
+			return false
+		}
+	}
+
+	if _, ok := errors.AsType[net.Error](err); ok {
+		return true
+	}
+
+	return errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 // ErrGuardrailBlocked is matched with errors.Is by errors that report a

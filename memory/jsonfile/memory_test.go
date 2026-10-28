@@ -16,6 +16,7 @@ package jsonfile
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -267,5 +268,68 @@ func TestMemory_SummarizationPersistedToDisk(t *testing.T) {
 
 	if !strings.HasPrefix(got[0].TextContent(), memory.SummarySystemMessagePrefix) {
 		t.Fatalf("first message after reopen = %q, want summary prefix %q", got[0].TextContent(), memory.SummarySystemMessagePrefix)
+	}
+}
+
+func TestMemory_SummarizationKeepsToolPairs(t *testing.T) {
+	ctx := context.Background()
+
+	mem, err := New(filepath.Join(t.TempDir(), "mem.json"), WithSummarization(&mockSummaryLLM{}, 4, 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Summarizing the oldest 2 messages would keep tool result "a" without its call.
+	msgs := []llm.Message{
+		llm.UserMessage(llm.Text("go")),
+		llm.AssistantMessage(nil, llm.ToolCall{ID: "a", Function: llm.FunctionCall{Name: "f", Arguments: "{}"}}),
+		llm.ToolResultMessage("a", llm.Text("result")),
+		llm.AssistantMessage([]llm.ContentPart{llm.Text("done")}),
+	}
+	if saveErr := mem.Save(ctx, msgs); saveErr != nil {
+		t.Fatal(saveErr)
+	}
+
+	got, _ := mem.Retrieve(ctx, "")
+	if len(got) != 2 || got[1].TextContent() != "done" {
+		t.Fatalf("got %+v, want summary + final answer", got)
+	}
+}
+
+func TestMemory_FailedSaveStoresNothing(t *testing.T) {
+	dir := t.TempDir()
+
+	mem, err := New(filepath.Join(dir, "memory.json"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctx := context.Background()
+	if err = mem.Save(ctx, []llm.Message{llm.UserMessage(llm.Text("one"))}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The temp file can't be created, so the write fails.
+	if err = os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	if err = mem.Save(ctx, []llm.Message{llm.UserMessage(llm.Text("two"))}); err == nil {
+		t.Skip("the directory is still writable (running as root?)")
+	}
+
+	if err = os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Saving again after the failure stores the message once.
+	if err = mem.Save(ctx, []llm.Message{llm.UserMessage(llm.Text("two"))}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := mem.Len(); got != 2 {
+		t.Fatalf("Len() = %d, want 2", got)
 	}
 }

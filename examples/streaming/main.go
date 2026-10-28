@@ -58,6 +58,10 @@ func main() {
 			fmt.Printf("\n[calling tool %s(%s)]\n", ev.ToolName, ev.ToolArgs)
 		case agent.EventToolResult:
 			fmt.Printf("\n[tool %s -> %s]\n", ev.ToolName, ev.ToolResult)
+		case agent.EventUsage:
+			// per-call usage; the run's total is printed with EventDone
+		case agent.EventCompactionStart, agent.EventCompactionEnd:
+			// this example does not enable compaction (agent.SetCompaction)
 		case agent.EventDone:
 			fmt.Println()
 

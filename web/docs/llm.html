@@ -74,6 +74,8 @@
           <code>llm.ToolChoiceNone</code> or <code>llm.ToolChoiceRequired</code>.</li>
         <li><code>llm.WithForcedTool(name)</code>: force a call to one specific tool, which must also be offered.</li>
         <li><code>llm.WithResponseFormat(format)</code>: constrain the answer to a JSON schema (structured output).</li>
+        <li><code>llm.WithMaxOutputTokens(n)</code>: cap the tokens the model may generate on this call, overriding the
+          client's own limit. An answer cut at the limit ends with <code>llm.FinishLength</code>.</li>
       </ul>
 
       <pre><code class="language-go">res, err := client.Execute(ctx, msgs,
@@ -148,15 +150,25 @@ llmClient := anthropic.New(
       <p>
         If you pass an empty API key, the underlying Anthropic SDK will fall back to its environment variable configuration.
       </p>
+
+      <p>
+        Without <code>WithMaxTokens</code>, requests use <code>anthropic.DefaultMaxTokens</code> (16384), enough for
+        long answers such as a file written in one tool call.
+      </p>
       <p>Available options:</p>
       <ul>
         <li><code>WithModel(m)</code>: Anthropic model name (e.g. <code>"claude-sonnet-4-6"</code>)</li>
         <li><code>WithMaxTokens(n)</code>: maximum completion tokens</li>
         <li><code>WithTemperature(t)</code>: sampling temperature (0&ndash;1)</li>
         <li><code>WithBaseURL(url)</code>: override the API endpoint (useful for proxies or tests)</li>
-        <li><code>WithPromptCaching()</code>: mark the system prompt and tool list as cacheable, so repeated requests
-          reuse them at the cheaper cache-read rate. Cache token counts appear on <code>Result.Usage</code>
+        <li><code>WithPromptCaching()</code>: mark the tool list, the system prompt, the first turn (after a
+          compaction, the summary and the pinned task) and the end of the conversation as cacheable, so repeated
+          requests reuse them at the cheaper cache-read rate. The conversation breakpoint
+          moves forward with every request, so each call of a long agent run reads the previous call's whole prompt
+          from the cache. Cache token counts appear on <code>Result.Usage</code>
           (<code>CacheReadTokens</code> / <code>CacheWriteTokens</code>).</li>
+        <li><code>WithPromptCacheTTL(anthropic.CacheTTL1h)</code>: prompt caching with one-hour cache entries instead
+          of five minutes, for calls that are minutes apart (an agent waiting on a human or a slow tool).</li>
         <li><code>WithThinking(budget)</code>: enable extended thinking with the given token budget. Reasoning is
           returned as <code>ContentTypeReasoning</code> parts (read it with <code>Message.ReasoningContent()</code>)
           and replayed on later turns so tool use keeps working. Reasoning never leaks into <code>TextContent()</code>.
@@ -283,6 +295,11 @@ llmClient := openai.New(
         <li><code>WithBaseURL(url)</code>: override the API base URL (e.g. point at a local proxy)</li>
         <li><code>WithOllamaBaseURL()</code>: shortcut to point at a local Ollama server</li>
       </ul>
+      <p>
+        OpenAI-compatible servers that return the model's thinking in <code>reasoning_content</code> (DeepSeek, Qwen
+        and others on vLLM or llama.cpp) get it as a reasoning part, first in the message, in buffered and streamed
+        calls; read it with <code>Message.ReasoningContent()</code>. It is not sent back to the server.
+      </p>
     </section>
 
     <section>
@@ -364,6 +381,13 @@ fmt.Println(result.TextContent())</code></pre>
       <p>
         See <a href="https://github.com/henomis/phero/tree/main/examples/multimodal">examples/multimodal</a> for a complete working example.
       </p>
+
+      <p>
+        A tool can return images too, by returning <code>[]llm.ContentPart</code> (a screenshot, for example).
+        Anthropic and Gemini accept images in tool results directly. The OpenAI Chat Completions API does not, so
+        <code>llm/openai</code> keeps the text in the tool message and sends the images in a user message right
+        after the tool results.
+      </p>
     </section>
 
     <section>
@@ -396,8 +420,15 @@ wrapped := llm.Use(base, loggingMiddleware)</code></pre>
       </p>
 
       <p>
-        The <code>llm/middleware</code> package ships ready-made middlewares: <code>NewRetry</code> (exponential back-off),
-        <code>NewRateLimit</code>, <code>NewGuardrails</code>, and <code>NewSemanticCache</code>.
+        The <code>llm/middleware</code> package ships ready-made middlewares: <code>NewRetry</code> (exponential back-off; by default it retries only errors <code>llm.IsRetryable</code> accepts),
+        <code>NewLimiter</code>, <code>NewGuardrails</code>, and <code>NewSemanticCache</code>.
+      </p>
+
+      <p>
+        All four keep streaming: they implement <code>llm.StreamingLLM</code>, so an agent's <code>RunStream</code>
+        still gets deltas through them. A retry happens only before the first chunk reaches the caller, the limiter
+        holds its slot until the stream ends, guardrails check the result on the terminal chunk (a failing result
+        guard replaces it with its error), and the cache serves a hit as one chunk and stores a streamed miss.
       </p>
     </section>
 
@@ -420,6 +451,23 @@ wrapped := llm.Use(base, loggingMiddleware)</code></pre>
         Errors that never reached the API, such as a network failure or an invalid request built locally, are
         returned as they are.
       </p>
+
+      <p>
+        A prompt too long for the model's context window sets <code>ContextLengthExceeded</code>, and the error
+        matches <code>llm.ErrContextLengthExceeded</code> with <code>errors.Is</code>. Each backend recognizes
+        its provider's wording: OpenAI's <code>context_length_exceeded</code> (and OpenAI-compatible servers
+        such as vLLM and llama.cpp), Anthropic's "prompt is too long", and Gemini's input token count error.
+        <code>llm.IsRetryable(err)</code> tells whether retrying can help: rate limits, timeouts, server and
+        overload errors and network failures can; bad requests, bad API keys, context-length errors and
+        guardrail blocks cannot.
+      </p>
+
+      <pre><code class="language-go">switch {
+case errors.Is(err, llm.ErrContextLengthExceeded):
+    // shorten the conversation, then call again
+case llm.IsRetryable(err):
+    // wait and retry
+}</code></pre>
     </section>
 
     <section>
@@ -512,6 +560,16 @@ if err != nil {
 
       <p>
         Tools are added to an agent with <code>AddTool</code>, and the agent will run them when the model requests a tool call.
+      </p>
+
+      <p>
+        Tools are offered in strict mode by default: every property is required and no other is allowed, as OpenAI and
+        Anthropic strict tool use need, so the model always sends every field. <code>tool.SetStrict(false)</code> offers
+        the schema as reflected instead, where a field tagged <code>omitempty</code> is optional, and the provider sends
+        the tool without strict mode. <code>openai.WithStrictTools(false)</code> and
+        <code>anthropic.WithStrictTools(false)</code> do the same for every tool of a client, for local servers that
+        mishandle strict schemas. Put a description containing commas in a <code>jsonschema_description</code> tag:
+        the <code>jsonschema</code> tag splits on commas.
       </p>
     </section>
 

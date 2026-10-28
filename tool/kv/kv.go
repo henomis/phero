@@ -57,12 +57,12 @@ func Open(nc *nats.Conn, bucket string) (*Store, error) {
 }
 
 type readInput struct {
-	Key string `json:"key" jsonschema:"The key to read from the store."`
+	Key string `json:"key" jsonschema:"description=The key to read from the store."`
 }
 
 type writeInput struct {
-	Key   string `json:"key" jsonschema:"The key to write."`
-	Value string `json:"value" jsonschema:"The value to store."`
+	Key   string `json:"key" jsonschema:"description=The key to write."`
+	Value string `json:"value" jsonschema:"description=The value to store."`
 }
 
 // ReadTool returns the tool that reads one key.

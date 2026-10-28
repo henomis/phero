@@ -39,8 +39,11 @@ const (
 	// too and will be mapped via OpenAIModelToAnthropic.
 	DefaultModel = "claude-sonnet-4-6"
 
-	// DefaultMaxTokens is the default max_tokens value used for requests.
-	DefaultMaxTokens int64 = 2048
+	// DefaultMaxTokens is the default max_tokens value used for requests. It
+	// leaves room for long answers, such as a file written by a coding agent's
+	// tool call, while staying low enough for a buffered (non-streaming)
+	// request.
+	DefaultMaxTokens int64 = 16384
 
 	// DefaultTemperature is the default sampling temperature used for requests.
 	//
@@ -81,6 +84,8 @@ type Client struct {
 	temperatureSet   bool
 	maxTokens        int64
 	promptCaching    bool
+	cacheTTL         CacheTTL
+	noStrictTools    bool
 	thinkingbudget   int64
 	thinkingAdaptive bool
 	effort           Effort
@@ -217,6 +222,11 @@ func (c *Client) buildParams(messages []llm.Message, opts []llm.CallOption) (ant
 	}
 
 	maxTokens := c.maxTokens
+	if cfg.MaxOutputTokens > 0 {
+		maxTokens = int64(cfg.MaxOutputTokens)
+	}
+
+	answerTokens := maxTokens
 	params := anthropicapi.MessageNewParams{
 		Model:    anthropicapi.Model(strings.TrimSpace(c.model)),
 		Messages: anthropicMessages,
@@ -242,7 +252,7 @@ func (c *Client) buildParams(messages []llm.Message, opts []llm.CallOption) (ant
 		// Extended thinking requires max_tokens > budget and disallows a custom
 		// temperature, so we omit temperature and ensure headroom above the budget.
 		if maxTokens <= c.thinkingbudget {
-			maxTokens = c.thinkingbudget + c.maxTokens
+			maxTokens = c.thinkingbudget + answerTokens
 		}
 
 		params.Thinking = anthropicapi.ThinkingConfigParamOfEnabled(c.thinkingbudget)
@@ -258,7 +268,7 @@ func (c *Client) buildParams(messages []llm.Message, opts []llm.CallOption) (ant
 	// tool_choice goes only with tools: Validate already rejects required and
 	// forced choices without them, and with no tools auto and none hold anyway.
 	if len(cfg.Tools) > 0 {
-		params.Tools = anthropicTools(cfg.Tools)
+		params.Tools = anthropicTools(cfg.Tools, c.noStrictTools)
 
 		if cfg.ToolChoice != nil {
 			params.ToolChoice = toolChoiceToAnthropic(cfg.ToolChoice)
@@ -266,7 +276,7 @@ func (c *Client) buildParams(messages []llm.Message, opts []llm.CallOption) (ant
 	}
 
 	if c.promptCaching {
-		applyPromptCaching(&params)
+		applyPromptCaching(&params, c.cacheTTL)
 	}
 
 	return params, nil
@@ -309,20 +319,70 @@ func anthropicOutputSchema(f *llm.ResponseFormat) map[string]any {
 	return out
 }
 
-// applyPromptCaching marks the high-value, stable prefix of the request as
-// cacheable: the (last) system block and the last tool definition. Anthropic
-// caches everything up to and including a cache_control breakpoint, so marking
-// these two points covers the system prompt and the full tool list.
-func applyPromptCaching(params *anthropicapi.MessageNewParams) {
-	if n := len(params.System); n > 0 {
-		params.System[n-1].CacheControl = anthropicapi.NewCacheControlEphemeralParam()
+// applyPromptCaching places cache_control breakpoints, at most four as the
+// API allows. Anthropic caches the request prefix (tools, then system, then
+// messages) up to and including a breakpoint:
+//   - the last tool definition, which caches the tool list;
+//   - the first system block (the agent's stable system prompt);
+//   - the end of the first message, when there are several: after a
+//     compaction, the summary and the pinned task, which change only at the
+//     next compaction (otherwise the task the conversation started with);
+//   - the last content block of the last message. This one moves forward with
+//     every request, so each call of a long tool-using conversation reads the
+//     previous call's whole prompt from the cache and pays full price only for
+//     the new turn.
+func applyPromptCaching(params *anthropicapi.MessageNewParams, ttl CacheTTL) {
+	cc := anthropicapi.NewCacheControlEphemeralParam()
+	if ttl != "" {
+		cc.TTL = anthropicapi.CacheControlEphemeralTTL(ttl)
 	}
 
 	if n := len(params.Tools); n > 0 {
 		if tool := params.Tools[n-1].OfTool; tool != nil {
-			tool.CacheControl = anthropicapi.NewCacheControlEphemeralParam()
+			tool.CacheControl = cc
 		}
 	}
+
+	if len(params.System) > 0 {
+		params.System[0].CacheControl = cc
+	}
+
+	if n := len(params.Messages); n > 1 {
+		markLastBlock(params.Messages[0].Content, cc)
+	}
+
+	if n := len(params.Messages); n > 0 {
+		markLastBlock(params.Messages[n-1].Content, cc)
+	}
+}
+
+// markLastBlock puts cc on the last block of blocks that can carry one.
+func markLastBlock(blocks []anthropicapi.ContentBlockParamUnion, cc anthropicapi.CacheControlEphemeralParam) {
+	for i := len(blocks) - 1; i >= 0; i-- {
+		// Thinking blocks cannot carry a breakpoint; the block before can.
+		if c := blocks[i].GetCacheControl(); c != nil {
+			*c = cc
+
+			return
+		}
+	}
+}
+
+// toolCallInput decodes a stored tool call's arguments into the JSON object a
+// tool_use block needs. Arguments that are empty, not valid JSON or not an
+// object (a model's output cut off at the token limit, or a call made by
+// another provider) become an empty object: the tool call already got an
+// error result, and failing the whole request would make the conversation
+// unusable.
+func toolCallInput(arguments string) map[string]any {
+	input := map[string]any{}
+	if args := strings.TrimSpace(arguments); args != "" {
+		if err := json.Unmarshal([]byte(args), &input); err != nil || input == nil {
+			return map[string]any{}
+		}
+	}
+
+	return input
 }
 
 // messagesToAnthropic converts Phero messages to Anthropic wire types.
@@ -428,18 +488,7 @@ func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam,
 					id = uuid.NewString()
 				}
 
-				var input any
-
-				args := strings.TrimSpace(tc.Function.Arguments)
-				if args == "" {
-					input = map[string]any{}
-				} else {
-					if err := json.Unmarshal([]byte(args), &input); err != nil {
-						return nil, nil, &ToolArgumentsParseError{ToolName: tc.Function.Name, Err: err}
-					}
-				}
-
-				blocks = append(blocks, anthropicapi.NewToolUseBlock(id, input, tc.Function.Name))
+				blocks = append(blocks, anthropicapi.NewToolUseBlock(id, toolCallInput(tc.Function.Arguments), tc.Function.Name))
 			}
 
 			add(llm.RoleAssistant, blocks...)
@@ -470,11 +519,15 @@ func messagesToAnthropic(messages []llm.Message) ([]anthropicapi.TextBlockParam,
 
 	flush()
 
-	joined := strings.TrimSpace(strings.Join(systemParts, "\n\n"))
+	// One block per system message, so a cache breakpoint can sit after the
+	// stable system prompt, before a summary that changes more often.
+	system := make([]anthropicapi.TextBlockParam, 0, len(systemParts))
+	for _, text := range systemParts {
+		system = append(system, anthropicapi.TextBlockParam{Text: strings.TrimSpace(text)})
+	}
 
-	var system []anthropicapi.TextBlockParam
-	if joined != "" {
-		system = []anthropicapi.TextBlockParam{{Text: joined}}
+	if len(system) == 0 {
+		system = nil
 	}
 
 	return system, out, nil
@@ -618,21 +671,25 @@ func normalizeToolArguments(input json.RawMessage) string {
 	return normalized
 }
 
-func anthropicTools(tools []*llm.Tool) []anthropicapi.ToolUnionParam {
+func anthropicTools(tools []*llm.Tool, noStrict bool) []anthropicapi.ToolUnionParam {
 	out := make([]anthropicapi.ToolUnionParam, 0, len(tools))
 	for _, t := range tools {
 		if t == nil {
 			continue
 		}
 
-		inputSchema := anthropicToolInputSchema(t.InputSchema())
+		strict := t.Strict() && !noStrict
+		inputSchema := anthropicToolInputSchema(t.Schema(strict))
 
 		tool := anthropicapi.ToolParam{
 			Name:        t.Name(),
 			Description: anthropicapi.String(t.Description()),
-			Strict:      anthropicapi.Bool(true),
 			InputSchema: inputSchema,
 		}
+		if strict {
+			tool.Strict = anthropicapi.Bool(true)
+		}
+
 		out = append(out, anthropicapi.ToolUnionParam{OfTool: &tool})
 	}
 
@@ -719,13 +776,48 @@ func WithTemperature(temp float32) Option {
 
 // WithPromptCaching enables Anthropic prompt caching.
 //
-// When enabled, the client marks the system prompt and the tool list as cacheable
-// (an ephemeral cache_control breakpoint), so repeated requests that share that
-// stable prefix are billed at the much cheaper cache-read rate. Cache read/write
-// token counts are reported on Result.Usage (CacheReadTokens / CacheWriteTokens).
+// When enabled, the client marks the tool list, the system prompt and the end
+// of the conversation as cacheable (ephemeral cache_control breakpoints), so
+// repeated requests that share a prefix are billed at the much cheaper
+// cache-read rate. The conversation breakpoint moves forward with every
+// request: each call of a long agent run reads the previous call's prompt from
+// the cache. Cache read/write token counts are reported on Result.Usage
+// (CacheReadTokens / CacheWriteTokens).
 func WithPromptCaching() Option {
 	return func(c *Client) {
 		c.promptCaching = true
+	}
+}
+
+// WithStrictTools chooses whether tools are sent in strict mode; they are by
+// default. With false, every tool goes without strict mode and with its schema
+// as reflected, where omitempty fields are optional (see llm.Tool.SetStrict),
+// for Anthropic-compatible servers that mishandle strict schemas.
+func WithStrictTools(strict bool) Option {
+	return func(c *Client) {
+		c.noStrictTools = !strict
+	}
+}
+
+// CacheTTL is how long Anthropic keeps a prompt cache entry.
+type CacheTTL string
+
+const (
+	// CacheTTL5m keeps cache entries for 5 minutes, refreshed on every hit.
+	// It is the API default.
+	CacheTTL5m CacheTTL = "5m"
+	// CacheTTL1h keeps cache entries for an hour. Writing one costs more than
+	// a 5-minute entry; it pays off when calls are minutes apart, for example
+	// an agent waiting on a human or a slow tool.
+	CacheTTL1h CacheTTL = "1h"
+)
+
+// WithPromptCacheTTL enables prompt caching, as WithPromptCaching does, with
+// cache entries kept for ttl.
+func WithPromptCacheTTL(ttl CacheTTL) Option {
+	return func(c *Client) {
+		c.promptCaching = true
+		c.cacheTTL = ttl
 	}
 }
 

@@ -16,22 +16,30 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
-	"sync"
 
+	"github.com/henomis/phero/v2/internal/snaplog"
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/memory"
 	"github.com/henomis/phero/v2/trace"
 )
 
-const maxToolNameLength = 64
-
 // DefaultMaxIterations is the iteration limit of an agent created by New.
+// It suits short tool-using tasks; a long-running agent, such as a coding
+// agent that reads, edits and tests over many turns, needs a higher limit set
+// with SetMaxIterations.
 const DefaultMaxIterations = 25
+
+// truncatedToolCallResult is the error result given to each tool call of a
+// response cut off at the output limit. The calls are not run, because their
+// arguments are probably cut too.
+const truncatedToolCallResult = "The call's arguments were cut off at the output limit and it was not run. " +
+	"Retry with smaller arguments, for example write the file in several edits."
 
 // Agent runs a chat loop using an llm.LLM, optionally with tools and memory.
 type Agent struct {
@@ -45,6 +53,12 @@ type Agent struct {
 	memory         memory.Memory
 	tracing        *trace.Provider
 	handoffs       map[string]*Agent
+
+	compactor       Compactor
+	compactAtTokens int
+	checkpoint      bool
+
+	maxParallelTools int
 }
 
 // Result represents the final output of an agent after processing user input and executing any tool calls.
@@ -59,6 +73,10 @@ type Result struct {
 	// means fan-out. It is empty when the run did not end in a handoff.
 	Handoffs []Handoff
 	Summary  *trace.RunSummary
+	// FinishReason is why the last LLM call stopped. llm.FinishLength means
+	// the answer in Parts was cut off at the output limit; the app may ask the
+	// model to continue. It is empty when the provider reports no reason.
+	FinishReason llm.FinishReason
 }
 
 // Handoff is one handoff made by the model at the end of a run.
@@ -207,9 +225,51 @@ func (a *Agent) AddHandoff(handoffAgent *Agent) error {
 	return nil
 }
 
+// SetLLM replaces the model the agent calls, keeping its tools, handoffs,
+// memory and every other setting, so the next run continues the same
+// conversation with another model. Call it between runs, not during one. It
+// returns ErrUndefinedLLM for a nil client.
+//
+// Only the agent's own client changes. A compactor holds the client it was
+// built with: a SummaryCompactor made with the old client keeps writing
+// summaries with the old model, so call SetCompaction again with one made
+// from the new client.
+func (a *Agent) SetLLM(client llm.LLM) error {
+	if client == nil {
+		return ErrUndefinedLLM
+	}
+
+	a.llm = client
+
+	return nil
+}
+
 // SetMemory sets the memory used to seed the agent with previous messages.
 func (a *Agent) SetMemory(mem memory.Memory) {
 	a.memory = mem
+}
+
+// SetCheckpoint makes the agent save the session to memory after every
+// iteration that ran tool calls, instead of only when the run ends, so a
+// process that crashes in a long run loses at most the iteration in progress.
+// Only the messages added since the previous save are saved; an assistant
+// message is always saved together with the results of its tool calls. The
+// next run continues from what memory holds (Run with no input picks up where
+// the last saved iteration left off).
+//
+// With compaction (SetCompaction), the messages already saved stay in memory
+// as they were, and only the messages added after a compaction are saved.
+//
+// It has no effect on an agent without memory.
+func (a *Agent) SetCheckpoint(enabled bool) {
+	a.checkpoint = enabled
+}
+
+// SetMaxParallelTools caps how many tool calls of one round run at once; 0
+// or less (the default) runs them all at once. Tools marked exclusive with
+// llm.Tool.SetExclusive always run alone.
+func (a *Agent) SetMaxParallelTools(n int) {
+	a.maxParallelTools = max(n, 0)
 }
 
 // SetMaxIterations sets a maximum number of iterations for the agent loop.
@@ -217,7 +277,9 @@ func (a *Agent) SetMemory(mem memory.Memory) {
 // If the limit is reached, Run() returns ErrMaxIterationsReached together with
 // a non-nil result holding any partial text the model produced so far and the
 // run's Summary. The default is DefaultMaxIterations; zero or a negative value
-// removes the limit.
+// removes the limit. An agent that works for many turns, such as a coding
+// agent, should raise it (200 or more) or remove it and bound the run with a
+// context deadline instead.
 func (a *Agent) SetMaxIterations(maxIterations int) {
 	a.maxIterations = maxIterations
 }
@@ -237,6 +299,381 @@ func (a *Agent) SetTracing(p *trace.Provider) {
 // applies to the answer it gives once it stops. Pass nil to restore free text.
 func (a *Agent) SetResponseFormat(format *llm.ResponseFormat) {
 	a.responseFormat = format
+}
+
+// SetCompaction makes the agent compact its session during a run, so a long
+// run keeps fitting the model's context window. The session, without the
+// system prompt and the current summary, is handed to c (NewSummaryCompactor
+// is the default choice), and becomes [system, the summary as a user message,
+// its pinned messages, the kept messages]. It is compacted:
+//   - before an LLM call, when the previous call's prompt and output tokens,
+//     as the provider reported them, reached atTokens; 0 disables this check.
+//     Before any size is reported (the first call of a run, after a
+//     compaction, or with a provider that reports no usage), the session is
+//     estimated with llm.EstimateTokens, so a long stored history is compacted
+//     before it is sent;
+//   - when a call fails with llm.ErrContextLengthExceeded: the session is
+//     compacted and the call made again, once. A second such error in a row
+//     ends the run.
+//
+// Each compaction is traced as a memory span with op trace.MemoryCompact.
+// The model calls of a SummaryCompactor are traced under it and count in the
+// run's Summary; a custom Compactor gets the same by wrapping its client with
+// trace.InstrumentLLM.
+// Memory keeps every message once: before compacting, the run saves the
+// messages it has not saved yet, and after it, only the messages added later.
+// With a memory.SnapshotStore, the compaction's snapshot is stored too
+// (traced as op trace.MemorySnapshot), and the next run starts from it: the
+// summary, then only the messages after it. Storing it fails without failing
+// the run when another writer stored a snapshot first, or the log no longer
+// holds the compacted messages; the summary then lives in the run only, as it
+// does with any other memory, and the next run loads the full history and
+// compacts again when it needs to.
+//
+// Pass a nil Compactor to disable compaction.
+func (a *Agent) SetCompaction(c Compactor, atTokens int) {
+	a.compactor = c
+	a.compactAtTokens = max(atTokens, 0)
+}
+
+// Compact compacts the conversation in memory now, as a run does when it
+// reaches the SetCompaction threshold, for example for a /compact command. It
+// loads the session from memory, hands it to the Compactor, and stores the
+// compaction's snapshot, so the next run starts from the summary. Call it
+// between runs, not during one.
+//
+// It needs a Compactor (ErrNoCompactor) and a memory that keeps snapshots: it
+// returns memory.ErrSnapshotsUnsupported for a memory that is not a
+// memory.SnapshotStore, or one that is set up without snapshot support, and
+// the error that stopped the snapshot from being stored otherwise. The
+// returned CompactionInfo has Trigger CompactManual; its Compacted is false,
+// with a nil error, when the Compactor found nothing to compact. Compact is
+// traced as a run's compaction is.
+func (a *Agent) Compact(ctx context.Context) (CompactionInfo, error) {
+	info := CompactionInfo{Trigger: CompactManual}
+
+	if a.compactor == nil {
+		return info, ErrNoCompactor
+	}
+
+	if _, ok := a.memory.(memory.SnapshotStore); !ok {
+		return info, memory.ErrSnapshotsUnsupported
+	}
+
+	if a.tracing != nil {
+		ctx = trace.WithProvider(ctx, a.tracing)
+	}
+
+	// The end event carries the sizes before and after.
+	rs := &runState{emit: func(ev Event) bool {
+		if ev.Type == EventCompactionEnd {
+			info = *ev.Compaction
+		}
+
+		return true
+	}}
+
+	session, sessionIndex, err := a.prepareSession(ctx, rs, nil)
+	if err != nil {
+		return info, err
+	}
+
+	// Every message came from memory: none is left to save.
+	rs.savedTo = sessionIndex
+
+	if _, _, err = a.compactSession(ctx, rs, session, sessionIndex, CompactManual, 0); err != nil {
+		return info, err
+	}
+
+	// Outside a run, a compaction that is not stored is lost.
+	if info.Compacted && rs.snapshotErr != nil {
+		info.Compacted, info.Err = false, rs.snapshotErr
+
+		return info, rs.snapshotErr
+	}
+
+	return info, nil
+}
+
+// compactIfNeeded compacts the session before the next LLM call when the
+// previous call reached the compaction threshold. next is the iteration whose
+// LLM call follows.
+func (a *Agent) compactIfNeeded(
+	ctx context.Context, rs *runState, session *[]llm.Message, sessionIndex *int, next int,
+) error {
+	if a.compactor == nil || a.compactAtTokens <= 0 {
+		return nil
+	}
+
+	// Before the provider has reported a prompt size (the first call, after a
+	// compaction, or with no usage at all), the session is estimated: a run
+	// that starts with a long history must not rely on the provider failing
+	// with a recognizable context-length error.
+	tokens := rs.contextTokens
+	if tokens == 0 {
+		tokens = llm.EstimateTokens(*session)
+	}
+
+	if tokens < a.compactAtTokens {
+		return nil
+	}
+
+	// Compaction only shortens the messages after the summary. When those fit
+	// the budget a compactor keeps whole, the threshold is reached by what it
+	// can't shorten (the system prompt, the summary, the pinned task), and
+	// compacting again would cost a summary call on every iteration for
+	// nothing. A prompt that then overflows is still compacted once on the
+	// context-length error.
+	if llm.EstimateTokens((*session)[rs.tailStart():]) < a.keepTokens() {
+		return nil
+	}
+
+	var err error
+
+	*session, *sessionIndex, err = a.compactSession(ctx, rs, *session, *sessionIndex, CompactThreshold, next)
+
+	return err
+}
+
+// keepTokens returns the budget for the messages a compaction keeps whole: a
+// quarter of the compaction threshold.
+func (a *Agent) keepTokens() int {
+	return a.compactAtTokens / 4 //nolint:mnd // a quarter of the threshold for the kept messages
+}
+
+// iterationFailed decides how the run goes on after an iteration failed with
+// iterErr, before iteration next. It returns true when the call should be
+// made again, after the session was compacted for a prompt too long for the
+// context window, and otherwise the error the run ends with: the cancellation
+// when ctx is done (an LLM that honours ctx fails on cancellation), else
+// iterErr.
+func (a *Agent) iterationFailed(
+	ctx context.Context, rs *runState, session *[]llm.Message, sessionIndex *int, next int, iterErr error,
+) (bool, error) {
+	if ctx.Err() != nil {
+		return false, cancellationError(ctx)
+	}
+
+	retry, compactErr := a.compactAfterError(ctx, rs, session, sessionIndex, next, iterErr)
+	if retry {
+		return true, nil
+	}
+
+	if compactErr != nil {
+		return false, errors.Join(iterErr, compactErr)
+	}
+
+	return false, iterErr
+}
+
+// compactAfterError compacts the session after a call failed because its
+// prompt is too long for the context window, once in a row, and reports
+// whether the call should be made again. It returns the compaction's error
+// when compacting failed.
+func (a *Agent) compactAfterError(
+	ctx context.Context, rs *runState, session *[]llm.Message, sessionIndex *int, next int, callErr error,
+) (bool, error) {
+	if a.compactor == nil || rs.compactedOnError || !errors.Is(callErr, llm.ErrContextLengthExceeded) {
+		return false, nil
+	}
+
+	rs.compactedOnError = true
+
+	var err error
+
+	*session, *sessionIndex, err = a.compactSession(ctx, rs, *session, *sessionIndex, CompactContextLength, next)
+
+	return err == nil, err
+}
+
+// compactSession compacts the session (see compact) between an
+// EventCompactionStart and an EventCompactionEnd. trigger says why, and next
+// is the iteration whose LLM call follows.
+func (a *Agent) compactSession(
+	ctx context.Context, rs *runState, session []llm.Message, sessionIndex int, trigger CompactionTrigger, next int,
+) ([]llm.Message, int, error) {
+	before := CompactionInfo{Trigger: trigger, TokensBefore: llm.EstimateTokens(session), MessagesBefore: len(session)}
+	if rs.emit != nil {
+		rs.emit(Event{Type: EventCompactionStart, Compaction: &before, Iteration: next})
+	}
+
+	newSession, newIndex, compacted, err := a.compact(ctx, rs, session, sessionIndex)
+
+	if rs.emit != nil {
+		after := before
+		after.TokensAfter, after.MessagesAfter = llm.EstimateTokens(newSession), len(newSession)
+		after.Compacted, after.Err = compacted, err
+		rs.emit(Event{Type: EventCompactionEnd, Compaction: &after, Iteration: next})
+	}
+
+	return newSession, newIndex, err
+}
+
+// compact compacts the session after its system prompt and its current
+// summary, inside a memory span. It returns the new session, [system, summary
+// messages, kept messages], the index where the kept messages start (where a
+// cancelled run's partial result is read from), and true. On error, or when
+// there is nothing to compact, the session is returned unchanged, with false.
+func (a *Agent) compact(
+	ctx context.Context, rs *runState, session []llm.Message, sessionIndex int,
+) ([]llm.Message, int, bool, error) {
+	payload := &trace.Memory{Op: trace.MemoryCompact}
+	ctx, span := trace.Start(ctx, string(trace.KindMemory)+" compact", payload)
+
+	in := CompactInput{
+		Previous:   rs.snapshot,
+		Messages:   slices.Clone(session[rs.tailStart():]),
+		KeepTokens: a.keepTokens(),
+	}
+
+	compaction, err := a.compactor.Compact(ctx, in)
+	if err == nil && compaction != nil {
+		err = compaction.check(in)
+	}
+
+	if err != nil || compaction == nil {
+		span.End(err)
+
+		return session, sessionIndex, false, err
+	}
+
+	// Memory only appends: the messages not saved yet are saved now, as they
+	// are, and the compacted ones are never saved. Each message is then stored
+	// once, and the summary lives only in this run.
+	if err = a.saveSession(context.WithoutCancel(ctx), session, rs.savedTo); err != nil {
+		err = fmt.Errorf("%w: %w", ErrSessionSaveFailed, err)
+		span.End(err)
+
+		return session, sessionIndex, false, err
+	}
+
+	if store, ok := a.memory.(memory.SnapshotStore); ok {
+		rs.snapshotErr = a.storeSnapshot(ctx, store, rs, in, compaction)
+	}
+
+	summary := memory.SummaryMessages(compaction.Snapshot)
+
+	newSession := make([]llm.Message, 0, 1+len(summary)+len(compaction.Kept))
+	newSession = append(newSession, session[0])
+	newSession = append(newSession, summary...)
+	newSession = append(newSession, compaction.Kept...)
+
+	payload.Messages = newSession[1:]
+	payload.Count = len(newSession) - 1
+
+	span.End(nil)
+
+	rs.snapshot = &compaction.Snapshot
+
+	// The next call's prompt size is unknown until the provider reports it,
+	// and its trace payload records the whole new session.
+	rs.contextTokens = 0
+	rs.promptLen = 0
+	rs.savedTo = len(newSession)
+
+	return newSession, rs.tailStart(), true, nil
+}
+
+// storeSnapshot stores the compaction's snapshot in store, inside a memory
+// span, so the next run starts from it. The session's messages are all in the
+// log by now; the snapshot covers them up to the last one not kept. Failing
+// to store it does not fail the run: the snapshot then lives in the run only,
+// as with a plain memory, and the error is recorded on the span and returned.
+func (a *Agent) storeSnapshot(
+	ctx context.Context, store memory.SnapshotStore, rs *runState, in CompactInput, compaction *Compaction,
+) error {
+	payload := &trace.Memory{Op: trace.MemorySnapshot}
+	ctx, span := trace.Start(context.WithoutCancel(ctx), string(trace.KindMemory)+" snapshot", payload)
+
+	upTo, err := snapshotCursor(ctx, store, rs, in, compaction)
+	if err == nil {
+		err = store.SaveSnapshot(ctx, compaction.Snapshot, upTo, rs.stored)
+	}
+
+	if err != nil {
+		span.End(err)
+		return err
+	}
+
+	saved := compaction.Snapshot
+	saved.UpTo = upTo
+	rs.stored = &saved
+
+	payload.Messages = memory.SummaryMessages(saved)
+	payload.Count = len(payload.Messages)
+
+	span.End(nil)
+
+	return nil
+}
+
+// snapshotCursor returns the cursor of the last message the compaction's
+// snapshot covers, by finding the compacted messages at the end of the log.
+func snapshotCursor(
+	ctx context.Context, store memory.SnapshotStore, rs *runState, in CompactInput, compaction *Compaction,
+) (memory.Cursor, error) {
+	current, logged, err := store.LoadSnapshot(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	if !snaplog.Same(current, rs.stored) {
+		return "", memory.ErrSnapshotConflict
+	}
+
+	// Empty answers are not saved: match the messages the log can hold.
+	covered := replayable(in.Messages[:len(in.Messages)-len(compaction.Kept)])
+	tail := replayable(in.Messages)
+
+	loggedMsgs := make([]memory.LoggedMessage, 0, len(logged))
+	for _, lm := range logged {
+		if !isEmptyAnswer(lm.Message) {
+			loggedMsgs = append(loggedMsgs, lm)
+		}
+	}
+
+	if len(covered) == 0 {
+		return "", fmt.Errorf("%w: it covers no saved message", ErrSnapshotMismatch)
+	}
+
+	// The tail is at the end of the log, or followed by another writer's
+	// messages.
+	for start := len(loggedMsgs) - len(tail); start >= 0; start-- {
+		if alignedWithLog(loggedMsgs[start:start+len(tail)], tail) {
+			return loggedMsgs[start+len(covered)-1].Cursor, nil
+		}
+	}
+
+	return "", ErrSnapshotMismatch
+}
+
+// alignedWithLog reports whether logged holds msgs, one for one. A tool
+// result is matched by its call ID, not its text: a compaction may have
+// clipped the session's copy (keptToolResultChars), while the log keeps
+// the original.
+func alignedWithLog(logged []memory.LoggedMessage, msgs []llm.Message) bool {
+	for i, m := range msgs {
+		l := logged[i].Message
+		if l.Role != m.Role || l.ToolCallID != m.ToolCallID || !sameToolCalls(l, m) {
+			return false
+		}
+
+		if m.Role != llm.RoleTool && l.TextContent() != m.TextContent() {
+			return false
+		}
+	}
+
+	return true
+}
+
+// tailStart returns the index of the session's first message after the
+// system prompt and the summary messages.
+func (rs *runState) tailStart() int {
+	if rs.snapshot == nil {
+		return 1
+	}
+
+	return 1 + len(memory.SummaryMessages(*rs.snapshot))
 }
 
 // callOptions returns the per-call LLM options every iteration of the loop sends.
@@ -283,6 +720,28 @@ type runState struct {
 	// promptLen is the prompt length of the previous LLM call, where the next
 	// call's message delta starts.
 	promptLen int
+	// snapshot is the summary the session starts from, after the system
+	// prompt (nil for none): the session is [system, SummaryMessages(snapshot),
+	// tail], and only the tail is compacted again.
+	snapshot *memory.Snapshot
+	// stored is the latest snapshot the memory holds as far as this run
+	// knows: what a SaveSnapshot compares against. It lags snapshot when
+	// storing one failed.
+	stored *memory.Snapshot
+	// contextTokens estimates the tokens of the next prompt: the previous
+	// call's prompt and output tokens, as the provider reported them. It is 0
+	// when unknown, as after a compaction, and llm.EstimateTokens is used then.
+	contextTokens int
+	// compactedOnError is set when the session was compacted after a
+	// context-length error, so a second such error in a row ends the run.
+	compactedOnError bool
+	// savedTo is the index of the first session message not saved to memory.
+	savedTo int
+	// emit streams events to RunStream's consumer; nil for Run.
+	emit emitFunc
+	// snapshotErr is why the latest compaction's snapshot was not stored
+	// (see storeSnapshot); nil when it was, or when the memory keeps none.
+	snapshotErr error
 }
 
 // run executes the agent loop, optionally emitting streaming Events.
@@ -301,8 +760,13 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 		SessionID:     trace.SessionFrom(ctx),
 		Input:         parts,
 		MaxIterations: max(a.maxIterations, 0),
-	}}
+	}, emit: emit}
 	ctx, rs.span = trace.Start(ctx, string(trace.KindRun)+" "+a.name, rs.run)
+
+	// Tool calls see the run they belong to (llm.RunFromContext). It ends when
+	// the run returns, after finishRun, which is deferred later.
+	ctx, endRun := llm.ContextWithRun(ctx, rand.Text())
+	defer endRun()
 
 	var (
 		session      []llm.Message
@@ -311,13 +775,15 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 	)
 
 	defer func() {
-		err = a.finishRun(ctx, rs, session, sessionIndex, iteration, result, err)
+		err = a.finishRun(ctx, rs, session, iteration, result, err)
 	}()
 
-	session, sessionIndex, err = a.prepareSession(ctx, parts)
+	session, sessionIndex, err = a.prepareSession(ctx, rs, parts)
 	if err != nil {
 		return &Result{}, err
 	}
+
+	rs.savedTo = sessionIndex
 
 	for {
 		if ctx.Err() != nil {
@@ -328,36 +794,73 @@ func (a *Agent) run(ctx context.Context, emit emitFunc, parts ...llm.ContentPart
 			return partialResultFromSession(session[sessionIndex:]), ErrMaxIterationsReached
 		}
 
+		if err = a.compactIfNeeded(ctx, rs, &session, &sessionIndex, iteration+1); err != nil {
+			return partialResultFromSession(session[sessionIndex:]), err
+		}
+
 		iteration++
 
 		iterationResult, iterErr := a.handleAgentIteration(ctx, session, iteration, rs, emit)
 		if iterErr != nil {
-			// An LLM that honours ctx fails on cancellation: report it as a
-			// cancelled run, with its partial result and Summary.
-			if ctx.Err() != nil {
-				return partialResultFromSession(session[sessionIndex:]), cancellationError(ctx)
+			if retry, failErr := a.iterationFailed(ctx, rs, &session, &sessionIndex, iteration+1, iterErr); !retry {
+				return partialResultFromSession(session[sessionIndex:]), failErr
 			}
 
-			return partialResultFromSession(session[sessionIndex:]), iterErr
+			continue
 		}
 
+		rs.compactedOnError = false
 		session = iterationResult.session
 
-		if iterationResult.stop != nil {
-			return iterationResult.result, iterationResult.stop
-		}
-
-		// If result is nil, the agent executed tool calls and needs to call the LLM again.
-		if iterationResult.result != nil {
-			return iterationResult.result, nil
+		if done, doneResult, doneErr := a.afterIteration(ctx, rs, iterationResult, sessionIndex); done {
+			return doneResult, doneErr
 		}
 	}
+}
+
+// afterIteration reports whether the run ends after a successful iteration,
+// with its result and error: when a tool stopped the run, when the model
+// answered without tool calls, or when saving a checkpoint failed. Otherwise
+// the agent ran tool calls and calls the LLM again.
+func (a *Agent) afterIteration(
+	ctx context.Context, rs *runState, it agentIteration, sessionIndex int,
+) (bool, *Result, error) {
+	if it.stop != nil {
+		return true, it.result, it.stop
+	}
+
+	if it.result != nil {
+		return true, it.result, nil
+	}
+
+	if err := a.saveCheckpoint(ctx, rs, it.session); err != nil {
+		return true, partialResultFromSession(it.session[sessionIndex:]), err
+	}
+
+	return false, nil, nil
+}
+
+// saveCheckpoint saves the messages added since the previous save, when
+// checkpoints are enabled (SetCheckpoint).
+func (a *Agent) saveCheckpoint(ctx context.Context, rs *runState, session []llm.Message) error {
+	if !a.checkpoint || a.memory == nil {
+		return nil
+	}
+
+	// As at the end of a run, a cancelled run still records its iteration.
+	if err := a.saveSession(context.WithoutCancel(ctx), session, rs.savedTo); err != nil {
+		return fmt.Errorf("%w: %w", ErrSessionSaveFailed, err)
+	}
+
+	rs.savedTo = len(session)
+
+	return nil
 }
 
 // finishRun ends a run: it saves the session to memory, ends the run span and
 // attaches its Summary to result. It returns err joined with any save error.
 func (a *Agent) finishRun(
-	ctx context.Context, rs *runState, session []llm.Message, sessionIndex, iteration int,
+	ctx context.Context, rs *runState, session []llm.Message, iteration int,
 	result *Result, err error,
 ) error {
 	rs.run.StopReason = stopReason(ctx, result, err)
@@ -371,7 +874,7 @@ func (a *Agent) finishRun(
 
 	// A cancelled run still records its turn: saving must not inherit the cancellation.
 	if session != nil {
-		if saveErr := a.saveSession(context.WithoutCancel(ctx), session, sessionIndex); saveErr != nil {
+		if saveErr := a.saveSession(context.WithoutCancel(ctx), session, rs.savedTo); saveErr != nil {
 			saveErr = fmt.Errorf("%w: %w", ErrSessionSaveFailed, saveErr)
 			err = errors.Join(err, saveErr)
 			spanErr = errors.Join(spanErr, saveErr)
@@ -524,22 +1027,31 @@ func (a *Agent) handleAgentIteration(
 		}
 	}
 
+	if u := msg.Usage; u != nil {
+		rs.contextTokens = u.InputTokens + u.CacheReadTokens + u.CacheWriteTokens + u.OutputTokens
+	}
+
 	session = append(session, *msg.Message)
 
-	return a.processToolCalls(ctx, session, msg.Message, iteration, emit)
+	return a.processToolCalls(ctx, session, msg.Message, msg.FinishReason, iteration, emit)
 }
 
 // processToolCalls executes the tool calls in message (if any) concurrently,
 // preserving order, and appends their results to the session. When emit is
-// non-nil it pushes a ToolCall event before execution and a ToolResult event
-// after, both in call order, on the single calling goroutine.
+// non-nil it pushes the ToolCall events, in call order, before execution, and
+// each ToolResult event as soon as its call finishes, all on the single
+// calling goroutine.
+//
+// When the response was cut off at the output limit (finish is
+// llm.FinishLength), its tool calls are not run: their arguments are probably
+// cut too. Each gets an error result asking the model to retry.
 func (a *Agent) processToolCalls(
 	ctx context.Context, session []llm.Message, message *llm.Message,
-	iteration int, emit emitFunc,
+	finish llm.FinishReason, iteration int, emit emitFunc,
 ) (agentIteration, error) {
 	toolCalls := message.ToolCalls
 	if len(toolCalls) == 0 {
-		return agentIteration{session: session, result: &Result{Parts: message.Parts}}, nil
+		return agentIteration{session: session, result: &Result{Parts: message.Parts, FinishReason: finish}}, nil
 	}
 
 	if emit != nil {
@@ -554,36 +1066,11 @@ func (a *Agent) processToolCalls(
 		}
 	}
 
-	// Execute all tool calls concurrently, preserving order.
-	results := make([]*llm.Message, len(toolCalls))
-
-	var wg sync.WaitGroup
-	wg.Add(len(toolCalls))
-
-	stops := make([]error, len(toolCalls))
-
-	for i, toolCall := range toolCalls {
-		go func() {
-			defer wg.Done()
-
-			results[i], stops[i] = a.handleToolCall(ctx, toolCall, iteration)
-		}()
+	if finish == llm.FinishLength {
+		return agentIteration{session: append(session, truncatedToolResults(toolCalls, iteration, emit)...)}, nil
 	}
 
-	wg.Wait()
-
-	if emit != nil {
-		for i, result := range results {
-			emit(Event{
-				Type:       EventToolResult,
-				ToolCallID: toolCalls[i].ID,
-				ToolName:   toolCalls[i].Function.Name,
-				ToolResult: llm.TextContent(result.Parts...),
-				ToolError:  result.ToolError,
-				Iteration:  iteration,
-			})
-		}
-	}
+	results, stops := a.runToolCalls(ctx, toolCalls, iteration, emit)
 
 	// Append results in order; collect all handoffs (fan-out when more than one).
 	var handoffs []Handoff
@@ -600,7 +1087,7 @@ func (a *Agent) processToolCalls(
 	if stop := errors.Join(stops...); stop != nil {
 		return agentIteration{
 			session: session,
-			result:  &Result{Parts: nonBlankParts(textOnly(message.Parts))},
+			result:  &Result{Parts: nonBlankParts(textOnly(message.Parts)), FinishReason: finish},
 			stop:    stop,
 		}, nil
 	}
@@ -610,11 +1097,42 @@ func (a *Agent) processToolCalls(
 		// model wrote alongside the handoff calls, not the handoff tools' replies.
 		return agentIteration{
 			session: session,
-			result:  &Result{Parts: nonBlankParts(textOnly(message.Parts)), Handoffs: handoffs},
+			result: &Result{
+				Parts: nonBlankParts(textOnly(message.Parts)), Handoffs: handoffs, FinishReason: finish,
+			},
 		}, nil
 	}
 
 	return agentIteration{session: session}, nil
+}
+
+// truncatedToolResults returns an error result for each tool call of a
+// response cut off at the output limit, without running the calls, and emits
+// their ToolResult events when emit is non-nil.
+func truncatedToolResults(toolCalls []llm.ToolCall, iteration int, emit emitFunc) []llm.Message {
+	results := make([]llm.Message, 0, len(toolCalls))
+
+	for _, tc := range toolCalls {
+		results = append(results, llm.Message{
+			Role:       llm.RoleTool,
+			Parts:      []llm.ContentPart{llm.Text(truncatedToolCallResult)},
+			ToolCallID: tc.ID,
+			ToolError:  true,
+		})
+
+		if emit != nil {
+			emit(Event{
+				Type:       EventToolResult,
+				ToolCallID: tc.ID,
+				ToolName:   tc.Function.Name,
+				ToolResult: truncatedToolCallResult,
+				ToolError:  true,
+				Iteration:  iteration,
+			})
+		}
+	}
+
+	return results
 }
 
 // handoffContext returns the context argument of a handoff tool call.
@@ -676,14 +1194,95 @@ func (a *Agent) handleToolCall(ctx context.Context, toolCall llm.ToolCall, itera
 	}, stop
 }
 
+// runToolCalls runs the tool calls of one round and returns their results
+// and StopRun errors, in call order. Calls run concurrently, at most
+// maxParallelTools at once when set, except exclusive tools (see
+// llm.Tool.SetExclusive): each runs alone, after the calls before it and
+// before the calls after it. Each result is emitted, on this goroutine, as
+// soon as its call finishes.
+func (a *Agent) runToolCalls(
+	ctx context.Context, toolCalls []llm.ToolCall, iteration int, emit emitFunc,
+) ([]*llm.Message, []error) {
+	results := make([]*llm.Message, len(toolCalls))
+	stops := make([]error, len(toolCalls))
+
+	var batch []int
+
+	for i, tc := range toolCalls {
+		if tool, ok := a.getTool(tc.Function.Name); ok && tool.Exclusive() {
+			a.runToolBatch(ctx, toolCalls, batch, iteration, emit, results, stops)
+			a.runToolBatch(ctx, toolCalls, []int{i}, iteration, emit, results, stops)
+
+			batch = nil
+
+			continue
+		}
+
+		batch = append(batch, i)
+	}
+
+	a.runToolBatch(ctx, toolCalls, batch, iteration, emit, results, stops)
+
+	return results, stops
+}
+
+// runToolBatch runs the tool calls at indexes concurrently, at most
+// maxParallelTools at once when set, storing their results and stops.
+func (a *Agent) runToolBatch(
+	ctx context.Context, toolCalls []llm.ToolCall, indexes []int, iteration int, emit emitFunc,
+	results []*llm.Message, stops []error,
+) {
+	finished := make(chan int, len(indexes))
+
+	var slots chan struct{}
+	if a.maxParallelTools > 0 {
+		slots = make(chan struct{}, a.maxParallelTools)
+	}
+
+	for _, i := range indexes {
+		go func() {
+			if slots != nil {
+				slots <- struct{}{}
+				defer func() { <-slots }()
+			}
+
+			results[i], stops[i] = a.handleToolCall(ctx, toolCalls[i], iteration)
+			finished <- i
+		}()
+	}
+
+	for range indexes {
+		i := <-finished
+
+		if emit == nil {
+			continue
+		}
+
+		emit(Event{
+			Type:       EventToolResult,
+			ToolCallID: toolCalls[i].ID,
+			ToolName:   toolCalls[i].Function.Name,
+			ToolResult: llm.TextContent(results[i].Parts...),
+			ToolError:  results[i].ToolError,
+			Iteration:  iteration,
+		})
+	}
+}
+
 // prepareSession prepares the messages for the LLM call, including the system prompt, memory messages, and user input.
-func (a *Agent) prepareSession(ctx context.Context, parts []llm.ContentPart) ([]llm.Message, int, error) {
+func (a *Agent) prepareSession(ctx context.Context, rs *runState, parts []llm.ContentPart) ([]llm.Message, int, error) {
 	messages := []llm.Message{llm.SystemMessage(a.description)}
 
 	if a.memory != nil {
-		memoryMessages, err := a.retrieveMemory(ctx, parts)
+		snapshot, memoryMessages, err := a.loadMemory(ctx, parts)
 		if err != nil {
 			return nil, 0, err
+		}
+
+		// A stored snapshot starts the session, as after a compaction.
+		if snapshot != nil {
+			rs.snapshot, rs.stored = snapshot, snapshot
+			messages = append(messages, memory.SummaryMessages(*snapshot)...)
 		}
 
 		messages = append(messages, memoryMessages...)
@@ -700,6 +1299,47 @@ func (a *Agent) prepareSession(ctx context.Context, parts []llm.ContentPart) ([]
 	}
 
 	return messages, sessionIndex, nil
+}
+
+// loadMemory loads the latest snapshot (nil for none) and the replayable
+// messages after it from a memory.SnapshotStore, or the messages from any
+// other memory, or from a store set up without snapshot support.
+func (a *Agent) loadMemory(ctx context.Context, parts []llm.ContentPart) (*memory.Snapshot, []llm.Message, error) {
+	store, ok := a.memory.(memory.SnapshotStore)
+	if !ok {
+		msgs, err := a.retrieveMemory(ctx, parts)
+		return nil, msgs, err
+	}
+
+	payload := &trace.Memory{Op: trace.MemoryRetrieve, Query: llm.TextContent(parts...)}
+	ctx, span := trace.Start(ctx, string(trace.KindMemory)+" retrieve", payload)
+
+	snapshot, logged, err := store.LoadSnapshot(ctx)
+	if errors.Is(err, memory.ErrSnapshotsUnsupported) {
+		span.End(nil)
+
+		msgs, retrieveErr := a.retrieveMemory(ctx, parts)
+
+		return nil, msgs, retrieveErr
+	}
+
+	if err != nil {
+		span.End(err)
+		return nil, nil, err
+	}
+
+	msgs := make([]llm.Message, 0, len(logged))
+	for _, lm := range logged {
+		msgs = append(msgs, lm.Message)
+	}
+
+	msgs = replayable(msgs)
+	payload.Messages = msgs
+	payload.Count = len(msgs)
+
+	span.End(nil)
+
+	return snapshot, msgs, nil
 }
 
 // retrieveMemory loads the replayable messages from memory inside a span.
@@ -795,13 +1435,23 @@ func nonBlankParts(parts []llm.ContentPart) []llm.ContentPart {
 }
 
 // executeToolCall executes a tool call and returns the result as content parts.
-func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall) ([]llm.ContentPart, error) {
+// A panic in the tool's handler is recovered and returned as a ToolPanicError.
+func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall) (parts []llm.ContentPart, err error) {
 	tool, found := a.getTool(tc.Function.Name)
 	if !found {
 		return nil, &ToolUnknownError{Name: tc.Function.Name}
 	}
 
-	result, err := tool.Handle(ctx, tc.Function.Arguments)
+	defer func() {
+		if v := recover(); v != nil {
+			parts, err = nil, &ToolExecutionError{
+				Name: tc.Function.Name,
+				Err:  &ToolPanicError{Name: tc.Function.Name, Value: v},
+			}
+		}
+	}()
+
+	result, err := tool.Handle(llm.ContextWithToolCall(ctx, tc), tc.Function.Arguments)
 	if err != nil {
 		return nil, &ToolExecutionError{Name: tc.Function.Name, Err: err}
 	}
@@ -847,7 +1497,7 @@ func anyToContentParts(v any) []llm.ContentPart {
 // Tool arguments schema: {"input": "..."}.
 func (a *Agent) AsTool(toolName, toolDescription string) (*llm.Tool, error) {
 	type ToolInput struct {
-		Input string `json:"input" jsonschema:"description=Instructions for the agent. Describe the task, question, or problem the agent should solve."` //nolint:lll
+		Input string `json:"input" jsonschema_description:"Instructions for the agent. Describe the task, question, or problem the agent should solve."` //nolint:lll
 	}
 
 	type ToolOutput struct {
@@ -870,25 +1520,12 @@ func (a *Agent) AsTool(toolName, toolDescription string) (*llm.Tool, error) {
 	)
 }
 
-// SanitizeToolName maps any string to one accepted by LLM providers.
-// Only [a-zA-Z0-9_-] are kept (all others become '_'); capped at 64 chars;
-// empty result falls back to "agent".
+// SanitizeToolName maps any string to one accepted by LLM providers, as
+// llm.SanitizeToolName does; an empty name becomes "agent".
 func SanitizeToolName(name string) string {
-	s := strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-			(r >= '0' && r <= '9') || r == '_' || r == '-' {
-			return r
-		}
-
-		return '_'
-	}, name)
-	if len(s) > maxToolNameLength {
-		s = s[:maxToolNameLength]
+	if s := llm.SanitizeToolName(name); s != "" {
+		return s
 	}
 
-	if s == "" {
-		s = "agent"
-	}
-
-	return s
+	return "agent"
 }

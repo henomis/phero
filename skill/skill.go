@@ -15,6 +15,8 @@
 package skill
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -28,10 +30,6 @@ const (
 	skillFileName           = "SKILL.md"
 	yamlFrontmatterDelim    = "---"
 	yamlFrontmatterSections = 3
-	toolNameRead            = "read"
-	toolNameWrite           = "write"
-	toolNameEdit            = "edit"
-	toolNameBash            = "bash"
 )
 
 // Parser discovers and parses skills under a root directory.
@@ -52,6 +50,45 @@ type Skill struct {
 	Metadata      map[string]any `yaml:"metadata,omitempty"`
 	AllowedTools  string         `yaml:"allowed-tools,omitempty"`
 	Body          string         `yaml:"-"`
+}
+
+// Tools returns the entries of the skill's allowed-tools field: the tools
+// pre-approved while the skill is in use. It accepts the space-separated form
+// of the Agent Skills spec ("Read Grep") and the comma-separated form with
+// patterns ("Bash(git status), Read"); a space inside parentheses belongs to
+// the pattern.
+func (s *Skill) Tools() []string {
+	var (
+		tools []string
+		cur   strings.Builder
+		depth int
+	)
+
+	flush := func() {
+		if t := strings.TrimSpace(cur.String()); t != "" {
+			tools = append(tools, t)
+		}
+
+		cur.Reset()
+	}
+
+	for _, r := range s.AllowedTools {
+		switch {
+		case r == '(':
+			depth++
+		case r == ')' && depth > 0:
+			depth--
+		case (r == ',' || r == ' ' || r == '\t' || r == '\n') && depth == 0:
+			flush()
+			continue
+		}
+
+		cur.WriteRune(r)
+	}
+
+	flush()
+
+	return tools
 }
 
 // New returns a Parser rooted at skillsRootPath.
@@ -114,6 +151,66 @@ func (p *Parser) Parse(skillName string) (*Skill, error) {
 	skill.RootPath = absPath
 
 	return skill, nil
+}
+
+// MultiParser discovers skills under several roots, such as a user's own
+// skills and a project's. When two roots hold a skill directory of the same
+// name, the earlier root wins: pass the user's root before the project's, so
+// a cloned project cannot shadow a skill the user trusts.
+type MultiParser struct {
+	parsers []*Parser
+}
+
+// NewMulti returns a MultiParser over roots, in decreasing precedence. A
+// root that does not exist holds no skills.
+func NewMulti(roots ...string) *MultiParser {
+	m := &MultiParser{}
+	for _, root := range roots {
+		m.parsers = append(m.parsers, New(root))
+	}
+
+	return m
+}
+
+// List returns the skill directory names found under any root, once each.
+func (m *MultiParser) List() ([]string, error) {
+	seen := map[string]bool{}
+
+	var names []string
+
+	for _, p := range m.parsers {
+		dirs, err := p.List()
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		for _, d := range dirs {
+			if !seen[d] {
+				seen[d] = true
+				names = append(names, d)
+			}
+		}
+	}
+
+	return names, nil
+}
+
+// Parse parses skillName from the first root that holds it.
+func (m *MultiParser) Parse(skillName string) (*Skill, error) {
+	for _, p := range m.parsers {
+		skill, err := p.Parse(skillName)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+
+		return skill, err
+	}
+
+	return nil, fmt.Errorf("%w: %s", os.ErrNotExist, skillName)
 }
 
 // Parse parses a skill definition from an io.Reader.

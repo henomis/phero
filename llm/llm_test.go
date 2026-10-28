@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -241,5 +242,44 @@ func TestNewRawTool_DoesNotMutateCallerSchema(t *testing.T) {
 
 	if _, ok := original["description"]; ok {
 		t.Fatalf("original schema was mutated: 'description' key was added")
+	}
+}
+
+func TestTool_SetStrictOffersOptionalFields(t *testing.T) {
+	type input struct {
+		Path  string `json:"path"`
+		Limit int    `json:"limit,omitempty"`
+	}
+
+	tool, err := NewTool("read", "read a file", func(_ context.Context, _ input) (string, error) { return "", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	required := func(schema map[string]any) []string {
+		list, _ := schema["required"].([]any)
+
+		out := make([]string, 0, len(list))
+		for _, r := range list {
+			out = append(out, r.(string))
+		}
+
+		slices.Sort(out)
+
+		return out
+	}
+
+	if !tool.Strict() || !slices.Equal(required(tool.InputSchema()), []string{"limit", "path"}) {
+		t.Fatalf("strict schema required = %v, want every field", required(tool.InputSchema()))
+	}
+
+	tool.SetStrict(false)
+
+	if got := required(tool.InputSchema()); !slices.Equal(got, []string{"path"}) {
+		t.Fatalf("loose schema required = %v, want only path", got)
+	}
+
+	if tool.InputSchema()["description"] != "read a file" || !slices.Equal(required(tool.Schema(true)), []string{"limit", "path"}) {
+		t.Fatal("the loose schema lost the description, or Schema(true) is not strict")
 	}
 }

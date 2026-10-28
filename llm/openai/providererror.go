@@ -16,6 +16,7 @@ package openai
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/sashabaranov/go-openai"
 
@@ -35,13 +36,61 @@ func wrapAPIError(err error) error {
 
 	var apiErr *openai.APIError
 	if errors.As(err, &apiErr) && apiErr.HTTPStatusCode > 0 {
-		return &llm.ProviderError{Provider: providerName, StatusCode: apiErr.HTTPStatusCode, Err: err}
+		code, _ := apiErr.Code.(string)
+
+		return &llm.ProviderError{
+			Provider:              providerName,
+			StatusCode:            apiErr.HTTPStatusCode,
+			ContextLengthExceeded: isContextLengthError(code, apiErr.Type, apiErr.Message),
+			Err:                   err,
+		}
 	}
 
 	var reqErr *openai.RequestError
 	if errors.As(err, &reqErr) && reqErr.HTTPStatusCode > 0 {
-		return &llm.ProviderError{Provider: providerName, StatusCode: reqErr.HTTPStatusCode, Err: err}
+		return &llm.ProviderError{
+			Provider:              providerName,
+			StatusCode:            reqErr.HTTPStatusCode,
+			ContextLengthExceeded: isContextLengthError("", "", string(reqErr.Body)),
+			Err:                   err,
+		}
 	}
 
 	return err
+}
+
+// Error code and type by which OpenAI and llama.cpp report a prompt too long
+// for the context window.
+const (
+	codeContextLengthExceeded = "context_length_exceeded"
+	typeExceedContextSize     = "exceed_context_size_error"
+)
+
+// contextLengthPhrases are the error message fragments by which OpenAI and
+// OpenAI-compatible servers report a prompt too long for the context window.
+var contextLengthPhrases = []string{
+	"maximum context length",             // OpenAI, vLLM
+	codeContextLengthExceeded,            // OpenAI code, echoed by some proxies
+	"exceeds the available context size", // llama.cpp
+	typeExceedContextSize,                // llama.cpp type
+	"context window",                     // LM Studio and others
+	"prompt is too long",                 // proxies to Anthropic
+}
+
+// isContextLengthError reports whether an API error's code, type or message
+// says the prompt does not fit the model's context window.
+func isContextLengthError(code, typ, message string) bool {
+	if code == codeContextLengthExceeded || typ == typeExceedContextSize {
+		return true
+	}
+
+	message = strings.ToLower(message)
+
+	for _, phrase := range contextLengthPhrases {
+		if strings.Contains(message, phrase) {
+			return true
+		}
+	}
+
+	return false
 }

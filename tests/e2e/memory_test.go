@@ -18,6 +18,8 @@ package e2e_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +27,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/henomis/phero/v2/llm"
+	"github.com/henomis/phero/v2/memory"
 	memoryjsonfile "github.com/henomis/phero/v2/memory/jsonfile"
 	memorypsql "github.com/henomis/phero/v2/memory/psql"
 	memorysimple "github.com/henomis/phero/v2/memory/simple"
@@ -358,5 +361,145 @@ func TestMemoryPostgres_SessionIsolation(t *testing.T) {
 		if strings.Contains(m.TextContent(), "session A") {
 			t.Error("session B received session A messages")
 		}
+	}
+}
+
+// TestMemoryPostgres_Snapshots covers the snapshot round trip, the
+// compare-and-swap, session isolation and pruning.
+func TestMemoryPostgres_Snapshots(t *testing.T) {
+	db := requirePostgres(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	texts := func(prefix string, n int) []llm.Message {
+		msgs := make([]llm.Message, 0, n)
+		for i := range n {
+			msgs = append(msgs, llm.UserMessage(llm.Text(fmt.Sprintf("%s%d", prefix, i))))
+		}
+
+		return msgs
+	}
+
+	for _, prune := range []bool{false, true} {
+		session := "e2e-snap-" + uuid.New().String()
+
+		mem, err := memorypsql.New(db, session, memorypsql.WithPruneCompacted(prune))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		other, err := memorypsql.New(db, session+"-other")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err = mem.Save(ctx, texts("m", 4)); err != nil {
+			t.Fatal(err)
+		}
+
+		if err = other.Save(ctx, texts("o", 2)); err != nil {
+			t.Fatal(err)
+		}
+
+		snap, logged, err := mem.LoadSnapshot(ctx)
+		if err != nil || snap != nil || len(logged) != 4 {
+			t.Fatalf("prune %v: LoadSnapshot = %v, %d, %v", prune, snap, len(logged), err)
+		}
+
+		if err = mem.SaveSnapshot(ctx, memory.Snapshot{Summary: "s1"}, logged[1].Cursor, nil); err != nil {
+			t.Fatalf("prune %v: SaveSnapshot: %v", prune, err)
+		}
+
+		// A second writer that started from no snapshot loses.
+		if err = mem.SaveSnapshot(ctx, memory.Snapshot{Summary: "x"}, logged[2].Cursor, nil); !errors.Is(err, memory.ErrSnapshotConflict) {
+			t.Fatalf("prune %v: err = %v, want ErrSnapshotConflict", prune, err)
+		}
+
+		// Another session's cursor is not this session's.
+		_, otherLogged, _ := other.LoadSnapshot(ctx)
+		if err = mem.SaveSnapshot(ctx, memory.Snapshot{Summary: "x"}, otherLogged[1].Cursor, snap); !errors.Is(err, memory.ErrInvalidCursor) &&
+			!errors.Is(err, memory.ErrSnapshotConflict) {
+			t.Fatalf("prune %v: other session's cursor: err = %v", prune, err)
+		}
+
+		snap, logged, err = mem.LoadSnapshot(ctx)
+		if err != nil || snap == nil || snap.Summary != "s1" || len(logged) != 2 || logged[0].Message.TextContent() != "m2" {
+			t.Fatalf("prune %v: after the snapshot: %+v, %d messages, %v", prune, snap, len(logged), err)
+		}
+
+		view, err := mem.Retrieve(ctx, "")
+		if err != nil || len(view) != 3 || !strings.Contains(view[0].TextContent(), "s1") {
+			t.Fatalf("prune %v: Retrieve = %+v, %v", prune, view, err)
+		}
+
+		var rows int
+
+		if err = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM conversation_memory WHERE session_id = $1", session).Scan(&rows); err != nil {
+			t.Fatal(err)
+		}
+
+		if want := map[bool]int{false: 4, true: 2}[prune]; rows != want {
+			t.Fatalf("prune %v: %d rows, want %d", prune, rows, want)
+		}
+
+		if otherView, _ := other.Retrieve(ctx, ""); len(otherView) != 2 {
+			t.Fatalf("prune %v: the other session sees %d messages, want its 2", prune, len(otherView))
+		}
+
+		_ = mem.Clear(ctx)
+		_ = other.Clear(ctx)
+	}
+}
+
+// TestMemoryPostgres_SaveWaitsForTheSessionsWriter checks that a Save waits
+// while another transaction appends to the same session, so the session's
+// rows commit in seq order.
+func TestMemoryPostgres_SaveWaitsForTheSessionsWriter(t *testing.T) {
+	db := requirePostgres(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	const table = "conversation_memory"
+
+	sessionID := "e2e-test-" + uuid.New().String()
+
+	mem, err := memorypsql.New(db, sessionID, memorypsql.WithEnsureSchema(true), memorypsql.WithTable(table))
+	if err != nil {
+		t.Fatalf("psql.New: %v", err)
+	}
+
+	if err = mem.EnsureSchema(ctx); err != nil {
+		t.Fatalf("EnsureSchema: %v", err)
+	}
+
+	// Another writer holds the session's lock, as a Save in progress does.
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`, table, sessionID); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+
+	go func() { done <- mem.Save(ctx, []llm.Message{llm.UserMessage(llm.Text("after"))}) }()
+
+	select {
+	case err = <-done:
+		t.Fatalf("Save returned (%v) while another writer held the session", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err = <-done; err != nil {
+		t.Fatalf("Save: %v", err)
 	}
 }

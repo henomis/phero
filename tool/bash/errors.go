@@ -45,3 +45,15 @@ var ErrShellNotFound = errors.New("bash: shell not found")
 // ErrInvalidOutputFilter is returned when a OutputInput filter is not a
 // valid regular expression.
 var ErrInvalidOutputFilter = errors.New("bash: invalid output filter")
+
+// ErrBubblewrapNotFound is returned by NewBubblewrapRunner when the bwrap
+// executable is not on PATH.
+var ErrBubblewrapNotFound = errors.New("bash: bubblewrap (bwrap) not found")
+
+// ErrPathTooBroad is returned by NewBubblewrapRunner when the workspace or an
+// extra path is the root or the home directory, or contains it: mounting it
+// would expose what the sandbox hides, Unix sockets included.
+var ErrPathTooBroad = errors.New("bash: sandbox path is / or contains the home directory")
+
+// ErrClosed is returned when a background command is started after Close.
+var ErrClosed = errors.New("bash: tool is closed")
