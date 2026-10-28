@@ -127,7 +127,9 @@ func builtinTools(t *testing.T) []*llm.Tool {
 	check(err)
 
 	agentTool, err := agenttool.New(llm.Func(
-		func(context.Context, []llm.Message, ...llm.CallOption) (*llm.Result, error) { return &llm.Result{}, nil },
+		func(context.Context, []llm.Message, ...llm.CallOption) (*llm.Result, error) {
+			return &llm.Result{}, nil
+		},
 	))
 	check(err)
 

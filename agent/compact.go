@@ -23,6 +23,7 @@ import (
 	"github.com/henomis/phero/v2/internal/summary"
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/memory"
+	"github.com/henomis/phero/v2/trace"
 )
 
 // DefaultKeepRecent is the number of most recent messages a SummaryCompactor
@@ -212,9 +213,11 @@ func WithSummaryPrompt(instructions string) SummaryCompactorOption {
 }
 
 // NewSummaryCompactor returns a SummaryCompactor that writes its summaries
-// with summaryLLM, which can be a cheaper model than the agent's.
+// with summaryLLM, which can be a cheaper model than the agent's. Each summary
+// call is traced as a model call span under the compaction's memory span, so
+// its usage and cost count in the run's Summary.
 func NewSummaryCompactor(summaryLLM llm.LLM, opts ...SummaryCompactorOption) *SummaryCompactor {
-	c := &SummaryCompactor{llm: summaryLLM, keepRecent: DefaultKeepRecent}
+	c := &SummaryCompactor{llm: trace.InstrumentLLM(summaryLLM), keepRecent: DefaultKeepRecent}
 	for _, opt := range opts {
 		opt(c)
 	}

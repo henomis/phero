@@ -31,6 +31,7 @@ import (
 	"github.com/henomis/phero/v2/internal/snaplog"
 	"github.com/henomis/phero/v2/llm"
 	"github.com/henomis/phero/v2/memory"
+	"github.com/henomis/phero/v2/trace"
 )
 
 var _ memory.SnapshotStore = (*Memory)(nil)
@@ -132,7 +133,11 @@ func Open(nc *nats.Conn, bucket, sessionID string, options ...Option) (*Memory, 
 // (memory.ErrSnapshotsUnsupported).
 func WithSummarization(summaryLLM llm.LLM, summarizeThreshold, summarySize uint) Option {
 	return func(m *Memory) {
-		m.llm = summaryLLM
+		if summaryLLM != nil {
+			// Traced so the summary call counts in the run that saves.
+			m.llm = trace.InstrumentLLM(summaryLLM)
+		}
+
 		m.summarySize = memory.ClampSummarySize(summarizeThreshold, summarySize)
 		m.summaryThreshold = summarizeThreshold
 	}

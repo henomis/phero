@@ -317,6 +317,9 @@ func (a *Agent) SetResponseFormat(format *llm.ResponseFormat) {
 //     ends the run.
 //
 // Each compaction is traced as a memory span with op trace.MemoryCompact.
+// The model calls of a SummaryCompactor are traced under it and count in the
+// run's Summary; a custom Compactor gets the same by wrapping its client with
+// trace.InstrumentLLM.
 // Memory keeps every message once: before compacting, the run saves the
 // messages it has not saved yet, and after it, only the messages added later.
 // With a memory.SnapshotStore, the compaction's snapshot is stored too
